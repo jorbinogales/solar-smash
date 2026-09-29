@@ -1,6 +1,47 @@
 {
-  "name": "space-game",
+  "name": "sistema-solar-procedural",
   "private": true,
-  "scripts": { "start": "node server.js" },
-  "dependencies": { "ws": "^8.18.0" }
+  "scripts": {
+    "start": "node server.js",
+    "electron": "electron .",
+    "dist": "electron-builder --win"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "productName": "Sistema Solar Procedural",
+  "version": "1.0.0",
+  "description": "Juego espacial multijugador",
+  "author": "Jorbi Nogales",
+  "main": "electron/main.js",
+  "build": {
+    "appId": "dev.solarsmash.game",
+    "productName": "Sistema Solar Procedural",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "electron/**",
+      "server.js",
+      "sysgen.js",
+      "*.js",
+      "*.html",
+      "package.json",
+      "!dist/**",
+      "!node_modules/.cache/**"
+    ],
+    "win": {
+      "target": "nsis",
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true
+    }
+  },
+  "devDependencies": {
+    "electron": "^44.5.0",
+    "electron-builder": "^26.15.3"
+  }
 }
