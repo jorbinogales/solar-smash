@@ -173,7 +173,7 @@ const BASE = (() => {
         const b = bodyBy(e.b); if (!b) continue; const dir = dirOf(e.la, e.lo), info = padInfo(b, dir);
         h = { o: e.o, nm: e.nm, b: e.b, la: e.la, lo: e.lo, hp: e.hp, sh: e.sh || 0, up: e.up || {}, st: baseStats(e.up || {}), ts: (e.ts || ['plasma', 'plasma', 'plasma', 'plasma']).slice(), dir, info, tw: null, bot: !!e.bot }; HG.set(e.o, h); planets.addPad(e.b, dir, PAD_R * BK, info.top); build(h); applyTw(h, e.tw || [h.st.twMax, h.st.twMax, h.st.twMax, h.st.twMax], true);
         if (e.o === myId) { hadHangar = true; defeated = false; if (LB.phase !== 'lobby' && !started) startGame(); else if (pendingSpawn) { pendingSpawn = false; if (P.hp > 0) { spawn(); P.deadUntil = 0; } } }
-      } else { if (e.o === myId && lastHp !== null && e.hp < lastHp - 0.5 && performance.now() - lastAlert > 4000) { lastAlert = performance.now(); say('¡TU HANGAR ESTÁ BAJO ATAQUE!'); } h.hp = e.hp; h.sh = e.sh || 0; h.up = e.up || h.up; h.st = baseStats(h.up); h.nm = e.nm; h.bot = !!e.bot; applyTw(h, e.tw); if (e.ts && e.ts.some((v, i) => v !== h.ts[i])) { h.ts = e.ts.slice(); setHeads(h); } }
+      } else { if (e.o === myId && lastHp !== null && e.hp < lastHp - 0.5 && performance.now() - lastAlert > 4000) { lastAlert = performance.now(); say('¡TU HANGAR ESTÁ BAJO ATAQUE!'); if (typeof attackAlert === 'function') attackAlert('b', '', null); } h.hp = e.hp; h.sh = e.sh || 0; h.up = e.up || h.up; h.st = baseStats(h.up); h.nm = e.nm; h.bot = !!e.bot; applyTw(h, e.tw); if (e.ts && e.ts.some((v, i) => v !== h.ts[i])) { h.ts = e.ts.slice(); setHeads(h); } }
       if (e.o === myId) lastHp = e.hp;
     }
     for (const [o, h] of [...HG]) if (!seen.has(o)) { drop(h); HG.delete(o); if (o === myId && hadHangar) lost(); }
@@ -313,7 +313,8 @@ const BASE = (() => {
         const dir = [ap[0] - mp[0], ap[1] - mp[1], ap[2] - mp[2]], l = Math.hypot(...dir); if (l < 0.01) continue; dir[0] /= l; dir[1] /= l; dir[2] /= l;
         if (dir[0] * h.dir[0] + dir[1] * h.dir[1] + dir[2] * h.dir[2] < 0.03 || !clearShot(bb, mp, ap)) { t.cd = 0.25; continue; } // solo disparan hacia arriba y nunca a través del terreno o del planeta
         const sty = TOWER_STYLES[h.ts[ti]] || TOWER_STYLES.plasma, dmg = sty.dmg * h.st.dmgMul, key = `${myId ?? 0}:t${++seq}`, life = Math.min(40, l / sty.spd * 1.4 + 2), kind = sty.homing ? 'm' : 'p', tg = sty.homing ? { k: 'p', id: tid } : null; t.cd = sty.cd * (0.8 + 0.4 * Math.random());
-        const mz = mp.map((c, i) => c + dir[i] * (MUZ[h.ts[ti]] ?? 0.012) * BK); spawnProj(-h.o, key, kind, mz, dir, tg, dmg, { spd: sty.spd, col: sty.col, life }); send({ t: 'fire', key, kind, pos: mz, dir, tgt: tg, dmg, tw: 1, spd: sty.spd, rb: S.refB, rp: S.refB >= 0 ? sub(mz, bodies[S.refB].pos) : null }); sfx(kind, l); puff(mz, 0.004, sty.col, 0.15, 0.004);
+        const mz = mp.map((c, i) => c + dir[i] * (MUZ[h.ts[ti]] ?? 0.012) * BK); spawnProj(-h.o, key, kind, mz, dir, tg, dmg, { spd: sty.spd, col: sty.col, life }); send({ t: 'fire', key, kind, pos: mz, dir, tgt: tg, dmg, tw: 1, spd: sty.spd, rb: S.refB, rp: S.refB >= 0 ? sub(mz, bodies[S.refB].pos) : null }); sfx(kind, l); puff(mz, 0.014 * BK, sty.col, 0.22, 0.012); puff(mz, 0.006 * BK, 0xffffff, 0.12, 0.008); // resplandor en la boca del cañón
+        if (tid === myId && typeof attackAlert === 'function') attackAlert('t', h.nm, w); // esta torreta me apunta a mí
       }
     }
   }
@@ -340,14 +341,14 @@ const BASE = (() => {
     let dx = c.x, dy = -c.y; if (Math.hypot(dx, dy) < 1e-6) { dx = 0; dy = 1; }
     const rx = W / 2 - 52, ry = H / 2 - 62, t = 1 / Math.hypot(dx / rx, dy / ry); return { x: W / 2 + dx * t, y: H / 2 + dy * t, edge: true, ang: Math.atan2(dy, dx) };
   }
-  function marker(k, w, dist, label, W, H, now) {
+  function marker(k, w, dist, label, W, H, now, ally) { // ally: marcador azul de mi propia base (siempre visible, también tras el planeta: indica la dirección)
     const p = screenPos(w, W, H), sz = 34, y = p.edge ? p.y : p.y - 46;
     g2.save(); g2.textAlign = 'center'; const pulse = 0.5 + 0.5 * Math.sin(now / 260);
-    if (p.edge) { g2.translate(p.x, p.y); g2.rotate(p.ang); g2.fillStyle = '#ff3b30'; g2.beginPath(); g2.moveTo(sz / 2 + 14, 0); g2.lineTo(sz / 2 + 2, -8); g2.lineTo(sz / 2 + 2, 8); g2.closePath(); g2.fill(); g2.rotate(-p.ang); g2.translate(-p.x, -p.y); }
-    g2.shadowColor = '#ff2a1a'; g2.shadowBlur = 10 + 8 * pulse; g2.fillStyle = 'rgba(38,2,0,0.78)'; g2.strokeStyle = '#ff3b30'; g2.lineWidth = 2; g2.beginPath(); g2.arc(p.x, y, sz / 2 + 5, 0, 7); g2.fill(); g2.stroke(); g2.shadowBlur = 0;
-    const im = icon(k); if (im.complete && im.naturalWidth) g2.drawImage(im, p.x - sz / 2, y - sz / 2, sz, sz);
-    g2.font = `bold 10px ${MONO}`; g2.fillStyle = '#ff8a7a'; g2.strokeStyle = '#000'; g2.lineWidth = 3; g2.strokeText(label, p.x, y + sz / 2 + 17); g2.fillText(label, p.x, y + sz / 2 + 17);
-    g2.font = `11px ${MONO}`; g2.fillStyle = '#ffd7cf'; g2.strokeText(fD(dist), p.x, y + sz / 2 + 29); g2.fillText(fD(dist), p.x, y + sz / 2 + 29); g2.restore();
+    if (p.edge) { g2.translate(p.x, p.y); g2.rotate(p.ang); g2.fillStyle = ally ? '#4db8ff' : '#ff3b30'; g2.beginPath(); g2.moveTo(sz / 2 + 14, 0); g2.lineTo(sz / 2 + 2, -8); g2.lineTo(sz / 2 + 2, 8); g2.closePath(); g2.fill(); g2.rotate(-p.ang); g2.translate(-p.x, -p.y); }
+    g2.shadowColor = ally ? '#2a9dff' : '#ff2a1a'; g2.shadowBlur = 10 + 8 * pulse; g2.fillStyle = ally ? 'rgba(0,18,38,0.8)' : 'rgba(38,2,0,0.78)'; g2.strokeStyle = ally ? '#4db8ff' : '#ff3b30'; g2.lineWidth = 2; g2.beginPath(); g2.arc(p.x, y, sz / 2 + 5, 0, 7); g2.fill(); g2.stroke(); g2.shadowBlur = 0;
+    const im = icon(k); if (im.complete && im.naturalWidth) { if (ally) g2.filter = 'hue-rotate(200deg) saturate(1.4)'; g2.drawImage(im, p.x - sz / 2, y - sz / 2, sz, sz); g2.filter = 'none'; }
+    g2.font = `bold 10px ${MONO}`; g2.fillStyle = ally ? '#9fd8ff' : '#ff8a7a'; g2.strokeStyle = '#000'; g2.lineWidth = 3; g2.strokeText(label, p.x, y + sz / 2 + 17); g2.fillText(label, p.x, y + sz / 2 + 17);
+    g2.font = `11px ${MONO}`; g2.fillStyle = ally ? '#d6eeff' : '#ffd7cf'; g2.strokeText(fD(dist), p.x, y + sz / 2 + 29); g2.fillText(fD(dist), p.x, y + sz / 2 + 29); g2.restore();
   }
   const tv2 = new THREE.Vector3();
   // estado de MI base, siempre visible arriba a la izquierda (vida, escudo y torretas)
@@ -361,7 +362,8 @@ const BASE = (() => {
   function hud(now) {
     baseStatus();
     const W = hc.width, H = hc.height; g2.save(); g2.textAlign = 'center';
-    if (P.hp > 0 && !S.foot.on) { // enemigos: hangares y naves siempre señalados en rojo
+    if (P.hp > 0 && !S.foot.on) { // enemigos: hangares y naves siempre señalados en rojo; mi base, en azul
+      { const mh = HG.get(myId); if (mh && mh.grp) { const mw = worldOf(mh), md = Math.hypot(mw[0] - S.pos[0], mw[1] - S.pos[1], mw[2] - S.pos[2]); if (md > 0.6) marker('hangar', mw, md, 'TU BASE', W, H, now, true); } }
       for (const h of HG.values()) if (h.o !== myId && h.grp) { const w = worldOf(h), dd = w.map((c, i) => c - S.pos[i]), dl = Math.hypot(...dd); if (dl > 0 && !losBlocked({ kind: 'h', dir: dd.map(c => c / dl), dist: dl })) marker('hangar', w, dl, 'HANGAR ' + h.nm.toUpperCase(), W, H, now); } // sin planeta de por medio
       for (const r of remotes.values()) if (r.hp > 0 && r.apos) { const dd = r.apos.map((c, i) => c - S.pos[i]), dl = r.dist ?? Math.hypot(...dd), hl = Math.hypot(...dd); if (hl > 0 && !losBlocked({ kind: 'p', dir: dd.map(c => c / hl), dist: hl })) marker('ship', r.apos, dl, (r.name || 'PILOTO').toUpperCase(), W, H, now); }
     }
