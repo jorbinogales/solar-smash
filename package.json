@@ -10,7 +10,7 @@
     "ws": "^8.18.0"
   },
   "productName": "Sistema Solar Procedural",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Juego espacial multijugador",
   "author": "Jorbi Nogales",
   "main": "electron/main.js",

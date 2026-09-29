@@ -349,8 +349,8 @@ const BASE = (() => {
   function hud(now) {
     const W = hc.width, H = hc.height; g2.save(); g2.textAlign = 'center';
     if (P.hp > 0 && !S.foot.on) { // enemigos: hangares y naves siempre señalados en rojo
-      for (const h of HG.values()) if (h.o !== myId && h.grp) marker('hangar', worldOf(h), Math.hypot(...worldOf(h).map((c, i) => c - S.pos[i])), 'HANGAR ' + h.nm.toUpperCase(), W, H, now);
-      for (const r of remotes.values()) if (r.hp > 0 && r.apos) marker('ship', r.apos, r.dist ?? Math.hypot(...r.apos.map((c, i) => c - S.pos[i])), (r.name || 'PILOTO').toUpperCase(), W, H, now);
+      for (const h of HG.values()) if (h.o !== myId && h.grp) { const w = worldOf(h), dd = w.map((c, i) => c - S.pos[i]), dl = Math.hypot(...dd); if (dl > 0 && !losBlocked({ kind: 'h', dir: dd.map(c => c / dl), dist: dl })) marker('hangar', w, dl, 'HANGAR ' + h.nm.toUpperCase(), W, H, now); } // sin planeta de por medio
+      for (const r of remotes.values()) if (r.hp > 0 && r.apos) { const dd = r.apos.map((c, i) => c - S.pos[i]), dl = r.dist ?? Math.hypot(...dd), hl = Math.hypot(...dd); if (hl > 0 && !losBlocked({ kind: 'p', dir: dd.map(c => c / hl), dist: hl })) marker('ship', r.apos, dl, (r.name || 'PILOTO').toUpperCase(), W, H, now); }
     }
     for (const h of HG.values()) { // barras de vida de las torretas de un hangar enemigo cercano
       if (h.o === myId || !h.tw || !h.towers || !h.grp.visible || h.d > 2.5) continue;

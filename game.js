@@ -239,7 +239,7 @@ function spawnProj(owner, key, kind, pos, dir, tgt, dmg, o = {}) { // o: { spd (
   let obj;
   if (kind === 'p') { obj = new THREE.Group(); const core = new THREE.Mesh(bolt, glow(0xffffff)); core.scale.set(0.35, 0.35, 1); obj.add(new THREE.Mesh(bolt, glow(o.col ?? WPN.p.color, 0.6)), core); }
   else obj = makeMissile();
-  scene.add(obj); projs.set(key, { owner, kind, fromSpace: o.spd === undefined && airK(pos) < 0.02, spd: o.spd, bot: o.bot, pos: [...pos], dir: [...dir], tgt, life: o.life ?? WPN[kind].life, dmg: dmg ?? WPN[kind].dmg, sp: obj, puff: 0 });
+  scene.add(obj); projs.set(key, { o0: [...pos], owner, kind, fromSpace: o.spd === undefined && airK(pos) < 0.02, spd: o.spd, bot: o.bot, pos: [...pos], dir: [...dir], tgt, life: o.life ?? WPN[kind].life, dmg: dmg ?? WPN[kind].dmg, sp: obj, puff: 0 });
 }
 function killProj(key) { const p = projs.get(key); if (p) { scene.remove(p.sp); projs.delete(key); } }
 function puff(pos, size, color, dur, min) { const sp = new THREE.Mesh(ball, glow(color)); scene.add(sp); fx.push({ pos: [...pos], size, t: 0, dur, min, sp }); }
@@ -276,6 +276,14 @@ function segDist(a, b, c) {
   return len([ac[0] - ab[0] * t, ac[1] - ab[1] * t, ac[2] - ab[2] * t]);
 }
 let muz = 0;
+function losBlocked(t) { // ¿hay un planeta (o luna o estrella) entre mi nave y ese objetivo? Entonces no se marca ni se fija
+  const d = t.dir, end = t.dist - (t.kind === 'h' ? 1.5 : 0); // una base apoyada en su propio planeta queda a ras de la esfera
+  for (const b of bodies) {
+    const oc = [S.pos[0] - b.pos[0], S.pos[1] - b.pos[1], S.pos[2] - b.pos[2]], R = b.R * 0.999 - 0.5, B = oc[0] * d[0] + oc[1] * d[1] + oc[2] * d[2], C = oc[0] * oc[0] + oc[1] * oc[1] + oc[2] * oc[2] - R * R;
+    if (C <= 0) continue; const disc = B * B - C; if (disc <= 0) continue; const te = -B - Math.sqrt(disc); if (te > 0 && te < end) return true;
+  }
+  return false;
+}
 function shoot(kind, tgt) {
   P.lastCombat = performance.now();
   const f = new THREE.Vector3(0, 0, -1).applyQuaternion(S.q), dir = [f.x, f.y, f.z];
@@ -588,7 +596,7 @@ function drawHud(fwd, now, targets) {
   g2.lineWidth = 2; g2.textAlign = 'center'; g2.font = `12px ${MONO}`;
   const nearest = Math.min(Infinity, ...targets.filter(t => t.kind === 'p').map(t => t.dist)); // enemigo más cercano (solo naves de jugadores)
   for (const t of targets) {
-    if (t.kind === 'w' && t.dist > 300000) continue;
+    if ((t.kind === 'w' && t.dist > 300000) || losBlocked(t)) continue; // sin línea de visión (planeta de por medio) no se dibuja
     const lock = t === lockT, col = t.kind === 'p' || t.kind === 'h' ? (lock ? '#ff2a2a' : '#ff8a4c') : (lock ? '#ffee55' : '#5dff8a');
     tv.copy(t.grp.position).project(camera);
     let x = (tv.x * 0.5 + 0.5) * W, y = (-tv.y * 0.5 + 0.5) * H; const behind = tv.z > 1;
@@ -758,11 +766,8 @@ function frame(now) {
   }
 
   planets.update(S.pos, sunLight.position, fwd);
-  const sky = planets.sky(S.pos, sunLight.position); renderer.setClearColor(sky.color); const fogD = planets.fogDensity(S.pos); scene.fog.density = Math.max(sky.f * 0.004, fogD);
-  if (fogD > sky.f * 0.004) { // niebla del suelo: color de la atmósfera del planeta (sin atmósfera, polvo del color de su superficie), atenuado de noche pero nunca negro
-    const fb = bodies.find(x => x.n === planets.info.name), sd = fb ? Math.hypot(S.pos[0] - fb.pos[0], S.pos[1] - fb.pos[1], S.pos[2] - fb.pos[2]) : 1, day = fb ? Math.max(0, Math.min(1, ((S.pos[0] - fb.pos[0]) * sunLight.position.x + (S.pos[1] - fb.pos[1]) * sunLight.position.y + (S.pos[2] - fb.pos[2]) * sunLight.position.z) / sd * 1.5 + 0.35)) : 1;
-    _fogC.set(fb && ATMO[fb.n] ? ATMO[fb.n].c : fb ? fb.c2 : 0x888888); if (fb && !ATMO[fb.n]) _fogC.multiplyScalar(0.55); scene.fog.color.copy(_fogC.multiplyScalar(0.3 + 0.7 * day));
-  } else scene.fog.color.copy(sky.color); sunLight.intensity = 1.6 - 0.5 * sky.f; // cielo atmosférico (el sol se suaviza bajo la atmósfera)
+  const sky = planets.sky(S.pos, sunLight.position); renderer.setClearColor(sky.color); scene.fog.density = 0; // sin niebla (ni de suelo ni de cielo): se distingue el terreno del cielo
+  scene.fog.color.copy(sky.color); sunLight.intensity = 1.6 - 0.5 * sky.f; // cielo atmosférico (el sol se suaviza bajo la atmósfera)
   SKY.set(sky.stars);
   // combate: respawn, disparos, proyectiles, remotos y cascos
   if (P.hp <= 0 && now >= P.deadUntil && (typeof BASE === 'undefined' || BASE.canRespawn())) { spawn(); P.cause = ''; P.heat = 0; Object.assign(P, { hp: P.hpMax, sh: P.shMax, plasma: MAXA.plasma, missiles: MAXA.missiles }); S.v = Math.min(300, P.vmax); Object.assign(S.warp, { on: false, bar: P.warpMax, lock: false }); }
@@ -796,7 +801,7 @@ function frame(now) {
   lockT = null; let bestA = CONE;
   if (alive) for (const t of targets) {
     const a = Math.acos(Math.min(1, fwd.x * t.dir[0] + fwd.y * t.dir[1] + fwd.z * t.dir[2]));
-    if (a < bestA && t.dist < (t.kind === 'h' ? 50 : RANGE)) { bestA = a; lockT = t; }
+    if (a < bestA && t.dist < (t.kind === 'h' ? 50 : RANGE) && !losBlocked(t)) { bestA = a; lockT = t; }
   }
   aimT = null; // objetivo bajo la mira para el recuadro de vista previa
   if (alive) {
@@ -844,7 +849,7 @@ function frame(now) {
     if (!projs.has(key)) continue;
     const v = view(p.pos), d = new THREE.Vector3(...p.dir);
     if (p.kind === 'p') { // rayo alargado que se ve desde lejos; su cola marca la trayectoria
-      const L = Math.min(300, Math.max(0.05, v.rd * 0.05)), r = Math.max(0.003, v.rd * 0.003);
+      const trav = len(sub(p.pos, p.o0)), L = Math.min(300, Math.max(0.03, v.rd * 0.04), Math.max(0.001, trav)), r = Math.max(0.002, v.rd * 0.003); // la cola nunca pasa del punto de partida (el cañón)
       p.sp.position.set(v.x - d.x * L / 2, v.y - d.y * L / 2, v.z - d.z * L / 2); p.sp.scale.set(r, r, L); p.sp.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), d);
     } else { // misil con llama parpadeante y estela de humo
       const sc = Math.max(0.02 * v.s, v.rd * 0.008);
