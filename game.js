@@ -214,7 +214,7 @@ function notifyRes(type, n) { // recurso obtenido: icono + cantidad (las gananci
 const QUIET = /luz|salto|atmósfera|exosfera|planeta|Ruedas|estacionada|Amerizaje|flota|despegar|impulso/i; // entradas/salidas de planeta y velocidad luz: solo texto central, sin notificación
 const say = t => { const now = performance.now(); P.msg = t; P.msgT = now + 2500; if ((t !== lastSay || now - lastSayT > 3000) && !QUIET.test(t)) notifyEl(`<span>${t}</span>`, 5500); lastSay = t; lastSayT = now; };
 let CARRY = [0, 0, 0]; // desplazamiento orbital del planeta cercano en este cuadro (lo que está en su aire viaja con él)
-const AST = new Map(), ZONE_PER = { madera: 12, piedra: 14, cobre: 8, plata: 5, oro: 4, diamante: 2 }; // unidades medias por asteroide de zona del recurso dominante principal (el secundario, el 60 %)
+const AST = new Map(), ZONE_PER = { agua: 12, piedra: 14, cobre: 8, plata: 5, oro: 4, diamante: 2 }; // unidades medias por asteroide de zona del recurso dominante principal (el secundario, el 60 %)
 const ROCKN = ['carbonáceo', 'rocoso', 'metálico', 'de hielo', 'alargado', 'binario'], ICOIMG = {};
 function astInfo(o) { // recursos que carga un asteroide (determinista por su identificador). Solo los de una zona (o.z) llevan recursos: los de sus dominantes. Fuera de las zonas son obstáculos sin recursos
   if (o.res) return o.res;

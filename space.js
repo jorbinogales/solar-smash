@@ -164,11 +164,22 @@ function createFields(scene, bodies) {
   }
   const SYS_R = Math.max(...bodies.filter(b => !b.parent).map(b => (b.a || 0) * DIST_SCALE)) + 3e6; // radio del sistema: fuera del cinturón hay asteroides sueltos
   let last = null; const sph = new THREE.Sphere(), gone = new Set(); fixed.forEach((f, n) => f.id = 'f' + n);
-  const ZCELL = 2000, ZROCK = { madera: 0, piedra: 1, cobre: 2, plata: 2, oro: 2, diamante: 3 }; // celda del cúmulo de una zona (km) y tipo de roca preferido según su recurso principal
+  const ZCELL = 2000, ZROCK = { agua: 3, piedra: 1, cobre: 2, plata: 2, oro: 2, diamante: 3 }; // celda del cúmulo de una zona (km) y tipo de roca preferido según su recurso principal
   const push = (im, n) => { // solo se sube a la GPU la parte usada de los buffers y las mallas vacías no se dibujan
     im.count = n; im.visible = n > 0; if (!n) return; im.instanceMatrix.updateRange.count = n * 16; im.instanceMatrix.needsUpdate = true; if (im.instanceColor) { im.instanceColor.updateRange.count = n * 3; im.instanceColor.needsUpdate = true; }
   };
+  const zoneCache = {};
+  function zoneRocks(z) { // rocas del cúmulo de una zona en coordenadas normalizadas (radio de la zona = 1): [x, y, z, tamaño 0-1, tipo de roca]; mismas celdas y semillas que el juego
+    if (zoneCache[z.id]) return zoneCache[z.id]; const out = [], n = Math.ceil(z.radius / ZCELL), rt = ZROCK[z.dominant[0].type];
+    for (let i = -n; i < n; i++) for (let j = -n; j < n; j++) for (let k = -n; k < n; k++) {
+      const r = rndOf(((i * 73856093) ^ (j * 19349663) ^ (k * 83492791) ^ Math.imul(z.id + 1, 668265263)) >>> 0); if (r() > 0.5) continue;
+      const ox = (i + r()) * ZCELL, oy = (j + r()) * ZCELL, oz = (k + r()) * ZCELL, u = r(), size = 1.5 + 45 * u * u * u; if (Math.hypot(ox, oy, oz) > z.radius) continue;
+      out.push([ox / z.radius, oy / z.radius, oz / z.radius, u, r() < 0.6 ? rt : (r() * ROCKS.length) | 0]);
+    }
+    return (zoneCache[z.id] = out);
+  }
   const api = {
+    zoneRocks,
     gone, active, near: Infinity, zone: false, geos: meshes.map(m => m.geometry), mats: { rock: rockMat, deb: debMat }, rockCount: ROCKS.length,
     update(P) { // la lista solo se regenera si te moviste >3000 km (la basura orbital sigue a su planeta); cada cuadro solo se actualizan posiciones y la distancia mínima
       const hr = Math.hypot(P[0], P[2]); api.zone = hr > BELT.i && hr < BELT.o && Math.abs(P[1]) < BELT.h; // BELT: cinturón del sistema generado (game.js)

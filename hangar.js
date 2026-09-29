@@ -25,7 +25,7 @@ function applyNow() { const v = validSpec(sel); saveSpec(v); applyLoadout(v, fal
 
 // ---------- NAVE ----------
 function renderRes() {
-  const keys = typeof RES !== 'undefined' ? Object.keys(RES) : ['madera', 'piedra', 'cobre', 'plata', 'oro', 'diamante'];
+  const keys = typeof RES !== 'undefined' ? Object.keys(RES) : ['agua', 'piedra', 'cobre', 'plata', 'oro', 'diamante'];
   $('resbar').innerHTML = keys.map(k => `<span class="cost"><i>${icon(k)}</i>${inv()[k] || 0}</span>`).join('');
 }
 function renderShip() {

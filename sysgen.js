@@ -69,9 +69,9 @@
   }
   // Zonas de recursos: el sistema tiene un presupuesto FINITO de cada recurso repartido en cúmulos de asteroides con 1-2 recursos dominantes.
   // Una zona por planeta principal (anclada a él: se mueve con su órbita) y 3 fijas en el cinturón (ancladas a la estrella). Determinista por semilla: el servidor lleva lo que queda.
-  const ZONE_THEME = { oro: ['Cinturón Áureo', 'Veta Dorada'], plata: ['Nube Argéntea', 'Campo de Plata'], cobre: ['Escombros Cobrizos', 'Deriva de Cobre'], diamante: ['Cúmulo Diamantino', 'Geoda Estelar'], piedra: ['Pedregal', 'Campo de Rocas'], madera: ['Nube Carbonácea', 'Restos Fósiles'] };
-  const ZONE_BUDGET = { madera: [250, 400], piedra: [300, 500], cobre: [150, 250], plata: [90, 150], oro: [60, 100], diamante: [20, 40] }; // recurso dominante principal; el secundario lleva la mitad
-  const ZONE_SEC_W = { madera: 3, piedra: 3, cobre: 3, plata: 2, oro: 1.2, diamante: 0.6 }; // probabilidad relativa de cada recurso como dominante secundario
+  const ZONE_THEME = { oro: ['Cinturón Áureo', 'Veta Dorada'], plata: ['Nube Argéntea', 'Campo de Plata'], cobre: ['Escombros Cobrizos', 'Deriva de Cobre'], diamante: ['Cúmulo Diamantino', 'Geoda Estelar'], piedra: ['Pedregal', 'Campo de Rocas'], agua: ['Cometas de Hielo', 'Nube Helada'] };
+  const ZONE_BUDGET = { agua: [250, 400], piedra: [300, 500], cobre: [150, 250], plata: [90, 150], oro: [60, 100], diamante: [20, 40] }; // recurso dominante principal; el secundario lleva la mitad
+  const ZONE_SEC_W = { agua: 3, piedra: 3, cobre: 3, plata: 2, oro: 1.2, diamante: 0.6 }; // probabilidad relativa de cada recurso como dominante secundario
   function genZones(sys) {
     const r = mulberry((((sys.seed >>> 0) || 1) ^ 0x2f6b1d3) >>> 0 || 7), RT = Object.keys(ZONE_BUDGET);
     const bud = (t, k) => Math.round(k * (ZONE_BUDGET[t][0] + r() * (ZONE_BUDGET[t][1] - ZONE_BUDGET[t][0])) / 5) * 5;
@@ -97,12 +97,12 @@
     return zones;
   }
   function wreckLoot(i) { // recursos de un casco a la deriva (determinista): 1-2 tipos; el servidor los concede solo la primera vez que se destruye cada casco en la sala
-    const rr = mulberry(i * 7919 + 13), tb = [['cobre', 4], ['plata', 3], ['oro', 2], ['piedra', 3], ['madera', 3]], pick = () => { let x = rr() * 15; for (const [k, wt] of tb) { x -= wt; if (x <= 0) return k; } return 'cobre'; }, a = pick(), b = pick(), n = 5 + Math.floor(rr() * 8);
+    const rr = mulberry(i * 7919 + 13), tb = [['cobre', 4], ['plata', 3], ['oro', 2], ['piedra', 3], ['agua', 3]], pick = () => { let x = rr() * 15; for (const [k, wt] of tb) { x -= wt; if (x <= 0) return k; } return 'cobre'; }, a = pick(), b = pick(), n = 5 + Math.floor(rr() * 8);
     return a === b || rr() < 0.4 ? [{ type: a, n }] : [{ type: a, n: Math.ceil(n * 0.6) }, { type: b, n: Math.max(1, Math.floor(n * 0.4)) }];
   }
   // Mejoras de la base (máx. 4 niveles): vida, escudo que absorbe las balas, vida y daño de las torres. Coste del nivel lv+1 = COST[k](lv+1).
   const BASE_UP = {
-    hp: { name: 'Vida de la base', max: 4, cost: n => ({ piedra: 8 * n, madera: 6 * n }) },
+    hp: { name: 'Vida de la base', max: 4, cost: n => ({ piedra: 8 * n, agua: 6 * n }) },
     sh: { name: 'Escudo de la base', max: 4, cost: n => ({ cobre: 6 * n, plata: 3 * n }) },
     tw: { name: 'Vida de las torres', max: 4, cost: n => ({ piedra: 6 * n, cobre: 4 * n }) },
     td: { name: 'Daño de las torres', max: 4, cost: n => ({ oro: 3 * n, plata: 3 * n }) },

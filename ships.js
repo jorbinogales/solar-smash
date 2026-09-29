@@ -29,8 +29,8 @@ function statsOf(spec) {
   const T = TYPES[spec.t], [ar, sh, pl, mi, en, am = 0] = spec.a;
   return { hp: T.hp + 30 * ar, sh: T.sh + 40 * sh, plasma: T.plasma + 60 * am, pdmg: 8 + 2 * pl, missiles: T.missiles + 2 * mi + am, flameMul: 1 + 0.3 * en, pitch: 1 - 0.1 * en, agil: T.agil, vmax: Math.min(1500, Math.round(T.speed * (1 + 0.1 * en))), warp: Math.round(T.warp * (1 + 0.5 * en)) };
 }
-// Mejoras de la nave básica: se compran con los recursos del planeta (madera, piedra, cobre, plata, oro, diamante). Coste del nivel lv+1 de la mejora i.
-const UPGRADE_COST = [n => ({ piedra: 6 * n, madera: 4 * n }), n => ({ cobre: 4 * n, piedra: 3 * n }), n => ({ plata: 3 * n, cobre: 3 * n }), n => ({ oro: 2 * n, plata: 2 * n }), n => ({ diamante: n, oro: 2 * n }), n => ({ plata: 2 * n, madera: 3 * n })];
+// Mejoras de la nave básica: se compran con los recursos del planeta (agua, piedra, cobre, plata, oro, diamante). Coste del nivel lv+1 de la mejora i.
+const UPGRADE_COST = [n => ({ piedra: 6 * n, agua: 4 * n }), n => ({ cobre: 4 * n, piedra: 3 * n }), n => ({ plata: 3 * n, cobre: 3 * n }), n => ({ oro: 2 * n, plata: 2 * n }), n => ({ diamante: n, oro: 2 * n }), n => ({ plata: 2 * n, madera: 3 * n })];
 const SHIP_COST = { halcon: null, saeta: { piedra: 12, cobre: 6 }, coloso: { plata: 12, oro: 6 }, nomada: { oro: 8, diamante: 3 } }; // cambiar de nave: se desbloquea una vez con recursos
 const upgradeCost = (i, lv) => UPGRADE_COST[i](lv + 1);
 const basicSpec = c => ({ t: 'halcon', a: [0, 0, 0, 0, 0, 0], c: Number.isFinite(c) ? c : 0x4db8ff }); // todos empiezan con una nave básica
