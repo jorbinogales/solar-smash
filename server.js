@@ -4,10 +4,12 @@ const http = require('http'), fs = require('fs'), path = require('path'), os = r
 const { WebSocketServer } = require('ws');
 
 const FILES = { '/': 'index.html', '/index.html': 'index.html', '/menu.js': 'menu.js', '/blobatar.js': 'blobatar.js', '/three.min.js': 'three.min.js', '/sw.js': 'sw.js', '/manifest.webmanifest': 'manifest.webmanifest', '/icons/icon-192.png': 'icons/icon-192.png', '/icons/icon-512.png': 'icons/icon-512.png', '/icons/icon.svg': 'icons/icon.svg', '/game': 'game.html', '/game.html': 'game.html', '/game.js': 'game.js', '/ships.js': 'ships.js', '/space.js': 'space.js', '/planets.js': 'planets.js', '/tview.js': 'tview.js', '/foot.js': 'foot.js', '/map.js': 'map.js', '/hangar.js': 'hangar.js', '/sysgen.js': 'sysgen.js', '/base.js': 'base.js', '/bot.js': 'bot.js', '/icons.js': 'icons.js' };
-const { genSystem, BASE_UP, baseStats, TOWER_STYLES } = require('./sysgen');
+const { genSystem, genZones, wreckLoot, BASE_UP, baseStats, TOWER_STYLES } = require('./sysgen');
 const HG_HP = 600, TW_HP = 150; // hangar: dueño -> { o, nm, b (planeta), la, lo (rad), hp, tw[4], bot }: un planeta = un hangar
-const rooms = new Map(); // código -> sala: { code, name, seed, np, fillBots, phase, host (token), launchAt, SYS, SOLID, members (token -> jugador), lobby (id de conexión -> jugador ya en la página del juego), hangars, botPlanets, players, bots, deadWrecks, nextBot }
-const setSystem = (R, seed, np) => { R.seed = seed; R.np = np; R.SYS = genSystem(seed, np); R.SOLID = new Set(R.SYS.bodies.filter(b => b.k !== 'sun').map(b => b.n)); };
+const rooms = new Map(); // código -> sala: { code, name, seed, np, fillBots, phase, host (token), launchAt, SYS, SOLID, zones, zr, looted, members (token -> jugador), lobby (id de conexión -> jugador ya en la página del juego), hangars, botPlanets, players, bots, deadWrecks, nextBot }
+// zones: zonas de recursos de la semilla (sysgen.genZones); zr[z][k]: lo que queda del recurso dominante k de la zona z (el servidor es quien lo descuenta)
+const setSystem = (R, seed, np) => { R.seed = seed; R.np = np; R.SYS = genSystem(seed, np); R.SOLID = new Set(R.SYS.bodies.filter(b => b.k !== 'sun').map(b => b.n)); R.zones = genZones(R.SYS); R.zr = R.zones.map(z => z.dominant.map(d => d.budget)); };
+const MINE_MAX = 60, MINE_GAP_MS = 100; // anti-trampas básico: unidades máximas de un recurso por asteroide y separación mínima entre extracciones de un mismo cliente
 const COLORS = [0x4db8ff, 0xff6a3c, 0x5dff8a, 0xffd23f, 0xd06bff, 0xf2f2f2, 0xff5fa2, 0x3ff0e0];
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.webmanifest': 'application/manifest+json', '.png': 'image/png', '.svg': 'image/svg+xml' };
 const byToken = tk => { for (const R of rooms.values()) if (tk && R.members.has(tk)) return R; return null; };
@@ -56,7 +58,7 @@ wss.on('connection', ws => {
         ws.token = String(m.token || '').slice(0, 40); if (!ws.token) return; const old = byToken(ws.token); if (old) { if (old.phase !== 'lobby') return send(ws, { created: 0, why: 'Ya estás en una partida.' }); dropMember(old, ws.token); }
         const np = Math.max(2, Math.min(8, Math.round(Number(m.np) || 4))), seed = Number.isInteger(m.seed) && m.seed > 0 ? m.seed : 1 + Math.floor(Math.random() * 2e9);
         let code; do code = Math.random().toString(36).slice(2, 7).toUpperCase(); while (code.length < 5 || rooms.has(code));
-        R = { code, name: String(m.name || 'Sala').replace(/[<>&"]/g, '').slice(0, 28), fillBots: true, phase: 'lobby', host: ws.token, launchAt: 0, members: new Map(), lobby: new Map(), hangars: new Map(), botPlanets: new Map(), players: new Map(), bots: new Map(), deadWrecks: new Map(), nextBot: 0 };
+        R = { code, name: String(m.name || 'Sala').replace(/[<>&"]/g, '').slice(0, 28), fillBots: true, phase: 'lobby', host: ws.token, launchAt: 0, members: new Map(), lobby: new Map(), hangars: new Map(), botPlanets: new Map(), players: new Map(), bots: new Map(), deadWrecks: new Map(), looted: new Set(), nextBot: 0 };
         setSystem(R, seed, np); rooms.set(code, R); ws.R = R; R.members.set(ws.token, newMember(ws, m, id, 0));
         console.log(`Sala "${R.name}" (${code}) creada · ${np} planetas · semilla ${seed} · ${rooms.size} salas`); return send(ws, { created: 1, code });
       }
@@ -115,6 +117,18 @@ wss.on('connection', ws => {
       } else if (m.t === 'wreck' && Number.isInteger(m.id) && m.id >= 0 && m.id < WRECKS && !R.deadWrecks.has(m.id)) {
         R.deadWrecks.set(m.id, Date.now() + WRECK_RESPAWN_MS);
         relay(R, id, { t: 'wreck', w: m.id, by: id });
+        const first = !R.looted.has(m.id); R.looted.add(m.id); send(ws, { mined: 1, w: m.id, got: first ? wreckLoot(m.id) : [] }); // sus recursos solo la primera vez en la sala (la munición se recarga siempre)
+      } else if (m.t === 'mine' && e && R.phase !== 'lobby' && Number.isInteger(m.z) && m.z >= 0 && m.z < R.zones.length && Array.isArray(m.list) && m.list.length <= 6) { // asteroide de una zona destruido: se concede lo que quede y se descuenta
+        const now = Date.now(), Z = R.zones[m.z], left = R.zr[m.z], got = [];
+        if (now - (ws.mineT || 0) >= MINE_GAP_MS) {
+          ws.mineT = now;
+          for (const it of m.list) {
+            const k = it ? Z.dominant.findIndex(d => d.type === it.type) : -1, n = Number(it && it.n);
+            if (k < 0 || !Number.isInteger(n) || n < 1 || n > MINE_MAX || got.some(g => g.type === it.type)) continue;
+            const g = Math.min(n, left[k]); if (g > 0) { left[k] -= g; got.push({ type: Z.dominant[k].type, n: g }); }
+          }
+        }
+        send(ws, { mined: 1, z: m.z, got }); // solo al que minó
       }
     } catch {}
   });
@@ -139,7 +153,7 @@ setInterval(() => {
     }
     for (const [w, t] of R.deadWrecks) if (t < now) R.deadWrecks.delete(w);
     for (const h of R.hangars.values()) { const st = baseStats(h.up || {}); if (h.up && h.up.sh && now - h.shT > 5000 && h.sh < st.shMax) h.sh = Math.min(st.shMax, h.sh + 20 * 0.066); } // el escudo de la base se regenera sin recibir golpes
-    const msg = JSON.stringify({ players: [...R.players.values(), ...R.bots.values()].filter(Boolean), wd: [...R.deadWrecks.keys()], hg: [...R.hangars.values()].map(h => ({ o: h.o, nm: h.nm, b: h.b, la: h.la, lo: h.lo, hp: Math.round(h.hp), sh: Math.round(h.sh), up: h.up, ts: h.ts, tw: h.tw, bot: h.bot })), bl: [...R.botPlanets.values()], ph: R.phase, adm: admin(R), rm: publicRoom(R), seed: R.seed, lb: [...R.lobby].map(([i, e]) => ({ id: i, nm: e.nm, b: e.b, ready: true, ld: e.ld ?? 0 })) });
+    const msg = JSON.stringify({ players: [...R.players.values(), ...R.bots.values()].filter(Boolean), wd: [...R.deadWrecks.keys()], wl: [...R.looted], zr: R.zr, hg: [...R.hangars.values()].map(h => ({ o: h.o, nm: h.nm, b: h.b, la: h.la, lo: h.lo, hp: Math.round(h.hp), sh: Math.round(h.sh), up: h.up, ts: h.ts, tw: h.tw, bot: h.bot })), bl: [...R.botPlanets.values()], ph: R.phase, adm: admin(R), rm: publicRoom(R), seed: R.seed, lb: [...R.lobby].map(([i, e]) => ({ id: i, nm: e.nm, b: e.b, ready: true, ld: e.ld ?? 0 })) });
     for (const c of wss.clients) if (c.R === R && c.readyState === 1) c.send(msg);
   }
 }, 66);

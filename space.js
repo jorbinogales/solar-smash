@@ -1,5 +1,5 @@
 // Cielo, asteroides y basura espacial procedurales. Todo es determinista: todos los jugadores ven los mismos objetos.
-// Depende de fbm() (game.js), rndOf() (ships.js) y AU (game.js), que se resuelven en tiempo de ejecución.
+// Depende de fbm() (game.js), rndOf() (ships.js), AU, ZONES y zoneLeft() (game.js), que se resuelven en tiempo de ejecución.
 
 // ---------- cielo: campo de estrellas (magnitudes y tipos espectrales) + banda de la Vía Láctea en una textura equirectangular de baja resolución ----------
 const SKY_GN = (() => { const g = [0.3, 0.86, 0.41], l = Math.hypot(g[0], g[1], g[2]); return g.map(c => c / l); })(); // normal del plano de la galaxia (la textura de la Vía Láctea se hornea en planets.js con la misma)
@@ -141,7 +141,7 @@ function createFields(scene, bodies) {
   const mk = (g, mat) => { const im = new THREE.InstancedMesh(g, mat, MAXI); im.frustumCulled = false; im.setColorAt(0, tint.setScalar(1)); im.count = 0; scene.add(im); return im; };
   const meshes = [...ROCKS.map((K, i) => mk(makeRock(11 + i * 17, K, 12), rockMat)), ...DEBRIS.map(f => mk(f(), debMat))]; // rocas: detalle alto (para los cercanos)
   const meshesLo = ROCKS.map((K, i) => mk(makeRock(11 + i * 17, K, 3), rockMat)), NM = meshes.length, cnt = new Int32Array(NM + ROCKS.length), LOD_ANG = 0.012; // versión de pocos triángulos para los que se ven pequeños (radio angular < 0,7°)
-  // pepitas de los minerales que lleva cada asteroide (oro, plata, cobre, diamante): pequeñas piezas brillantes sobre la roca
+  // pepitas de los minerales que lleva cada asteroide de zona (oro, plata, cobre, diamante): pequeñas piezas brillantes sobre la roca; desaparecen cuando su zona agota ese recurso
   const NUGC = { oro: 0xffc22a, plata: 0xe6ebf2, cobre: 0xe0783c, diamante: 0x9fefff }, nugMat = new THREE.MeshStandardMaterial({ roughness: 0.25, metalness: 0.75, emissive: 0x33291a, flatShading: true });
   const nug = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 0), nugMat, 4000), dummy2 = new THREE.Object3D(), tcol = new THREE.Color(), _nv = new THREE.Vector3(); nug.frustumCulled = false; nug.setColorAt(0, tint.setScalar(1)); nug.count = 0; scene.add(nug);
   function nuggets(o) { // posiciones fijas sobre la superficie (deterministas por asteroide y mineral)
@@ -164,6 +164,7 @@ function createFields(scene, bodies) {
   }
   const SYS_R = Math.max(...bodies.filter(b => !b.parent).map(b => (b.a || 0) * DIST_SCALE)) + 3e6; // radio del sistema: fuera del cinturón hay asteroides sueltos
   let last = null; const sph = new THREE.Sphere(), gone = new Set(); fixed.forEach((f, n) => f.id = 'f' + n);
+  const ZCELL = 2000, ZROCK = { madera: 0, piedra: 1, cobre: 2, plata: 2, oro: 2, diamante: 3 }; // celda del cúmulo de una zona (km) y tipo de roca preferido según su recurso principal
   const push = (im, n) => { // solo se sube a la GPU la parte usada de los buffers y las mallas vacías no se dibujan
     im.count = n; im.visible = n > 0; if (!n) return; im.instanceMatrix.updateRange.count = n * 16; im.instanceMatrix.needsUpdate = true; if (im.instanceColor) { im.instanceColor.updateRange.count = n * 3; im.instanceColor.needsUpdate = true; }
   };
@@ -194,6 +195,20 @@ function createFields(scene, bodies) {
               active.push({ id, pos, r: size * 0.9, vis: size, m: (r() * ROCKS.length) | 0, ax: new THREE.Vector3(r() - 0.5, r() - 0.5, r() - 0.5).normalize(), rate: 0.02 + r() * 0.15, a0: r() * 6.28, tint: 0.85 + r() * 0.3 });
             }
       }
+      for (const z of ZONES) { // cúmulo denso de cada zona de recursos (ZONES, game.js): mismas celdas deterministas, pero en coordenadas de la zona, que sigue a su planeta
+        const par = bodies[z.anchor], lx = P[0] - par.pos[0] - z.off[0], ly = P[1] - par.pos[1] - z.off[1], lz = P[2] - par.pos[2] - z.off[2];
+        if (Math.hypot(lx, ly, lz) > RA + z.radius) continue;
+        const n = Math.ceil(z.radius / ZCELL), lo = v => Math.max(-n, Math.floor((v - RA) / ZCELL)), hi = v => Math.min(n - 1, Math.floor((v + RA) / ZCELL)), rt = ZROCK[z.dominant[0].type];
+        for (let i = lo(lx); i <= hi(lx); i++) for (let j = lo(ly); j <= hi(ly); j++) for (let k = lo(lz); k <= hi(lz); k++) {
+          const r = rndOf(((i * 73856093) ^ (j * 19349663) ^ (k * 83492791) ^ Math.imul(z.id + 1, 668265263)) >>> 0);
+          if (r() > 0.5) continue; const id = 'z' + z.id + ':' + i + ':' + j + ':' + k; if (gone.has(id)) continue;
+          const ox = (i + r()) * ZCELL, oy = (j + r()) * ZCELL, oz = (k + r()) * ZCELL, u = r(), size = 1.5 + 45 * u * u * u;
+          if (Math.hypot(ox, oy, oz) > z.radius || Math.hypot(ox - lx, oy - ly, oz - lz) > RA) continue;
+          const off = [z.off[0] + ox, z.off[1] + oy, z.off[2] + oz], pos = [par.pos[0] + off[0], par.pos[1] + off[1], par.pos[2] + off[2]];
+          if (bodies.some(b => Math.hypot(pos[0] - b.pos[0], pos[1] - b.pos[1], pos[2] - b.pos[2]) < b.R * 1.5 + 200)) continue;
+          active.push({ id, z: z.id, pos, parent: par, off, r: size * 0.9, vis: size, m: r() < 0.6 ? rt : (r() * ROCKS.length) | 0, ax: new THREE.Vector3(r() - 0.5, r() - 0.5, r() - 0.5).normalize(), rate: 0.02 + r() * 0.15, a0: r() * 6.28, tint: 0.85 + r() * 0.3 });
+        }
+      }
       for (const f of fixed) {
         const pos = [f.parent.pos[0] + f.off[0], f.parent.pos[1] + f.off[1], f.parent.pos[2] + f.off[2]];
         if (!gone.has(f.id) && Math.hypot(pos[0] - P[0], pos[1] - P[1], pos[2] - P[2]) < RA) active.push({ id: f.id, pos, parent: f.parent, off: f.off, r: f.r, vis: f.size, m: f.m, ax: f.ax, rate: f.rate, a0: f.a0, tint: f.tint });
@@ -209,7 +224,7 @@ function createFields(scene, bodies) {
         const im = lo ? meshesLo[o.m] : meshes[o.m];
         dummy.position.set(rx, ry, rz); dummy.quaternion.setFromAxisAngle(o.ax, o.a0 + o.rate * t / 1000); dummy.scale.setScalar(sc); dummy.updateMatrix();
         im.setMatrixAt(c, dummy.matrix); im.setColorAt(c, tint.setScalar(o.tint)); cnt[mi]++;
-        if (sc / d > 0.0035 && nc < 3900) { const stt = AST.get(o.id); for (const g of nuggets(o)) { if (stt && (stt.given[g.t] || 0) >= g.n) continue; _nv.copy(g.d).multiplyScalar(0.95 * sc).applyQuaternion(dummy.quaternion); const gs = Math.max(g.s * sc, d * 0.0009); dummy2.position.set(rx + _nv.x, ry + _nv.y, rz + _nv.z); dummy2.quaternion.copy(dummy.quaternion); dummy2.scale.set(gs, gs * (g.t === 'diamante' ? 1.7 : 1), gs); dummy2.updateMatrix(); nug.setMatrixAt(nc, dummy2.matrix); nug.setColorAt(nc, tcol.setHex(g.c)); nc++; } } // pepitas que se ven desde lejos como destellos
+        if (sc / d > 0.0035 && nc < 3900 && o.z != null) { for (const g of nuggets(o)) { if (!zoneLeft(o.z, g.t)) continue; _nv.copy(g.d).multiplyScalar(0.95 * sc).applyQuaternion(dummy.quaternion); const gs = Math.max(g.s * sc, d * 0.0009); dummy2.position.set(rx + _nv.x, ry + _nv.y, rz + _nv.z); dummy2.quaternion.copy(dummy.quaternion); dummy2.scale.set(gs, gs * (g.t === 'diamante' ? 1.7 : 1), gs); dummy2.updateMatrix(); nug.setMatrixAt(nc, dummy2.matrix); nug.setColorAt(nc, tcol.setHex(g.c)); nc++; } } // pepitas que se ven desde lejos como destellos
       }
       push(nug, nc); for (let i = 0; i < NM; i++) push(meshes[i], cnt[i]); for (let i = 0; i < meshesLo.length; i++) push(meshesLo[i], cnt[NM + i]);
     },

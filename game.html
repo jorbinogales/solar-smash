@@ -82,8 +82,10 @@
   #map canvas{position:absolute;inset:0;width:100%;height:100%}#map .m3{display:none}
   #map .mh{position:absolute;left:16px;top:14px;z-index:2;display:flex;gap:10px;align-items:center}
   #map .mh b{letter-spacing:.25em;margin-right:6px}
-  #map .tab{padding:6px 12px;border:1px solid #2a5a78;border-radius:8px;cursor:pointer;background:#08202f;color:#bfe8ff}
-  #map .tab.on{background:#4db8ff;color:#00131f;font-weight:bold}#map .hint{color:#ffd23f;font-size:12px}
+  #map .mc{position:absolute;right:16px;top:48px;z-index:2;width:min(340px,90vw);max-height:calc(100% - 110px);overflow-y:auto;background:#06121ef0;border:1px solid #2a6a90;border-radius:12px;padding:12px 14px;color:#cfe9f7;box-shadow:0 0 30px #000c}#map .mc[hidden]{display:none}
+  #map .mc h3{margin:0 0 2px;font-size:15px;letter-spacing:.12em}#map .mc small{display:block;color:#8fb8d0}
+  #map .mc .zb{margin-top:10px;padding-top:10px;border-top:1px solid #1d4a66;display:grid;gap:6px}#map .mc>.zb:first-child{margin-top:0;padding-top:0;border-top:0}
+  #map .mc button{justify-self:start;background:#4db8ff;color:#00131f;border:0;border-radius:8px;padding:7px 14px;font:inherit;font-weight:bold;cursor:pointer}#map .mc button:disabled{background:#3a5a2a;color:#cfffd8;cursor:default}
   #help{font:inherit;color:#8fb8d0;white-space:pre-wrap;margin:14px 0 0}
 </style>
 </head>
@@ -124,10 +126,10 @@
       <div class="kr"><span class="note">Blanco fijado en la mira = impacto seguro.</span></div>
     </section>
     <section><h3>Navegación</h3>
-      <div class="kr"><span><kbd>Tab</kbd></span><em>siguiente destino</em></div>
+      <div class="kr"><span><kbd>Tab</kbd></span><em>siguiente destino (planetas y zonas de recursos)</em></div>
       <div class="kr"><span><kbd>G</kbd></span><em>vuelo directo al planeta apuntado</em></div>
       <div class="kr"><span><kbd>V</kbd></span><em>escáner de recursos</em></div>
-      <div class="kr"><span><kbd>M</kbd></span><em>mapas</em></div>
+      <div class="kr"><span><kbd>M</kbd></span><em>mapa del sistema</em></div>
       <div class="kr"><span><kbd>H</kbd><kbd>Esc</kbd></span><em>menú</em></div>
     </section>
     <section><h3>Planetas</h3>

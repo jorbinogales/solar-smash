@@ -67,6 +67,39 @@
     const bi = orbits[gi] + gap * 0.3, bo = orbits[gi + 1] - gap * 0.3, belt = { i: bi, o: bo, h: Math.min(0.3e6, (bo - bi) * 0.35) };
     return { seed, star, bodies, surf, atmo, belt, types: TYPES };
   }
+  // Zonas de recursos: el sistema tiene un presupuesto FINITO de cada recurso repartido en cúmulos de asteroides con 1-2 recursos dominantes.
+  // Una zona por planeta principal (anclada a él: se mueve con su órbita) y 3 fijas en el cinturón (ancladas a la estrella). Determinista por semilla: el servidor lleva lo que queda.
+  const ZONE_THEME = { oro: ['Cinturón Áureo', 'Veta Dorada'], plata: ['Nube Argéntea', 'Campo de Plata'], cobre: ['Escombros Cobrizos', 'Deriva de Cobre'], diamante: ['Cúmulo Diamantino', 'Geoda Estelar'], piedra: ['Pedregal', 'Campo de Rocas'], madera: ['Nube Carbonácea', 'Restos Fósiles'] };
+  const ZONE_BUDGET = { madera: [250, 400], piedra: [300, 500], cobre: [150, 250], plata: [90, 150], oro: [60, 100], diamante: [20, 40] }; // recurso dominante principal; el secundario lleva la mitad
+  const ZONE_SEC_W = { madera: 3, piedra: 3, cobre: 3, plata: 2, oro: 1.2, diamante: 0.6 }; // probabilidad relativa de cada recurso como dominante secundario
+  function genZones(sys) {
+    const r = mulberry((((sys.seed >>> 0) || 1) ^ 0x2f6b1d3) >>> 0 || 7), RT = Object.keys(ZONE_BUDGET);
+    const bud = (t, k) => Math.round(k * (ZONE_BUDGET[t][0] + r() * (ZONE_BUDGET[t][1] - ZONE_BUDGET[t][0])) / 5) * 5;
+    const order = RT.slice(); for (let i = order.length - 1; i > 0; i--) { const j = (r() * (i + 1)) | 0; [order[i], order[j]] = [order[j], order[i]]; }
+    const planets = sys.bodies.map((b, i) => ({ b, i })).filter(x => x.b.k !== 'sun' && !x.b.parent), zones = [];
+    const add = (anchor, off, radius, name0) => {
+      const k = zones.length, t = order[k % order.length], dom = [{ type: t, budget: bud(t, 1) }];
+      if (r() < 0.55) { let s = 0; for (const q of RT) if (q !== t) s += ZONE_SEC_W[q]; let x = r() * s; for (const q of RT) { if (q === t) continue; x -= ZONE_SEC_W[q]; if (x <= 0) { dom.push({ type: q, budget: bud(q, 0.5) }); break; } } }
+      const th = ZONE_THEME[t][(r() * 2) | 0];
+      zones.push({ id: k, name: `${th} ${name0}`, anchor, off, radius, dominant: dom });
+    };
+    for (const { b, i } of planets) { // a unas decenas de miles de km del planeta, fuera de su basura orbital y de su atmósfera
+      const radius = Math.round(5000 + r() * 2000), th = r() * 6.2832, el = (r() - 0.5) * 0.3, d = b.R * (6 + 4 * r()) + radius + 3000;
+      add(i, [Math.round(d * Math.cos(th) * Math.cos(el)), Math.round(d * Math.sin(el)), Math.round(d * Math.sin(th) * Math.cos(el))], radius, 'de ' + b.n);
+    }
+    const bl = sys.belt, a0 = r() * 6.2832;
+    for (let k = 0; k < 3; k++) { // en el cinturón: puntos fijos respecto a la estrella
+      const th = a0 + k * 2.0944 + (r() - 0.5) * 0.6, rr = bl.i + (0.3 + 0.4 * r()) * (bl.o - bl.i);
+      add(0, [Math.round(rr * Math.cos(th)), 0, Math.round(rr * Math.sin(th))], Math.round(7000 + r() * 2000), ['α', 'β', 'γ'][k]);
+    }
+    const has = new Set(zones.flatMap(z => z.dominant.map(d => d.type))); // con pocos planetas: todos los recursos deben existir en algún sitio
+    for (const t of RT) if (!has.has(t)) { const z = zones.find(q => q.dominant.length < 2) || zones[zones.length - 1]; z.dominant[1] = { type: t, budget: bud(t, 0.5) }; has.add(t); } // el secundario sustituido siempre es principal en otra zona
+    return zones;
+  }
+  function wreckLoot(i) { // recursos de un casco a la deriva (determinista): 1-2 tipos; el servidor los concede solo la primera vez que se destruye cada casco en la sala
+    const rr = mulberry(i * 7919 + 13), tb = [['cobre', 4], ['plata', 3], ['oro', 2], ['piedra', 3], ['madera', 3]], pick = () => { let x = rr() * 15; for (const [k, wt] of tb) { x -= wt; if (x <= 0) return k; } return 'cobre'; }, a = pick(), b = pick(), n = 5 + Math.floor(rr() * 8);
+    return a === b || rr() < 0.4 ? [{ type: a, n }] : [{ type: a, n: Math.ceil(n * 0.6) }, { type: b, n: Math.max(1, Math.floor(n * 0.4)) }];
+  }
   // Mejoras de la base (máx. 4 niveles): vida, escudo que absorbe las balas, vida y daño de las torres. Coste del nivel lv+1 = COST[k](lv+1).
   const BASE_UP = {
     hp: { name: 'Vida de la base', max: 4, cost: n => ({ piedra: 8 * n, madera: 6 * n }) },
@@ -82,6 +115,6 @@
     missile: { name: 'Misil guiado', dmg: 14, cd: 3.2,  spd: 6, col: 0xff8a3c, homing: true,  cost: { oro: 6, plata: 6 } },
     rail:    { name: 'Cañón de riel', dmg: 22, cd: 4.2, spd: 30, col: 0x9fe8ff, homing: false, cost: { diamante: 3, oro: 8 } },
   };
-  root.genSystem = genSystem; root.BASE_UP = BASE_UP; root.baseStats = baseStats; root.TOWER_STYLES = TOWER_STYLES;
-  if (typeof module !== 'undefined') module.exports = { genSystem, BASE_UP, baseStats, TOWER_STYLES };
+  root.genSystem = genSystem; root.genZones = genZones; root.wreckLoot = wreckLoot; root.BASE_UP = BASE_UP; root.baseStats = baseStats; root.TOWER_STYLES = TOWER_STYLES;
+  if (typeof module !== 'undefined') module.exports = { genSystem, genZones, wreckLoot, BASE_UP, baseStats, TOWER_STYLES };
 })(typeof window !== 'undefined' ? window : globalThis);

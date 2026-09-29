@@ -3,6 +3,12 @@ const DIST_SCALE = 0.06, C = 299792.458, AU = 149597870.7 * DIST_SCALE, DAY = 86
 
 // Sistema procedural (sysgen.js) a partir de la semilla del servidor (seed.js): solo mundos habitables, compactos; hasta 10 cuerpos.
 const SYS = genSystem(SEED, NPL); Object.assign(SURF, SYS.surf); Object.assign(ATMO, SYS.atmo); const DATA = SYS.bodies, BELT = SYS.belt;
+// Zonas de recursos (sysgen.genZones, las mismas que calcula el servidor): solo sus asteroides dan recursos y lo que queda (ZR) lo dicta el servidor en cada tick
+const ZONES = genZones(SYS); let ZR = ZONES.map(z => z.dominant.map(d => d.budget)), LOOTED = new Set(); // LOOTED: cascos ya saqueados en la sala
+const ZT = ZONES.map((z, i) => ({ zi: i, zone: z, n: z.name, R: z.radius, pos: [0, 0, 0] })); // destinos de zona (Tab, mapa, salto luz); pos se actualiza cada cuadro
+const zoneLeft = (zi, type) => { const k = ZONES[zi] ? ZONES[zi].dominant.findIndex(d => d.type === type) : -1; return k < 0 || !ZR[zi] ? 0 : ZR[zi][k] || 0; };
+const zoneRes = zi => ZONES[zi].dominant.map((d, k) => ({ type: d.type, n: (ZR[zi] && ZR[zi][k]) || 0 })); // [{type, n}] con lo que queda
+const ZONE_ARR = 3000; // el salto luz hacia una zona se corta a esta distancia de su borde
 
 // ---------- ruido 3D (sin costura); las texturas de los astros se generan en planets.js con la misma función que el terreno ----------
 const h3 = (x, y, z) => { const n = Math.sin(x * 127.1 + y * 311.7 + z * 74.7) * 43758.5453; return n - Math.floor(n); };
@@ -66,7 +72,9 @@ function updateBodies() {
     const th = b.ph + 2 * Math.PI * simT / (b.T * DAY), o = b.parent ? b.parent.pos : [0, 0, 0];
     const a = b.parent ? b.a : b.a * DIST_SCALE; b.pos = [o[0] + a * Math.cos(th), 0, o[2] + a * Math.sin(th)];
   }
+  for (const t of ZT) { const p = bodies[t.zone.anchor].pos, f = t.zone.off; t.pos = [p[0] + f[0], p[1] + f[1], p[2] + f[2]]; } // las zonas siguen a su planeta
 }
+const tgtObj = () => S.tgt < bodies.length ? bodies[S.tgt] : ZT[S.tgt - bodies.length]; // destino seleccionado con Tab o desde el mapa: cuerpo o zona
 
 // ---------- nave ----------
 let mySpec = loadSpec(), ship = makeShip(mySpec); scene.add(ship); // modelo según el hangar (ships.js)
@@ -95,7 +103,7 @@ function fitBox(box, W) { if (!box) return; box.style.zoom = 1; box.style.width 
 const keys = {}; let mdx = 0, mdy = 0;
 addEventListener('keydown', e => {
   keys[e.code] = true;
-  if (e.code === 'Tab') { e.preventDefault(); S.tgt = (S.tgt + 1) % bodies.length; }
+  if (e.code === 'Tab') { e.preventDefault(); S.tgt = (S.tgt + 1) % (bodies.length + ZT.length); const t = tgtObj(); if (t.zone) say(`Destino: ${t.n} · Shift: salto luz`); } // Tab: cicla planetas y zonas de recursos
   if (e.code === 'KeyX') { S.v = 0; S.auto = false; }
   if (e.code === 'KeyG' && !S.foot.on && !S.warp.on && P.hp > 0) { // G: fija el rumbo del salto luz hacia el planeta bajo la mira (otra vez: libera)
     if (S.lockB != null) { S.lockB = null; say('Vuelo directo cancelado'); }
@@ -206,22 +214,23 @@ function notifyRes(type, n) { // recurso obtenido: icono + cantidad (las gananci
 const QUIET = /luz|salto|atmósfera|exosfera|planeta|Ruedas|estacionada|Amerizaje|flota|despegar|impulso/i; // entradas/salidas de planeta y velocidad luz: solo texto central, sin notificación
 const say = t => { const now = performance.now(); P.msg = t; P.msgT = now + 2500; if ((t !== lastSay || now - lastSayT > 3000) && !QUIET.test(t)) notifyEl(`<span>${t}</span>`, 5500); lastSay = t; lastSayT = now; };
 let CARRY = [0, 0, 0]; // desplazamiento orbital del planeta cercano en este cuadro (lo que está en su aire viaja con él)
-const AST = new Map(), ASTW = { 0: [['piedra', 7], ['cobre', 2], ['diamante', 1], ['madera', 2]], 1: [['piedra', 6], ['cobre', 2.5], ['plata', 1.5]], 2: [['cobre', 3.5], ['plata', 3.5], ['oro', 3]], 3: [['piedra', 5], ['plata', 3], ['diamante', 2]], 4: [['cobre', 4], ['piedra', 4], ['oro', 2], ['madera', 2]], 5: [['piedra', 4], ['plata', 3], ['oro', 2], ['diamante', 1]], d: [['cobre', 5], ['plata', 3], ['oro', 2], ['madera', 4]] };
+const AST = new Map(), ZONE_PER = { madera: 12, piedra: 14, cobre: 8, plata: 5, oro: 4, diamante: 2 }; // unidades medias por asteroide de zona del recurso dominante principal (el secundario, el 60 %)
 const ROCKN = ['carbonáceo', 'rocoso', 'metálico', 'de hielo', 'alargado', 'binario'], ICOIMG = {};
-function astInfo(o) { // recursos que carga un asteroide o pieza de basura (determinista por su identificador): uno o varios tipos, cantidades y vida
+function astInfo(o) { // recursos que carga un asteroide (determinista por su identificador). Solo los de una zona (o.z) llevan recursos: los de sus dominantes. Fuera de las zonas son obstáculos sin recursos
   if (o.res) return o.res;
   let h = 2166136261; for (const ch of String(o.id)) h = Math.imul(h ^ ch.charCodeAt(0), 16777619);
-  const r = rndOf(h >>> 0), tab = ASTW[o.m < fields.rockCount ? o.m : 'd'] || ASTW[1], pick = () => { let x = r() * tab.reduce((a, b) => a + b[1], 0); for (const [k, w] of tab) { x -= w; if (x <= 0) return k; } return tab[0][0]; };
-  const n = o.m < fields.rockCount ? Math.max(3, Math.round(3 + o.vis * 0.33)) : 2 + Math.round(o.vis * 8), nt = 1 + (r() < 0.55 ? 1 : 0) + (o.vis > 12 && r() < 0.3 ? 1 : 0), types = [];
-  for (let i = 0; i < 8 && types.length < nt; i++) { const t = pick(); if (!types.includes(t)) types.push(t); }
-  const wts = types.map((_, i) => (i === 0 ? 1.6 : 0.6) * (0.6 + r() * 0.8)), sw = wts.reduce((a, b) => a + b, 0), list = types.map((t, i) => ({ type: t, n: Math.max(1, Math.round(n * wts[i] / sw)) })), tot = list.reduce((a, b) => a + b.n, 0);
-  return (o.res = { list, n: tot, hp: tot * 10, type: list[0].type });
+  const r = rndOf(h >>> 0), base = o.m < fields.rockCount ? Math.max(3, Math.round(3 + o.vis * 0.33)) : 2 + Math.round(o.vis * 8), list = [];
+  if (o.z != null && ZONES[o.z]) ZONES[o.z].dominant.forEach((d, k) => list.push({ type: d.type, n: Math.max(1, Math.round(ZONE_PER[d.type] * (k ? 0.6 : 1) * (0.6 + 0.8 * r()) * (0.7 + Math.min(o.vis, 40) / 40))) }));
+  const tot = list.reduce((a, b) => a + b.n, 0);
+  return (o.res = { list, n: tot, hp: 10 * Math.max(base, tot), type: list[0] ? list[0].type : null });
 }
-function astLeft(o) { const r = astInfo(o), st = AST.get(o.id); return r.list.map(it => ({ type: it.type, n: it.n - ((st && st.given[it.type]) || 0) })).filter(it => it.n > 0); } // lo que aún queda por extraer
-function hitAsteroid(o, dmg) { // mi disparo golpea un asteroide: va soltando sus recursos según el daño acumulado y al destruirse suelta lo que queda
-  const r = astInfo(o), st = AST.get(o.id) || { dmg: 0, given: {} }; AST.set(o.id, st); st.dmg += dmg;
-  if (st.dmg >= r.hp) { for (const it of r.list) FOOT.add(it.type, it.n); // los recursos se obtienen de una vez, al destruirlo por completo
- fields.gone.add(o.id); const i = fields.active.indexOf(o); if (i >= 0) fields.active.splice(i, 1); AST.delete(o.id); boom(o.pos, Math.min(40, Math.max(3, o.vis * 0.5))); }
+function astLeft(o) { return astInfo(o).list.map(it => ({ type: it.type, n: Math.min(it.n, zoneLeft(o.z, it.type)) })).filter(it => it.n > 0); } // lo que aún daría: nunca más de lo que le queda a su zona
+function hitAsteroid(o, dmg) { // mi disparo golpea un asteroide; al destruirlo se piden sus recursos al servidor, que concede lo que quede en la zona (se suman al llegar la respuesta 'mined')
+  const r = astInfo(o), st = AST.get(o.id) || { dmg: 0 }; AST.set(o.id, st); st.dmg += dmg;
+  if (st.dmg >= r.hp) {
+    const got = astLeft(o); if (o.z != null && got.length) send({ t: 'mine', z: o.z, list: got });
+    fields.gone.add(o.id); const i = fields.active.indexOf(o); if (i >= 0) fields.active.splice(i, 1); AST.delete(o.id); boom(o.pos, Math.min(40, Math.max(3, o.vis * 0.5)));
+  }
 }
 const icoImg = k => { let im = ICOIMG[k]; if (!im && typeof ICONS !== 'undefined') { im = ICOIMG[k] = new Image(); im.src = 'data:image/svg+xml;utf8,' + encodeURIComponent(ICONS[k]); } return im; };
 const projs = new Map(), fx = [], dusts = [], AIR = { p: 14, m: 4.5 }; // dentro de la atmósfera (km/s): llegan rápido al blanco
@@ -341,8 +350,9 @@ function toggleWarp() {
   if (!warpTarget()) return say('Sin destino para el salto'); say(`Salto hacia ${warpTarget().n}`);
   w.cd = 5; w.n = 6; // cuenta atrás de 5 s con pitido por número; al llegar a 0 se activa el salto (ver startWarp)
 }
-function warpTarget() { // destino del salto: el rumbo fijado con G o, si no, el cuerpo más cercano a la dirección de la mira (nunca sales del sistema)
+function warpTarget() { // destino del salto: el rumbo fijado con G, la zona elegida con Tab o en el mapa (si aún no estás en ella) o, si no, el cuerpo más cercano a la dirección de la mira (nunca sales del sistema)
   if (S.lockB != null) return bodies[S.lockB];
+  { const t = tgtObj(); if (t && t.zone && len(sub(t.pos, S.pos)) > t.R + ZONE_ARR + 500) return t; }
   const f = new THREE.Vector3(0, 0, -1).applyQuaternion(S.q); let best = null, ba = 9;
   for (const b of bodies) { const d = sub(b.pos, S.pos), l = len(d); if (l - b.R < 5000) continue; const a = Math.acos(Math.max(-1, Math.min(1, (f.x * d[0] + f.y * d[1] + f.z * d[2]) / l))); if (a < ba) { ba = a; best = b; } }
   return best;
@@ -352,6 +362,7 @@ function warpStep(dt) { // avanza en tramos de 2500 km para no saltarse un plane
   const w = S.warp; let left = w.v * dt; if (w.tb) w.dir = nrm(sub(w.tb.pos, S.pos)); // la trayectoria sigue al destino (los planetas orbitan)
   while (left > 0) {
     const st = Math.min(2500, left); S.pos = [S.pos[0] + w.dir[0] * st, S.pos[1] + w.dir[1] * st, S.pos[2] + w.dir[2] * st]; left -= st;
+    if (w.tb && w.tb.zone && len(sub(w.tb.pos, S.pos)) < w.tb.R + ZONE_ARR) return endWarp(`Has llegado a ${w.tb.n}`); // destino de zona: se corta cerca de su borde
     for (const b of bodies) if (!(w.ex && w.ex.has(b.i)) && Math.hypot(S.pos[0] - b.pos[0], S.pos[1] - b.pos[1], S.pos[2] - b.pos[2]) - b.R < (b.k === 'sun' ? 2.6 * b.R : 5000)) return endWarp(b.k === 'sun' ? '¡Zona de radiación del Sol! Velocidad luz desactivada' : `¡${b.n} a 5000 km! Velocidad luz desactivada`);
   }
 }
@@ -387,6 +398,12 @@ ws.onmessage = ev => {
   if (m.id) { myId = m.id; window.__welcome = m; if (typeof BASE !== 'undefined' && BASE.booted()) BASE.onWelcome(m); return; }
   if ((m.created !== undefined || m.joined !== undefined || m.mismatch !== undefined || m.room !== undefined || m.resumed !== undefined) && typeof BASE !== 'undefined') return void BASE.onRoomMsg(m);
   if (m.claim !== undefined) return void (typeof BASE !== 'undefined' && BASE.onClaim(m.claim));
+  if (m.mined) { // respuesta del servidor a una extracción (asteroide de zona o casco): solo ahora se suman los recursos concedidos
+    const got = Array.isArray(m.got) ? m.got : []; for (const it of got) if (RES[it.type] && it.n > 0) FOOT.add(it.type, it.n);
+    if (Number.isInteger(m.z) && ZR[m.z]) { for (const it of got) { const k = ZONES[m.z].dominant.findIndex(d => d.type === it.type); if (k >= 0) ZR[m.z][k] = Math.max(0, ZR[m.z][k] - it.n); } if (!got.length) say(`${ZONES[m.z].name}: ya no queda nada de eso`); } // se descuenta ya; el tick lo confirma
+    if (Number.isInteger(m.w)) LOOTED.add(m.w);
+    return;
+  }
   if (m.ev) {
     const e = m.ev;
     if (e.t === 'fire') { if (e.rb >= 0 && e.rp) e.pos = bodies[e.rb].pos.map((c, i) => c + e.rp[i]); spawnProj(e.id, e.key, e.kind, e.pos, e.dir, e.tgt, e.dmg, e.tw ? { spd: e.spd || 1, col: 0xff5040, life: 30 } : undefined); if (e.tw) { const q = projs.get(e.key); if (q) q.vis = true; } const de = len(sub(e.pos, S.pos)); sfx(e.kind, de); if (de < 40000) P.lastCombat = performance.now(); if (!e.tw && P.hp > 0 && de < 30000 && de > 0 && (S.pos[0] - e.pos[0]) * e.dir[0] / de + (S.pos[1] - e.pos[1]) * e.dir[1] / de + (S.pos[2] - e.pos[2]) * e.dir[2] / de > 0.985) attackAlert('p', (remotes.get(e.id) || {}).name || 'Un piloto', e.pos); } // disparo de otra nave que apunta hacia mí
@@ -400,6 +417,8 @@ ws.onmessage = ev => {
   }
   if (m.hg && typeof BASE !== 'undefined') BASE.sync(m.hg);
   if (m.ph && typeof BASE !== 'undefined') BASE.onLobby(m);
+  if (Array.isArray(m.zr) && m.zr.length === ZONES.length) ZR = m.zr; // lo que queda en cada zona (igual para todos los de la sala)
+  if (Array.isArray(m.wl)) LOOTED = new Set(m.wl);
   const wd = new Set(m.wd); for (const w of wrecks) if (dead.has(w.i) && !wd.has(w.i)) w.hp = WRECK_HP;
   dead.clear(); wd.forEach(i => dead.add(i));
   const seen = new Set();
@@ -546,26 +565,23 @@ function speedMeter(H, now) { // velocidad como una batería: barras que crecen 
 const resText = l => l.map(it => `${it.type} ×${it.n}`).join(' · ');
 function asteroidMarks(W, H, now) { // recursos de los asteroides cercanos (iconos) y ficha del apuntado: tipos, cantidades y vida
   if (P.hp <= 0) return; const list = [];
-  for (const o of fields.active) { const d = Math.hypot(o.pos[0] - S.pos[0], o.pos[1] - S.pos[1], o.pos[2] - S.pos[2]), aimed = aimT && aimT.ob === o; if (d < (o.m < fields.rockCount ? 6000 : 800) || aimed) list.push([d, o, aimed]); }
+  for (const o of fields.active) { const aimed = aimT && aimT.ob === o; if (!aimed && o.z == null) continue; const d = Math.hypot(o.pos[0] - S.pos[0], o.pos[1] - S.pos[1], o.pos[2] - S.pos[2]); if ((d < (o.m < fields.rockCount ? 6000 : 800) && astLeft(o).length) || aimed) list.push([d, o, aimed]); } // solo los que aún tienen recursos (o el apuntado)
   list.sort((a, b) => a[0] - b[0]);
   for (const [d, o, aimed] of list.slice(0, 8)) {
     const r = astInfo(o), v = view(o.pos); tv.set(v.x, v.y, v.z).project(camera); if (tv.z >= 1 || Math.abs(tv.x) > 1 || Math.abs(tv.y) > 1) continue;
     const x = (tv.x * 0.5 + 0.5) * W, y = (-tv.y * 0.5 + 0.5) * H - 26, st = AST.get(o.id), left = astLeft(o), hp = Math.max(0, r.hp - (st ? st.dmg : 0)), sz = aimed ? 24 : 18, w = left.length * (sz + 4) + 8;
-    g2.save(); g2.globalAlpha = aimed ? 1 : 0.8; g2.fillStyle = 'rgba(0,10,20,0.75)'; g2.strokeStyle = RES[left[0] ? left[0].type : r.type]; g2.lineWidth = 2; g2.beginPath(); g2.roundRect(x - w / 2, y - sz / 2 - 4, w, sz + 8, 10); g2.fill(); g2.stroke();
+    g2.save(); g2.globalAlpha = aimed ? 1 : 0.8; g2.fillStyle = 'rgba(0,10,20,0.75)'; g2.strokeStyle = left[0] ? RES[left[0].type] : '#667788'; g2.lineWidth = 2; g2.beginPath(); g2.roundRect(x - w / 2, y - sz / 2 - 4, w, sz + 8, 10); g2.fill(); g2.stroke();
     left.forEach((it, i) => { const im = icoImg(it.type); if (im && im.complete && im.naturalWidth) g2.drawImage(im, x - w / 2 + 6 + i * (sz + 4), y - sz / 2, sz, sz); });
-    if (aimed) { g2.textAlign = 'center'; g2.font = `bold 12px ${MONO}`; g2.fillStyle = '#fff'; g2.strokeStyle = '#000'; g2.lineWidth = 3; const nm = o.m < fields.rockCount ? 'Asteroide ' + ROCKN[o.m] : 'Basura espacial', tx = `${nm} · ${resText(left)}`; g2.strokeText(tx, x, y - 24); g2.fillText(tx, x, y - 24); g2.fillStyle = 'rgba(255,255,255,0.18)'; g2.fillRect(x - 40, y + 22, 80, 6); g2.fillStyle = hp / r.hp > 0.35 ? '#5dff8a' : '#ff8a4c'; g2.fillRect(x - 40, y + 22, 80 * hp / r.hp, 6); g2.font = `10px ${MONO}`; g2.fillStyle = '#bfe8ff'; g2.fillText(`VIDA ${Math.round(hp)} / ${r.hp} · ${fD(d)}`, x, y + 40); }
+    if (aimed) { g2.textAlign = 'center'; g2.font = `bold 12px ${MONO}`; g2.fillStyle = '#fff'; g2.strokeStyle = '#000'; g2.lineWidth = 3; const nm = o.m < fields.rockCount ? 'Asteroide ' + ROCKN[o.m] : 'Basura espacial', tx = `${nm} · ${resText(left) || (r.list.length ? 'zona agotada' : 'sin recursos')}`; g2.strokeText(tx, x, y - 24); g2.fillText(tx, x, y - 24); g2.fillStyle = 'rgba(255,255,255,0.18)'; g2.fillRect(x - 40, y + 22, 80, 6); g2.fillStyle = hp / r.hp > 0.35 ? '#5dff8a' : '#ff8a4c'; g2.fillRect(x - 40, y + 22, 80 * hp / r.hp, 6); g2.font = `10px ${MONO}`; g2.fillStyle = '#bfe8ff'; g2.fillText(`VIDA ${Math.round(hp)} / ${r.hp} · ${fD(d)}`, x, y + 40); }
     g2.restore();
   }
 }
-function wreckInfo(i) { // recursos de un casco a la deriva (determinista): 1-2 tipos
-  const rr = rndOf(i * 7919 + 13), tb = [['cobre', 4], ['plata', 3], ['oro', 2], ['piedra', 3], ['madera', 3]], pick = () => { let x = rr() * 12; for (const [k, wt] of tb) { x -= wt; if (x <= 0) return k; } return 'cobre'; }, a = pick(), b = pick(), n = 5 + Math.floor(rr() * 8);
-  return a === b || rr() < 0.4 ? [{ type: a, n }] : [{ type: a, n: Math.ceil(n * 0.6) }, { type: b, n: Math.max(1, Math.floor(n * 0.4)) }];
-}
+const wreckInfo = i => LOOTED.has(i) ? [] : wreckLoot(i); // recursos de un casco a la deriva (sysgen.wreckLoot, igual que en el servidor); ya saqueado en la sala: nada
 function scanMarks(W, H, now) { // V: todos los recursos a tu alrededor con una flecha hacia donde están, en un círculo centrado en la nave
   if (!S.scanT || P.hp <= 0) return; if (now - S.scanT > 30000) { S.scanT = 0; return; }
   const items = [];
-  for (const o of fields.active) { const d = Math.hypot(o.pos[0] - S.pos[0], o.pos[1] - S.pos[1], o.pos[2] - S.pos[2]); if (d < RANGE) items.push({ pos: o.pos, d, list: astLeft(o) }); } // solo lo que está al alcance de la nave
-  for (const w of wrecks) if (!dead.has(w.i)) { const d = Math.hypot(w.pos[0] - S.pos[0], w.pos[1] - S.pos[1], w.pos[2] - S.pos[2]); if (d < RANGE) items.push({ pos: w.pos, d, list: wreckInfo(w.i), wreck: true }); }
+  for (const o of fields.active) { if (o.z == null) continue; const d = Math.hypot(o.pos[0] - S.pos[0], o.pos[1] - S.pos[1], o.pos[2] - S.pos[2]); if (d < RANGE) { const list = astLeft(o); if (list.length) items.push({ pos: o.pos, d, list }); } } // solo lo que está al alcance de la nave y aún tiene recursos (zonas no agotadas)
+  for (const w of wrecks) if (!dead.has(w.i) && !LOOTED.has(w.i)) { const d = Math.hypot(w.pos[0] - S.pos[0], w.pos[1] - S.pos[1], w.pos[2] - S.pos[2]); if (d < RANGE) items.push({ pos: w.pos, d, list: wreckInfo(w.i), wreck: true }); }
   items.sort((a, b) => a.d - b.d); const show = items.slice(0, 8);
   tv.set(0, 0, 0).project(camera); const cx = (tv.x * 0.5 + 0.5) * W, cy = (-tv.y * 0.5 + 0.5) * H, R = Math.min(W, H) * 0.27, cm = new THREE.Vector3();
   show.forEach(it => { const v = view(it.pos); cm.set(v.x, v.y, v.z).applyMatrix4(camera.matrixWorldInverse); let dx = cm.x, dy = -cm.y; const l = Math.hypot(dx, dy); if (l < 1e-9) { dx = 0; dy = -1; } else { dx /= l; dy /= l; } it.a = Math.atan2(dy, dx); });
@@ -578,6 +594,27 @@ function scanMarks(W, H, now) { // V: todos los recursos a tu alrededor con una 
     g2.fillStyle = 'rgba(0,10,20,0.78)'; g2.strokeStyle = col; g2.lineWidth = 2; g2.beginPath(); g2.roundRect(px - w / 2, py - 13, w, 26, 9); g2.fill(); g2.stroke();
     it.list.forEach((r, i) => { const im = icoImg(r.type); if (im && im.complete && im.naturalWidth) g2.drawImage(im, px - w / 2 + 5 + i * (sz + 3), py - sz / 2, sz, sz); });
     g2.font = `10px ${MONO}`; g2.fillStyle = '#dff4ff'; g2.strokeStyle = '#000'; g2.lineWidth = 3; const tx = it.d < 1e4 ? Math.round(it.d).toLocaleString('es') + ' km' : (it.d / 1000).toFixed(0) + ' mil km'; g2.strokeText(tx, px, py + 26); g2.fillText(tx, px, py + 26);
+  }
+  g2.restore();
+}
+function zoneMarks(W, H, now) { // zonas de recursos en el HUD: rombo con nombre, distancia al borde e iconos de lo que queda; la seleccionada (Tab / mapa) en amarillo y con flecha si está fuera de la vista
+  if (P.hp <= 0) return; const sel = S.tgt - bodies.length, cm = new THREE.Vector3(); g2.save(); g2.lineWidth = 2;
+  const chips = (x, y, res, sz) => { // icono + cantidad restante de cada recurso dominante (atenuado si ya no queda)
+    let cx = x; const a0 = g2.globalAlpha; g2.textAlign = 'left'; g2.font = `bold 11px ${MONO}`; g2.strokeStyle = '#000'; g2.lineWidth = 3;
+    for (const it of res) { const im = icoImg(it.type); g2.globalAlpha = a0 * (it.n ? 1 : 0.35); if (im && im.complete && im.naturalWidth) g2.drawImage(im, cx, y - sz / 2, sz, sz); g2.fillStyle = it.n ? '#fff' : '#889'; g2.strokeText(String(it.n), cx + sz + 2, y + 4); g2.fillText(String(it.n), cx + sz + 2, y + 4); cx += sz + 8 + 7 * String(it.n).length; }
+    g2.globalAlpha = a0;
+  };
+  for (const t of ZT) {
+    const v = view(t.pos), d = v.d, res = zoneRes(t.zi), isSel = t.zi === sel, empty = res.every(it => !it.n), col = isSel ? '#ffd23f' : empty ? '#8899aa' : RES[res[0].type];
+    g2.strokeStyle = '#000';
+    if (d < t.R) { g2.textAlign = 'center'; g2.font = `bold 13px ${MONO}`; g2.fillStyle = col; const tx = `ZONA ${t.n.toUpperCase()}${empty ? ' · AGOTADA' : ''}`; g2.lineWidth = 3; g2.strokeText(tx, W / 2, 160); g2.fillText(tx, W / 2, 160); chips(W / 2 - 60, 180, res, 16); continue; } // dentro de la zona: cartel arriba
+    tv.set(v.x, v.y, v.z).project(camera); const on = tv.z < 1 && Math.abs(tv.x) < 0.95 && Math.abs(tv.y) < 0.95;
+    if (!on) { if (!isSel) continue; cm.set(v.x, v.y, v.z).applyMatrix4(camera.matrixWorldInverse); let dx = cm.x, dy = -cm.y; const l = Math.hypot(dx, dy) || 1; dx /= l; dy /= l; const R = Math.min(W, H) * 0.42; g2.save(); g2.translate(W / 2 + dx * R, H / 2 + dy * R); g2.rotate(Math.atan2(dy, dx)); g2.fillStyle = col; g2.beginPath(); g2.moveTo(14, 0); g2.lineTo(-8, -9); g2.lineTo(-8, 9); g2.closePath(); g2.fill(); g2.restore(); g2.textAlign = 'center'; g2.font = `bold 11px ${MONO}`; g2.fillStyle = col; g2.lineWidth = 3; g2.strokeText(t.n, W / 2 + dx * (R - 26), H / 2 + dy * (R - 26)); g2.fillText(t.n, W / 2 + dx * (R - 26), H / 2 + dy * (R - 26)); continue; }
+    if (losBlocked({ dir: [v.rel[0] / d, v.rel[1] / d, v.rel[2] / d], dist: d, kind: 'z' })) continue; // tapada por un planeta
+    const x = (tv.x * 0.5 + 0.5) * W, y = (-tv.y * 0.5 + 0.5) * H, s = isSel ? 11 + Math.sin(now / 200) : 8;
+    g2.globalAlpha = isSel ? 1 : 0.78; g2.strokeStyle = col; g2.beginPath(); g2.moveTo(x, y - s); g2.lineTo(x + s, y); g2.lineTo(x, y + s); g2.lineTo(x - s, y); g2.closePath(); g2.stroke();
+    g2.textAlign = 'left'; g2.font = `${isSel ? 'bold ' : ''}11px ${MONO}`; g2.fillStyle = col; g2.strokeStyle = '#000'; g2.lineWidth = 3; const tx = `${t.n} · ${fD(Math.max(0, d - t.R))}${empty ? ' · agotada' : ''}`; g2.strokeText(tx, x + s + 6, y - 2); g2.fillText(tx, x + s + 6, y - 2);
+    chips(x + s + 6, y + 13, res, 14); g2.globalAlpha = 1;
   }
   g2.restore();
 }
@@ -636,7 +673,7 @@ function drawHud(fwd, now, targets) {
     g2.strokeStyle = g2.fillStyle; g2.lineWidth = 1; g2.strokeRect(bx + 0.5, by + 0.5, 220, 9); g2.fillRect(bx + 2, by + 2, 217 * hf, 6); g2.lineWidth = 2; g2.textAlign = 'center';
   }
   if (S.foot.on) return; // a pie: sin medidor de la nave, munición ni velocidad (FOOT.hud dibuja la interfaz del astronauta)
-  attackHud(W, H, now, new THREE.Vector3()); gauge(H); flightInstr(W, H, now); ammoPanel(W, now); warpBar(W, H); speedMeter(H, now); asteroidMarks(W, H, now); scanMarks(W, H, now);
+  attackHud(W, H, now, new THREE.Vector3()); gauge(H); flightInstr(W, H, now); ammoPanel(W, now); warpBar(W, H); speedMeter(H, now); asteroidMarks(W, H, now); scanMarks(W, H, now); zoneMarks(W, H, now);
   if (!S.warp.on && S.warp.cd <= 0 && P.hp > 0) { // rumbo del salto: G sobre la mira cuando apuntas a un planeta; marcador fijo cuando ya está fijado
     const cy = H / 2 - 84;
     if (S.lockB != null) {
@@ -718,7 +755,8 @@ function frame(now) {
     if (!manual) { if (g < LOW_ALT) cap = Math.min(cap, Math.max(0.04, ATM_MAX * Math.max(0, g) / LOW_ALT)); else if (g < BRAKE_ALT) cap = Math.min(cap, ATM_MAX + (LOWCAP - ATM_MAX) * u * u); capAll = Math.min(capAll, cap, Math.max(0.04, 0.5 * Math.max(g, 0) / dt)); } else capAll = Math.min(capAll, cap); // el frenado de aterrizaje solo si no aceleras a mano: con W pulsado puedes ir rápido cerca del suelo (hasta el tope de combustión) y chocar
     if (g < LOW_ALT && (!atm || g < atm.alt)) atm = { b, alt: g }; if (alt < H) entry = true;
   }
-  S.rho = rho; S.rhoH = rhoH; S.rhoB = rhoB; S.atm = atm; S.entry = entry; S.low = hardV < Infinity; // S.low: a menos de 80 km de altura (modo combustión) const nearGround = planets.info.on && planets.info.ground < 0.08 && S.ve < 0.1 && P.hp > 0 && !S.warp.on && !S.foot.on; S.canPark = nearGround && !planets.info.water; S.canFloat = nearGround && !!planets.info.water; // sobre el agua no se estaciona ni se pulsa T: al tocar el agua despacio la nave amerriza sola
+  S.rho = rho; S.rhoH = rhoH; S.rhoB = rhoB; S.atm = atm; S.entry = entry; S.low = hardV < Infinity; // S.low: a menos de 80 km de altura (modo combustión)
+  const nearGround = planets.info.on && planets.info.ground < 0.08 && S.ve < 0.1 && P.hp > 0 && !S.warp.on && !S.foot.on; S.canPark = nearGround && !planets.info.water; S.canFloat = nearGround && !!planets.info.water; // sobre el agua no se estaciona ni se pulsa T: al tocar el agua despacio la nave amerriza sola
   if (!S.park.on && S.canFloat && planets.info.ground < 0.03) {
     const wb = bodies.find(x => x.n === planets.info.name), wd = sub(S.pos, wb.pos), wl = len(wd);
     Object.assign(S.park, { on: true, b: wb, dir: wd.map(c => c / wl), h: planets.info.ground, water: true, upT: null }); S.v = 0; say('Amerizaje: la nave flota sobre las olas · W para despegar');
@@ -749,7 +787,7 @@ function frame(now) {
   } else if (!warp.on) S.q.multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(pitch, yaw, roll, 'YXZ')));
   if ((warp.on || warp.cd > 0) && !S.park.on) { const tb = warp.on ? warp.tb : warpTarget(); if (tb) S.q.slerp(lookQ(nrm(sub(tb.pos, S.pos))), 1 - Math.exp(-dt * (warp.on ? 10 : 3))); }
   if (lockFly) { const tb = bodies[S.lockB], dl = len(sub(tb.pos, S.pos)) - tb.R; if (dl < 3000) { S.lockB = null; say('Has llegado: control manual'); } else S.q.slerp(lookQ(nrm(sub(tb.pos, S.pos))), 1 - Math.exp(-dt * 2.5)); }
-  if (S.auto && !warp.on && !S.park.on) S.q.slerp(lookQ(nrm(sub(bodies[S.tgt].pos, S.pos))), 1 - Math.exp(-dt * 2));
+  if (S.auto && !warp.on && !S.park.on) S.q.slerp(lookQ(nrm(sub(tgtObj().pos, S.pos))), 1 - Math.exp(-dt * 2));
   S.q.normalize();
 
   // velocidad: W/S exponencial; cerca de un cuerpo se limita a ~0.8·altitud por segundo
@@ -903,7 +941,7 @@ function frame(now) {
       w.hp -= p.dmg; killProj(key); boom(p.pos, 6);
       if (w.hp <= 0) {
         dead.add(w.i); boom(w.pos, 80); send({ t: 'wreck', id: w.i });
-        P.plasma = MAXA.plasma; P.missiles = MAXA.missiles; say('¡CASCO DESTRUIDO! MUNICIÓN RECARGADA'); for (const it of wreckInfo(w.i)) FOOT.add(it.type, it.n); // los cascos abandonados también llevan recursos
+        P.plasma = MAXA.plasma; P.missiles = MAXA.missiles; say('¡CASCO DESTRUIDO! MUNICIÓN RECARGADA'); // sus recursos los concede el servidor (respuesta 'mined'), solo la primera vez en la sala
       }
       break;
     }
