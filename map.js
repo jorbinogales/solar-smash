@@ -33,7 +33,7 @@ const MAP = (() => {
   // ---------- escena: planetas con su textura sobre sus órbitas (tamaños exagerados para poder verlos) y zonas de recursos ----------
   const dispR = b => b.k === 'sun' ? 1.5 : b.parent ? 0.1 + b.R / 9000 : 0.22 + b.R / 1800 * 0.09;
   function moonOrbitR(b) { const sibs = bodies.filter(m => m.parent === b.parent); return dispR(b.parent) * 2.1 + 0.32 * sibs.indexOf(b); }
-  const zoneR = z => z.anchor ? 0.09 : Math.max(0.14, z.radius * K); // radio dibujado de una zona
+  const zoneR = z => z.anchor ? 0.2 : Math.max(0.3, z.radius * K); // radio dibujado de una zona
   function initSys() {
     if (sys) return;
     const sc = new THREE.Scene(), cam = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.005, 3000); cam.rotation.order = 'YXZ';
@@ -49,7 +49,12 @@ const MAP = (() => {
       return { b, m, orbit, p: new THREE.Vector3() };
     });
     { const n = 900, pos = new Float32Array(n * 3), r0 = BELT.i * K, r1 = BELT.o * K; for (let i = 0; i < n; i++) { const a = Math.random() * 6.2832, r = r0 + Math.random() * (r1 - r0); pos[i * 3] = Math.cos(a) * r; pos[i * 3 + 1] = (Math.random() - 0.5) * 0.3; pos[i * 3 + 2] = Math.sin(a) * r; } const gg = new THREE.BufferGeometry(); gg.setAttribute('position', new THREE.BufferAttribute(pos, 3)); sc.add(new THREE.Points(gg, new THREE.PointsMaterial({ size: 1.6, sizeAttenuation: false, color: 0xb8a58a }))); }
-    const zGeo = new THREE.IcosahedronGeometry(1, 1), zones = ZT.map(t => { const m = new THREE.Mesh(zGeo, new THREE.MeshBasicMaterial({ color: RES[t.zone.dominant[0].type], wireframe: true, transparent: true, opacity: 0.55 })); m.scale.setScalar(zoneR(t.zone)); sc.add(m); return { t, m, p: new THREE.Vector3() }; });
+    const zones = ZT.map(t => { // cada yacimiento es un cúmulo de asteroides (puntos) con los colores de sus recursos; posiciones estables por zona
+      const n = 90, pos = new Float32Array(n * 3), col = new Float32Array(n * 3), d = t.zone.dominant, cA = new THREE.Color(RES[d[0].type]), cB = new THREE.Color(RES[(d[1] || d[0]).type]); let sd = 1000 + t.zi * 7919; const rn = () => (sd = (sd * 1664525 + 1013904223) >>> 0) / 4294967296;
+      for (let i = 0; i < n; i++) { const u = rn() * 2 - 1, a2 = rn() * 6.2832, r = Math.cbrt(rn()) * Math.sqrt(1 - u * u); pos[i * 3] = Math.cos(a2) * r; pos[i * 3 + 1] = u * 0.55; pos[i * 3 + 2] = Math.sin(a2) * r; const c = rn() < 0.65 ? cA : cB, k = 0.7 + 0.3 * rn(); col[i * 3] = c.r * k; col[i * 3 + 1] = c.g * k; col[i * 3 + 2] = c.b * k; }
+      const gg = new THREE.BufferGeometry(); gg.setAttribute('position', new THREE.BufferAttribute(pos, 3)); gg.setAttribute('color', new THREE.BufferAttribute(col, 3));
+      const m = new THREE.Points(gg, new THREE.PointsMaterial({ size: 6, sizeAttenuation: false, vertexColors: true })); m.scale.setScalar(zoneR(t.zone)); sc.add(m); return { t, m, p: new THREE.Vector3() };
+    });
     const mk = (geo, col) => { const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: col })); sc.add(m); return m; };
     sys = { sc, cam, objs, zones, me: mk(new THREE.ConeGeometry(0.09, 0.3, 10), 0x4db8ff), foes: [], bases: [], mk };
     resize();
@@ -119,7 +124,7 @@ const MAP = (() => {
     cam.position.copy(st.pos); cam.rotation.set(st.pitch, st.yaw, 0);
     for (const o of sys.objs) { dpos(o.b, o.p); o.m.position.copy(o.p); o.m.rotation.y = o.b.k !== 'sun' ? now / 9000 + o.b.i : now / 30000; if (o.orbit && o.b.parent) o.orbit.position.set(o.b.parent.pos[0] * K, 0, o.b.parent.pos[2] * K); }
     const selZ = tgtObj() && tgtObj().zone ? tgtObj().zi : -1;
-    for (const o of sys.zones) { zpos(o.t, o.p); o.m.position.copy(o.p); o.m.rotation.y = now / 4000; const res = zoneRes(o.t.zi), empty = res.every(it => !it.n); o.m.material.color.set(o.t.zi === selZ ? '#ffd23f' : empty ? '#556070' : RES[res[0].type]); o.m.scale.setScalar(zoneR(o.t.zone) * (o.t.zi === selZ ? 1 + 0.12 * Math.sin(now / 200) : 1)); }
+    for (const o of sys.zones) { zpos(o.t, o.p); o.m.position.copy(o.p); o.m.rotation.y = now / 4000; const res = zoneRes(o.t.zi), empty = res.every(it => !it.n); o.m.material.color.set(o.t.zi === selZ ? '#ffe27a' : empty ? '#556070' : '#ffffff'); o.m.scale.setScalar(zoneR(o.t.zone) * (o.t.zi === selZ ? 1 + 0.12 * Math.sin(now / 200) : 1)); }
     // marcadores: yo, otros jugadores y hangares
     entityPos(S.pos, sys.me.position); { const f = new THREE.Vector3(0, 0, -1).applyQuaternion(S.q); sys.me.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), f); sys.me.scale.setScalar(0.7 + 0.25 * Math.sin(now / 250)); }
     const os = others(); while (sys.foes.length < os.length) sys.foes.push(sys.mk(new THREE.ConeGeometry(0.08, 0.26, 8), 0xff6a3c));
