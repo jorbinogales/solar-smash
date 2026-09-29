@@ -145,7 +145,7 @@
 <script>
 // Carga por etapas: la pantalla de arranque se pinta primero y avanza con cada módulo; al terminar se generan las texturas de los planetas (BOOT_DONE, en base.js)
 (function () {
-  const L = [['ships.js', 'Naves'], ['space.js', 'Asteroides'], ['planets.js', 'Terreno'], ['seed.js', 'Semilla del sistema'], ['sysgen.js', 'Generador de sistemas'], ['game.js', 'Generando el sistema solar'], ['base.js', 'Bases y salas'], ['bot.js', 'Bots'], ['icons.js', 'Iconos'], ['hangar.js', 'Menú'], ['tview.js', 'Radar'], ['foot.js', 'Personaje'], ['map.js', 'Mapas']];
+  const L = [['ships.js', 'Naves'], ['space.js', 'Asteroides'], ['planets.js', 'Terreno'], ['seed.js?token=' + encodeURIComponent((() => { try { return sessionStorage.getItem('token') || ''; } catch { return ''; } })()), 'Semilla del sistema'], ['sysgen.js', 'Generador de sistemas'], ['game.js', 'Generando el sistema solar'], ['base.js', 'Bases y salas'], ['bot.js', 'Bots'], ['icons.js', 'Iconos'], ['hangar.js', 'Menú'], ['tview.js', 'Radar'], ['foot.js', 'Personaje'], ['map.js', 'Mapas']];
   const bar = document.querySelector('#boot .bb i'), st = document.querySelector('#boot .bs'); let i = 0;
   function next() {
     if (i >= L.length) { if (window.BOOT_DONE) window.BOOT_DONE(); return; }

@@ -8,7 +8,7 @@
   const newSeed = () => 'p' + Math.random().toString(36).slice(2, 8);
   const autoName = () => `${pick(['Nebulosa', 'Cósmica', 'Estelar', 'Orbital', 'Galáctica', 'Lunar', 'Solar', 'Cuántica'])}-${pick(['Alfa', 'Kepler', 'Andrómeda', 'Orión', 'Vega', 'Sirio', 'Aurora', 'Titán'])}-${10 + rnd(90)}`;
   const COL = ['#4db8ff', '#ff6a3c', '#5dff8a', '#ffd23f', '#d06bff', '#f2f2f2', '#ff5fa2', '#3ff0e0'];
-  const st = { name: ls.get('pname') || '', av: ls.get('avatar') || newSeed(), room: null, msg: '', np: 4, seed: 1 + rnd(2e9), rname: autoName(), copied: false, want: null, hover: null, cands: null };
+  const st = { name: ls.get('pname') || '', av: ls.get('avatar') || newSeed(), room: null, msg: '', np: 4, seed: 1 + rnd(2e9), rname: autoName(), copied: false, want: null, hover: null, cands: null, view: 'home', code: (new URLSearchParams(location.search).get('sala') || '').toUpperCase().slice(0, 8) };
   st.cands = [st.av, ...Array.from({ length: 5 }, newSeed)];
   const me = () => (st.room ? st.room.members.find(m => m.hk === myHk) : null), isHost = () => !!(me() && me().host);
   const cur = () => (st.room ? { seed: st.room.seed, np: st.room.np } : { seed: st.seed, np: st.np });
@@ -76,52 +76,61 @@
   ws.onclose = () => { st.msg = 'Conexión perdida con el servidor.'; render(true); };
   ws.onmessage = ev => {
     const m = JSON.parse(ev.data);
-    if (m.id) { st.room = m.room || null; render(); return; }
+    if (m.id) { render(); return; }
     if (m.created === 1) { st.msg = ''; if (st.want) send({ t: 'pick', b: st.want }); st.want = null; history.replaceState(null, '', '?sala=' + m.code); return; }
-    if (m.created === 0) { st.msg = 'Ya hay una sala abierta.'; render(true); return; }
-    if (m.joined === 1) { st.msg = ''; if (st.want) send({ t: 'pick', b: st.want }); st.want = null; return; }
+    if (m.created === 0) { st.msg = m.why || 'No se pudo crear la sala.'; render(true); return; }
+    if (m.joined === 1) { st.msg = ''; st.want = null; return; }
     if (m.joined === 0) { st.msg = m.why || 'No se pudo entrar.'; render(true); return; }
     if (m.go) { if (!me()) return; ls.set('pname', st.name); location.href = '/game'; return; }
-    if (m.rm !== undefined) { st.room = m.rm; if (st.room && st.room.phase !== 'lobby' && me()) { ls.set('pname', st.name); location.href = '/game'; return; } render(); }
+    if (m.rm !== undefined) { const had = st.room; st.room = m.rm; if (!st.room) { if (had) { st.view = 'home'; st.msg = 'La sala se cerró.'; history.replaceState(null, '', '/'); } } else if (st.room.phase !== 'lobby' && me()) { ls.set('pname', st.name); location.href = '/game'; return; } render(); }
   };
 
   // ---------- pantalla única ----------
   const esc = s => String(s).replace(/[<>&"]/g, '');
   let sig = '';
   function render(force) {
-    const r = st.room, s = [st.msg, st.copied, st.np, st.seed, st.rname, st.want, st.av, st.cands.join(), !!blob, r && JSON.stringify(r)].join('|'); if (!force && s === sig) return; sig = s;
+    const r = st.room, s = [st.view, st.code, st.msg, st.copied, st.np, st.seed, st.rname, st.want, st.av, st.cands.join(), !!blob, r && JSON.stringify(r)].join('|'); if (!force && s === sig) return; sig = s;
     const nmEl = box.querySelector('#nm'), rnEl = box.querySelector('#rn'); if (nmEl) st.name = nmEl.value; if (rnEl && !r) st.rname = rnEl.value;
     const focus = document.activeElement && document.activeElement.id; box.innerHTML = html();
     if (focus) { const el = box.querySelector('#' + focus); if (el) { el.focus(); if (el.type === 'text') el.setSelectionRange(el.value.length, el.value.length); } }
     fit();
   }
   const slot = (m, i) => m ? `<div class="slot${m.hk === myHk ? ' me' : ''}"><div class="av">${avSvg(m.av)}</div><div class="in"><div class="nm">${m.host ? '★ ' : ''}${esc(m.nm)}</div><small>${m.pick ? `<span class="dot" style="background:${COL[i % 8]}"></span>${esc(m.pick)}` : 'sin planeta'}</small></div></div>` : `<div class="slot empty"><div class="av">+</div><div class="in"><div class="nm">esperando…</div></div></div>`;
-  function html() {
+  const profile = () => `<div class="card"><h3>TU PERFIL</h3><div class="prof"><div class="av big">${avSvg(st.av)}</div><div class="grow"><input type="text" id="nm" maxlength="16" placeholder="Tu nombre" value="${esc(st.name)}"></div></div>
+          <div class="cands">${st.cands.map(a => `<div class="av${a === st.av ? ' on' : ''}" data-av="${a}">${avSvg(a)}</div>`).join('')}<button class="btn ghost sm" id="reav" title="Más fotos" style="margin-left:auto">🎲</button></div></div>`;
+  function homeHtml() { // portada: crear una sala o entrar a una con su código de invitación (no se listan las salas de otros)
+    return `<div style="max-width:760px;margin:0 auto"><div class="hdr" style="justify-content:center"><div class="logo" style="font-size:34px;text-align:center">SISTEMA SOLAR<small>PROCEDURAL</small></div></div>
+      ${profile()}
+      <div class="opts"><div class="card opt"><h3>NUEVA PARTIDA</h3><p>Crea tu sala, elige cuántos planetas tendrá el sistema y comparte el código.</p><button class="btn go" id="toSetup">CREAR SALA</button></div>
+        <div class="card opt"><h3>TENGO UN CÓDIGO</h3><p>Escribe el código de invitación que te pasó el anfitrión.</p><input type="text" id="code" maxlength="8" placeholder="CÓDIGO" value="${esc(st.code)}" style="text-align:center;letter-spacing:.3em;font-size:20px;text-transform:uppercase"><button class="btn green" id="joinCode" style="width:100%;margin-top:10px;font-size:17px;padding:11px">ENTRAR A LA SALA</button></div></div>
+      <div class="err" style="font-size:15px;margin-top:14px">${esc(st.msg)}</div></div>`;
+  }
+  const html = () => (st.room && me() ? roomHtml() : st.view === 'setup' ? roomHtml() : homeHtml());
+  function roomHtml() {
     const r = st.room, host = isHost(), mem = me(), { np } = cur(), link = r ? `${location.origin}/?sala=${r.code}` : '';
     const members = r ? r.members : [{ nm: st.name || 'Tú', av: st.av, hk: myHk, host: true, pick: st.want }];
     const slots = Array.from({ length: np }, (_, i) => slot(members[i], i)).join('');
     const canCfg = !r || host, chosen = mem ? mem.pick : st.want;
     let action;
     if (!r) action = '<button class="btn go" id="create">CREAR SALA</button>';
-    else if (!mem) action = r.phase === 'lobby' && r.members.length < r.np ? '<button class="btn go" id="join">UNIRSE A LA SALA</button>' : '<div class="wait">La sala no admite más jugadores ahora.</div>';
     else if (host) action = '<button class="btn go" id="start">INICIAR PARTIDA</button>';
     else action = '<div class="wait">Esperando a que el anfitrión inicie la partida…</div>';
     return `<div class="hdr"><div class="logo">SISTEMA SOLAR<small>PROCEDURAL</small></div>
       <div class="grow"></div>
+      <button class="btn ghost sm" id="${r ? 'leave' : 'toHome'}">${r ? 'SALIR' : '← VOLVER'}</button>
       <div class="code">CÓDIGO<b>${r ? r.code : '·····'}</b></div>
       <button class="btn sm" id="copy" ${r ? '' : 'disabled'}>${st.copied ? '¡COPIADO!' : 'COMPARTIR'}</button></div>
     <div class="main"><div class="left card" style="padding:10px"><canvas id="pv"></canvas><div class="cap">Haz clic en un planeta para elegirlo · arrastra para girar el sistema${chosen ? ' · clic de nuevo para soltarlo' : ''}</div></div>
       <div class="right">
         ${r ? `<div class="card"><h3><span>JUGADORES ${members.length}/${np}</span></h3><div class="slots">${slots}</div></div>` : ''}
-        <div class="card"><h3>TU PERFIL</h3><div class="prof"><div class="av big">${avSvg(st.av)}</div><div class="grow"><input type="text" id="nm" maxlength="16" placeholder="Tu nombre" value="${esc(st.name)}"></div></div>
-          <div class="cands">${st.cands.map(a => `<div class="av${a === st.av ? ' on' : ''}" data-av="${a}">${avSvg(a)}</div>`).join('')}<button class="btn ghost sm" id="reav" title="Más fotos" style="margin-left:auto">🎲</button></div></div>
+        ${profile()}
         <div class="card"><h3>SISTEMA</h3>${!r ? `<div class="row"><div class="stepper"><button class="btn ghost sm" id="npm">−</button><b>${np}</b><button class="btn ghost sm" id="npp">+</button><span style="color:var(--dim)">planetas = jugadores</span></div><button class="btn ghost sm" id="reroll">🎲 OTRO</button></div>` : `<div class="wait" style="padding:4px">Sistema de ${np} planetas</div>`}
           ${host ? `<label class="chk"><input type="checkbox" id="fb" ${r.fillBots ? 'checked' : ''}> Rellenar los planetas libres con bots IA</label>` : !r ? '<label class="chk"><input type="checkbox" checked disabled> Rellenar los planetas libres con bots IA</label>' : `<div class="wait" style="padding:4px">Bots ${r.fillBots ? 'activados' : 'desactivados'}</div>`}</div>
         ${action}<div class="err">${esc(st.msg)}</div></div></div>`;
   }
 
   // ---------- eventos ----------
-  box.addEventListener('input', e => { if (e.target.id === 'nm') { st.name = e.target.value; if (me()) send({ t: 'pf', nm: st.name }); ls.set('pname', st.name); } if (e.target.id === 'rn') st.rname = e.target.value; });
+  box.addEventListener('input', e => { if (e.target.id === 'code') st.code = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''); if (e.target.id === 'nm') { st.name = e.target.value; if (me()) send({ t: 'pf', nm: st.name }); ls.set('pname', st.name); } if (e.target.id === 'rn') st.rname = e.target.value; });
   box.addEventListener('change', e => { if (e.target.id === 'fb' && st.room) send({ t: 'cfg', np: st.room.np, fillBots: e.target.checked }); });
   const setAv = a => { st.av = a; ls.set('avatar', a); if (me()) send({ t: 'pf', av: a }); render(true); };
   const nick = () => (st.name || 'Piloto').slice(0, 16);
@@ -137,10 +146,14 @@
     else if (id === 'npm' || id === 'npp') { const n = Math.max(2, Math.min(8, np + (id === 'npp' ? 1 : -1))); if (st.room) send({ t: 'cfg', np: n, seed: st.room.seed }); else { st.np = n; st.want = null; render(true); } }
     else if (id === 'reroll') { if (st.room) send({ t: 'cfg', np: st.room.np, seed: 1 + rnd(2e9) }); else { st.seed = 1 + rnd(2e9); st.want = null; render(true); } }
     else if (id === 'create') send({ t: 'create', token, nm: nick(), av: st.av, np: st.np, seed: st.seed, name: st.rname });
-    else if (id === 'join') send({ t: 'join', token, nm: nick(), av: st.av, code: st.room && st.room.code });
+    else if (id === 'toSetup') { st.view = 'setup'; st.msg = ''; st.seed = 1 + rnd(2e9); render(true); }
+    else if (id === 'toHome') { st.view = 'home'; st.want = null; st.msg = ''; render(true); }
+    else if (id === 'joinCode') { if (!st.code) { st.msg = 'Escribe el código de la sala.'; render(true); } else send({ t: 'join', token, nm: nick(), av: st.av, code: st.code }); }
+    else if (id === 'leave') { send({ t: 'leave' }); st.room = null; st.view = 'home'; st.want = null; st.msg = ''; history.replaceState(null, '', '/'); render(true); }
     else if (id === 'start') send({ t: 'start' });
     else if (id === 'copy' && st.room) { const link = `${location.origin}/?sala=${st.room.code}`, done = () => { st.copied = true; render(true); setTimeout(() => { st.copied = false; render(true); }, 1800); }; if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(link).then(done, done); else done(); }
   });
+  box.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.id === 'code') { e.preventDefault(); const b = box.querySelector('#joinCode'); if (b) b.click(); } });
   // arrastrar el sistema para girarlo; un clic sin arrastre elige planeta
   const canvasPt = e => { const c = box.querySelector('#pv'), b = c.getBoundingClientRect(); return { x: (e.clientX - b.left) * c.width / b.width, y: (e.clientY - b.top) * c.height / b.height }; };
   const planetAt = e => { const q = canvasPt(e); let best = null; for (const k of hit) if (Math.hypot(q.x - k.x, q.y - k.y) < k.r) best = k; return best; };
