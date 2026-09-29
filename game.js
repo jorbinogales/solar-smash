@@ -454,6 +454,46 @@ function ammoPanel(W, now) {
   g2.fillStyle = P.cdM > 0 ? '#ffb347' : '#5dff8a'; g2.fillRect(W - 254, 240, 214 * (P.cdM > 0 ? 1 - P.cdM / WPN.m.cd : 1), 6);
   g2.fillStyle = '#ffd9a0'; g2.font = `11px ${MONO}`; g2.fillText(P.cdM > 0 ? `RECARGA ${P.cdM.toFixed(1)}s` : 'LISTO', W - 254, 262);
 }
+// ---------- instrumento de vuelo: horizonte artificial (inclinación respecto al suelo), altura, distancia a mi base y alerta de choque ----------
+const _fi = { f: new THREE.Vector3(), r: new THREE.Vector3(), u: new THREE.Vector3(), beep: 0 };
+function flightInstr(W, H, now) {
+  if (P.hp <= 0 || S.warp.on || S.foot.on) return;
+  let nb = null, na = Infinity; for (const b of bodies) { if (b.k === 'sun') continue; const a = Math.hypot(S.pos[0] - b.pos[0], S.pos[1] - b.pos[1], S.pos[2] - b.pos[2]) - b.R; if (a < na) { na = a; nb = b; } }
+  if (!nb || na > 600) return; // solo cerca de un planeta
+  const g = Math.max(0, planets.info.on && planets.info.name === nb.n ? planets.info.ground : na), dv = sub(S.pos, nb.pos), dl = len(dv), up = [dv[0] / dl, dv[1] / dl, dv[2] / dl];
+  _fi.f.set(0, 0, -1).applyQuaternion(S.q); _fi.r.set(1, 0, 0).applyQuaternion(S.q); _fi.u.set(0, 1, 0).applyQuaternion(S.q);
+  const sinP = Math.max(-1, Math.min(1, _fi.f.x * up[0] + _fi.f.y * up[1] + _fi.f.z * up[2])), pitch = Math.asin(sinP), roll = Math.atan2(_fi.r.x * up[0] + _fi.r.y * up[1] + _fi.r.z * up[2], _fi.u.x * up[0] + _fi.u.y * up[1] + _fi.u.z * up[2]);
+  const vz = S.ve * sinP, tti = vz < -0.03 && g > 0 && !S.park.on ? g / -vz : Infinity, thr = 8 + Math.min(12, S.ve * 1.2); // más rápido = avisa antes
+  const cx = W - 96, cy = H * 0.5 + 30, R = 52;
+  g2.save(); g2.textAlign = 'center';
+  g2.beginPath(); g2.arc(cx, cy, R, 0, 7); g2.save(); g2.clip(); g2.translate(cx, cy); g2.rotate(-roll); const py = pitch * 180 / Math.PI * 1.3;
+  g2.fillStyle = '#2a6aa8'; g2.fillRect(-90, -200 + py, 180, 200); g2.fillStyle = '#7a5530'; g2.fillRect(-90, py, 180, 200); g2.fillStyle = '#ffffffcc'; g2.fillRect(-90, py - 1, 180, 2);
+  g2.strokeStyle = '#ffffff99'; g2.lineWidth = 1; g2.font = `9px ${MONO}`; g2.fillStyle = '#ffffffcc'; for (let a = -30; a <= 30; a += 10) { if (!a) continue; const y = py - a * 1.3, w = a % 20 ? 10 : 18; g2.beginPath(); g2.moveTo(-w, y); g2.lineTo(w, y); g2.stroke(); if (!(a % 20)) g2.fillText(Math.abs(a), w + 10, y + 3); }
+  g2.restore();
+  g2.strokeStyle = tti < thr && vz < -0.12 ? '#ff3b30' : '#8fd8ff'; g2.lineWidth = 3; g2.beginPath(); g2.arc(cx, cy, R, 0, 7); g2.stroke();
+  g2.strokeStyle = '#ffd23f'; g2.lineWidth = 3; g2.beginPath(); g2.moveTo(cx - 30, cy); g2.lineTo(cx - 10, cy); g2.lineTo(cx - 5, cy + 6); g2.moveTo(cx + 30, cy); g2.lineTo(cx + 10, cy); g2.lineTo(cx + 5, cy + 6); g2.moveTo(cx, cy - 3); g2.lineTo(cx, cy + 1); g2.stroke(); // avión fijo
+  const deg = Math.round(pitch * 180 / Math.PI), mine = typeof BASE !== 'undefined' ? BASE.mine() : null, bd = mine ? len(sub(BASE.worldOf(mine), S.pos)) : null;
+  g2.font = `bold 12px ${MONO}`; g2.fillStyle = '#e6f6ff'; g2.strokeStyle = '#000'; g2.lineWidth = 3;
+  const lines = [[`ALTURA ${g < 1 ? Math.round(g * 1000) + ' m' : fD(g)}`, '#e6f6ff'], [`INCLINACIÓN ${deg > 0 ? '+' : ''}${deg}°`, deg < -8 ? '#ffb347' : '#e6f6ff']];
+  if (bd !== null) lines.push([`BASE ${fD(bd)}`, '#5dff8a']); if (tti < 60) lines.push([`IMPACTO ${tti.toFixed(1)} s`, tti < thr ? '#ff5a4a' : '#ffd23f']);
+  lines.forEach(([t, c], i) => { g2.fillStyle = c; g2.strokeText(t, cx, cy + R + 18 + i * 15); g2.fillText(t, cx, cy + R + 18 + i * 15); });
+  g2.restore();
+  if (tti < thr && vz < -0.12) crashAlert(W, H, now, tti); // aterrizajes suaves (< 430 km/h de caída) no disparan la alerta
+}
+function crashAlert(W, H, now, tti) { // triángulo de peligro parpadeante en el centro de la pantalla; parpadea y pita más rápido cuanto menos falta
+  const fast = tti < 3, ph = now / (fast ? 90 : 170), a = 0.5 + 0.5 * Math.sin(ph), x = W / 2, y = H * 0.3, s = 62 * (1 + 0.06 * Math.sin(ph));
+  g2.save(); g2.textAlign = 'center'; g2.lineJoin = 'round';
+  const k = (now % 900) / 900; g2.strokeStyle = `rgba(255,60,40,${0.5 * (1 - k)})`; g2.lineWidth = 5; g2.beginPath(); g2.arc(x, y + 8, s * (1 + k * 1.1), 0, 7); g2.stroke(); // onda que se expande
+  g2.globalAlpha = 0.45 + 0.55 * a; g2.shadowColor = '#ff2a1a'; g2.shadowBlur = 28 + 22 * a;
+  g2.beginPath(); g2.moveTo(x, y - s); g2.lineTo(x + s * 0.95, y + s * 0.72); g2.lineTo(x - s * 0.95, y + s * 0.72); g2.closePath();
+  const gr = g2.createLinearGradient(0, y - s, 0, y + s * 0.72); gr.addColorStop(0, '#ff5a3c'); gr.addColorStop(1, '#a4100a'); g2.fillStyle = gr; g2.fill(); g2.lineWidth = 9; g2.strokeStyle = '#fff3c4'; g2.stroke(); g2.shadowBlur = 0;
+  g2.lineWidth = 8; g2.lineCap = 'round'; g2.strokeStyle = '#fff'; g2.beginPath(); g2.moveTo(x, y - s * 0.42); g2.lineTo(x, y + s * 0.22); g2.stroke(); g2.beginPath(); g2.arc(x, y + s * 0.47, 1, 0, 7); g2.stroke(); // signo de exclamación
+  g2.globalAlpha = 1; g2.font = 'bold 26px ui-monospace,Consolas,monospace'; g2.lineWidth = 5; g2.strokeStyle = '#000'; g2.fillStyle = a > 0.5 ? '#fff' : '#ff6a5a';
+  g2.strokeText('¡VAS A ESTRELLARTE!', x, y + s + 40); g2.fillText('¡VAS A ESTRELLARTE!', x, y + s + 40);
+  g2.font = 'bold 18px ui-monospace,Consolas,monospace'; g2.fillStyle = '#ffd23f'; const t2 = `SUBE · impacto en ${tti.toFixed(1)} s`; g2.strokeText(t2, x, y + s + 66); g2.fillText(t2, x, y + s + 66);
+  g2.restore();
+  if (now - _fi.beep > 120 + 60 * tti) { _fi.beep = now; beep(); }
+}
 function gauge(H) { // medidor curvo: arco azul = escudo (exterior), arco verde = casco (interior)
   const j = P.flash > 0 ? 10 * P.flash : 0, cx = 110 + (Math.random() - 0.5) * j, cy = H - 16 - hud.offsetHeight - 72 + (Math.random() - 0.5) * j, a0 = 0.75 * Math.PI, sw = 1.5 * Math.PI; // el medidor curvo queda justo encima del panel (sin tocarlo)
   { const tvb = document.getElementById('tv'); if (tvb) tvb.style.bottom = (hud.offsetHeight + 16 + 158) + 'px'; } // la vista previa del objetivo sube con él
@@ -579,7 +619,7 @@ function drawHud(fwd, now, targets) {
     g2.strokeStyle = g2.fillStyle; g2.lineWidth = 1; g2.strokeRect(bx + 0.5, by + 0.5, 220, 9); g2.fillRect(bx + 2, by + 2, 217 * hf, 6); g2.lineWidth = 2; g2.textAlign = 'center';
   }
   if (S.foot.on) return; // a pie: sin medidor de la nave, munición ni velocidad (FOOT.hud dibuja la interfaz del astronauta)
-  gauge(H); ammoPanel(W, now); warpBar(W, H); speedMeter(H, now); asteroidMarks(W, H, now); scanMarks(W, H, now);
+  gauge(H); flightInstr(W, H, now); ammoPanel(W, now); warpBar(W, H); speedMeter(H, now); asteroidMarks(W, H, now); scanMarks(W, H, now);
   if (!S.warp.on && S.warp.cd <= 0 && P.hp > 0) { // rumbo del salto: G sobre la mira cuando apuntas a un planeta; marcador fijo cuando ya está fijado
     const cy = H / 2 - 84;
     if (S.lockB != null) {
