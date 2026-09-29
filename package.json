@@ -28,11 +28,14 @@
       "*.html",
       "package.json",
       "!dist/**",
-      "!node_modules/.cache/**"
+      "!node_modules/.cache/**",
+      "icons/**",
+      "manifest.webmanifest"
     ],
     "win": {
       "target": "nsis",
-      "signAndEditExecutable": false
+      "signAndEditExecutable": false,
+      "icon": "icons/icon-512.png"
     },
     "nsis": {
       "oneClick": false,

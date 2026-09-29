@@ -168,5 +168,12 @@
   function fit() { box.style.zoom = 1; const h = box.offsetHeight || 1, s = Math.max(0.35, Math.min(innerHeight / (h + 40), innerWidth / (1080 + 30), 1.4)); box.style.zoom = s; }
   addEventListener('resize', fit);
   (function loop(t) { drawStars(t); const c = box.querySelector('#pv'); if (c) { const { seed, np } = cur(); drawSystem(c, sysOf(seed, np), t); } requestAnimationFrame(loop); })(0);
+  // ---------- instalación: botón de instalar la app (PWA) y descarga del ejecutable de escritorio ----------
+  const inst = document.getElementById('inst'); let deferred = null; const RELEASE = 'https://github.com/jorbinogales/solar-smash/releases/latest';
+  const paintInst = () => { inst.innerHTML = (deferred ? '<button class="btn green sm" id="pwa">⬇ INSTALAR APP</button>' : '') + `<a class="btn ghost sm" href="${RELEASE}" target="_blank" rel="noopener">DESCARGAR PARA WINDOWS</a>`; const b = document.getElementById('pwa'); if (b) b.onclick = async () => { deferred.prompt(); await deferred.userChoice; deferred = null; paintInst(); }; };
+  if (!(window.electron || /Electron/.test(navigator.userAgent))) paintInst(); // dentro de la app de escritorio no hace falta
+  addEventListener('beforeinstallprompt', e => { e.preventDefault(); deferred = e; paintInst(); });
+  addEventListener('appinstalled', () => { deferred = null; paintInst(); });
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
   render(true);
 })();

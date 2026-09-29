@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="manifest" href="/manifest.webmanifest"><link rel="icon" href="/icons/icon-192.png"><meta name="theme-color" content="#050f1c">
 <title>Sistema Solar Procedural</title>
 <style>
   :root{--ink:#050f1c;--card:#12304d;--card2:#0d2338;--blue:#4db8ff;--orange:#ff9a3c;--green:#5dff8a;--yellow:#ffd23f;--txt:#e6f6ff;--dim:#8fb8d0}
@@ -48,6 +49,7 @@
   .chk{display:flex;gap:8px;align-items:center;margin-top:8px;color:#cfeaff;font-size:13px;cursor:pointer}.chk input{width:18px;height:18px;accent-color:var(--orange)}
   .err{color:var(--yellow);text-align:center;min-height:18px;font-size:13px}
   .opts{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px}.opt{display:flex;flex-direction:column;gap:10px}.opt p{margin:0;color:var(--dim);font-size:13px;min-height:36px}.opt .btn.go{margin-top:auto}
+  #inst{position:fixed;right:16px;bottom:14px;z-index:5;display:flex;gap:8px;align-items:center}#inst a{text-decoration:none;display:inline-block}
   .wait{text-align:center;color:var(--dim);padding:14px}
   @keyframes pop{from{opacity:0;transform:scale(.85)}to{opacity:1;transform:none}}@keyframes pulse{50%{opacity:.55}}
 </style>
@@ -55,6 +57,7 @@
 <body>
 <canvas id="stars"></canvas>
 <div id="app"><div id="box"></div></div>
+<div id="inst"></div>
 <script src="sysgen.js"></script>
 <script src="menu.js"></script>
 </body>
