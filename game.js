@@ -307,7 +307,7 @@ function parkStep(dt) { // en tierra: desciende sobre las ruedas y sigue el terr
     pk.h += (0.0006 - pk.h) * (1 - Math.exp(-dt * 1.5)); pk.upT = up.clone().addScaledVector(e, -gx).addScaledVector(nn, -gz).normalize(); // se inclina según la pendiente de la ola
     S.shipPos = b.pos.map((c, i) => c + pk.dir[i] * (R + hs + pk.h));
   } else {
-    if (pk.leaving) { pk.t += dt; const u = Math.min(1, pk.t / 5); pk.h = pk.h0 + 0.1 * u * u * (3 - 2 * u); if (pk.t >= 5) { pk.on = false; pk.leaving = false; S.v = 0.02; say('Despegue completado · control de la nave'); } } // sube 100 m solo, con arranque y frenada suaves
+    if (pk.leaving) { pk.t += dt; const u = Math.min(1, pk.t / 1.8); pk.h = pk.h0 + 0.1 * u * u * (3 - 2 * u); if (pk.t >= 1.8) { pk.on = false; pk.leaving = false; S.v = 0.02; say('Despegue completado · control de la nave'); } } // sube 100 m solo, con arranque y frenada suaves
     else pk.h += (ship.gearH - pk.h) * (1 - Math.exp(-dt * 3));
     S.shipPos = b.pos.map((c, i) => c + pk.dir[i] * (planets.surfaceR(b, dR, R) + pk.h));
   }
@@ -801,7 +801,7 @@ function frame(now) {
   lockT = null; let bestA = CONE;
   if (alive) for (const t of targets) {
     const a = Math.acos(Math.min(1, fwd.x * t.dir[0] + fwd.y * t.dir[1] + fwd.z * t.dir[2]));
-    if (a < bestA && t.dist < (t.kind === 'h' ? 50 : RANGE) && !losBlocked(t)) { bestA = a; lockT = t; }
+    if (a < bestA && t.dist < (t.kind === 'h' ? 200 : RANGE) && !losBlocked(t)) { bestA = a; lockT = t; }
   }
   aimT = null; // objetivo bajo la mira para el recuadro de vista previa
   if (alive) {

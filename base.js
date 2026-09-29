@@ -2,7 +2,7 @@
 // Mientras el hangar exista, al morir reapareces en él tras una cuenta atrás; si lo destruyen, quedas derrotado y debes elegir otro planeta.
 // El servidor solo guarda { dueño, planeta, lat, lon, vida }. Las torretas las simula la víctima (igual que el daño de los proyectiles), así no hay retardo.
 const BASE = (() => {
-  const HG = new Map(), PAD_R = 0.055, TW_RANGE = 100, TW_RANGE_ATMO = 100, // las bases detectan y disparan a enemigos hasta 100 km (con o sin atmósfera)
+  const HG = new Map(), PAD_R = 0.055, TW_RANGE = 200, TW_RANGE_ATMO = 200, // las bases detectan y disparan a enemigos hasta 200 km (con o sin atmósfera)
    TW_CD = 0.9, TW_SPD = 1.0, TW_HP = 150, // las torretas disparan a 1 km/s (3 600 km/h): el proyectil viaja y tarda en llegar
    HG_R = 0.075, HG_HPMAX = 600, css = document.createElement('style');
   const TW = [[0.034, 0.034], [-0.034, 0.034], [0.034, -0.034], [-0.034, -0.034]]; // posición local (x, z) de las torretas, km
@@ -346,7 +346,16 @@ const BASE = (() => {
     g2.font = `11px ${MONO}`; g2.fillStyle = '#ffd7cf'; g2.strokeText(fD(dist), p.x, y + sz / 2 + 29); g2.fillText(fD(dist), p.x, y + sz / 2 + 29); g2.restore();
   }
   const tv2 = new THREE.Vector3();
+  // estado de MI base, siempre visible arriba a la izquierda (vida, escudo y torretas)
+  const bh = document.createElement('div'); bh.id = 'bh'; bh.style.cssText = 'position:fixed;left:16px;top:60px;z-index:4;width:210px;background:#00121fcc;border:1px solid #1d4a66;border-radius:10px;padding:6px 10px;color:#dff4ff;font:600 12px ui-monospace,Consolas,monospace;pointer-events:none;display:none;text-shadow:0 0 4px #000'; document.body.append(bh); let bhSig = '';
+  function baseStatus() {
+    const h = HG.get(myId), on = h && started && !loading && P.hp > -1e9; if (!on) { if (bh.style.display !== 'none') bh.style.display = 'none'; return; }
+    const tw = h.tw ? h.tw.filter(v => v > 0).length : 4, sg = [Math.round(h.hp), Math.round(h.sh), tw, h.st.hpMax, h.st.shMax].join(); if (sg === bhSig) return; bhSig = sg;
+    const f = Math.max(0, Math.min(1, h.hp / h.st.hpMax)), bar = (v, c) => `<div style="height:7px;background:#ffffff1f;border-radius:4px;overflow:hidden;margin:2px 0 4px"><i style="display:block;height:100%;width:${Math.max(0, Math.min(100, v * 100))}%;background:${c}"></i></div>`;
+    bh.innerHTML = `<div style="display:flex;justify-content:space-between"><span style="color:#8fb8d0;letter-spacing:.12em">MI BASE</span><b style="color:${f > 0.35 ? '#5dff8a' : '#ff5a4a'}">${Math.round(h.hp)}/${h.st.hpMax}</b></div>${bar(f, f > 0.35 ? '#5dff8a' : '#ff5a4a')}${h.st.shMax ? `<div style="display:flex;justify-content:space-between"><span style="color:#8fb8d0">ESCUDO</span><b>${Math.round(h.sh)}/${h.st.shMax}</b></div>${bar(h.sh / h.st.shMax, '#4db8ff')}` : ''}<div style="color:#8fb8d0">TORRETAS <b style="color:#fff">${tw}/4</b></div>`; bh.style.display = 'block';
+  }
   function hud(now) {
+    baseStatus();
     const W = hc.width, H = hc.height; g2.save(); g2.textAlign = 'center';
     if (P.hp > 0 && !S.foot.on) { // enemigos: hangares y naves siempre señalados en rojo
       for (const h of HG.values()) if (h.o !== myId && h.grp) { const w = worldOf(h), dd = w.map((c, i) => c - S.pos[i]), dl = Math.hypot(...dd); if (dl > 0 && !losBlocked({ kind: 'h', dir: dd.map(c => c / dl), dist: dl })) marker('hangar', w, dl, 'HANGAR ' + h.nm.toUpperCase(), W, H, now); } // sin planeta de por medio
