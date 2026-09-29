@@ -33,7 +33,7 @@ const scene = new THREE.Scene(); scene.fog = new THREE.FogExp2(0x000000, 0); // 
 const camera = new THREE.PerspectiveCamera(65, innerWidth / innerHeight, 0.0005, 3e7);
 addEventListener('resize', () => { renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5)); renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); });
 
-scene.add(new THREE.AmbientLight(0xffffff, 0.22));
+const ambLight = new THREE.AmbientLight(0xffffff, 0.22); scene.add(ambLight);
 const sunLight = new THREE.DirectionalLight(0xffffff, 1.6); scene.add(sunLight);
 
 // cielo: estrellas con magnitud y color espectral + banda de la Vía Láctea (space.js); siguen a la cámara
@@ -463,14 +463,14 @@ function flightInstr(W, H, now) {
   const g = Math.max(0, planets.info.on && planets.info.name === nb.n ? planets.info.ground : na), dv = sub(S.pos, nb.pos), dl = len(dv), up = [dv[0] / dl, dv[1] / dl, dv[2] / dl];
   _fi.f.set(0, 0, -1).applyQuaternion(S.q); _fi.r.set(1, 0, 0).applyQuaternion(S.q); _fi.u.set(0, 1, 0).applyQuaternion(S.q);
   const sinP = Math.max(-1, Math.min(1, _fi.f.x * up[0] + _fi.f.y * up[1] + _fi.f.z * up[2])), pitch = Math.asin(sinP), roll = Math.atan2(_fi.r.x * up[0] + _fi.r.y * up[1] + _fi.r.z * up[2], _fi.u.x * up[0] + _fi.u.y * up[1] + _fi.u.z * up[2]);
-  const vz = S.ve * sinP, tti = vz < -0.03 && g > 0 && !S.park.on ? g / -vz : Infinity, thr = 8 + Math.min(12, S.ve * 1.2); // más rápido = avisa antes
+  const vz = S.ve * sinP, tti = vz < -0.03 && g > 0 && !S.park.on ? g / -vz : Infinity, thr = 2.5 + Math.min(4.5, S.ve * 0.3); // más rápido = avisa antes (hasta 7 s); apuntar al planeta desde lejos no la activa
   const cx = W - 96, cy = H * 0.5 + 30, R = 52;
   g2.save(); g2.textAlign = 'center';
   g2.beginPath(); g2.arc(cx, cy, R, 0, 7); g2.save(); g2.clip(); g2.translate(cx, cy); g2.rotate(-roll); const py = pitch * 180 / Math.PI * 1.3;
   g2.fillStyle = '#2a6aa8'; g2.fillRect(-90, -200 + py, 180, 200); g2.fillStyle = '#7a5530'; g2.fillRect(-90, py, 180, 200); g2.fillStyle = '#ffffffcc'; g2.fillRect(-90, py - 1, 180, 2);
   g2.strokeStyle = '#ffffff99'; g2.lineWidth = 1; g2.font = `9px ${MONO}`; g2.fillStyle = '#ffffffcc'; for (let a = -30; a <= 30; a += 10) { if (!a) continue; const y = py - a * 1.3, w = a % 20 ? 10 : 18; g2.beginPath(); g2.moveTo(-w, y); g2.lineTo(w, y); g2.stroke(); if (!(a % 20)) g2.fillText(Math.abs(a), w + 10, y + 3); }
   g2.restore();
-  g2.strokeStyle = tti < thr && vz < -0.12 ? '#ff3b30' : '#8fd8ff'; g2.lineWidth = 3; g2.beginPath(); g2.arc(cx, cy, R, 0, 7); g2.stroke();
+  g2.strokeStyle = tti < thr && vz < -0.3 ? '#ff3b30' : '#8fd8ff'; g2.lineWidth = 3; g2.beginPath(); g2.arc(cx, cy, R, 0, 7); g2.stroke();
   g2.strokeStyle = '#ffd23f'; g2.lineWidth = 3; g2.beginPath(); g2.moveTo(cx - 30, cy); g2.lineTo(cx - 10, cy); g2.lineTo(cx - 5, cy + 6); g2.moveTo(cx + 30, cy); g2.lineTo(cx + 10, cy); g2.lineTo(cx + 5, cy + 6); g2.moveTo(cx, cy - 3); g2.lineTo(cx, cy + 1); g2.stroke(); // avión fijo
   const deg = Math.round(pitch * 180 / Math.PI), mine = typeof BASE !== 'undefined' ? BASE.mine() : null, bd = mine ? len(sub(BASE.worldOf(mine), S.pos)) : null;
   g2.font = `bold 12px ${MONO}`; g2.fillStyle = '#e6f6ff'; g2.strokeStyle = '#000'; g2.lineWidth = 3;
@@ -478,7 +478,7 @@ function flightInstr(W, H, now) {
   if (bd !== null) lines.push([`BASE ${fD(bd)}`, '#5dff8a']); if (tti < 60) lines.push([`IMPACTO ${tti.toFixed(1)} s`, tti < thr ? '#ff5a4a' : '#ffd23f']);
   lines.forEach(([t, c], i) => { g2.fillStyle = c; g2.strokeText(t, cx, cy + R + 18 + i * 15); g2.fillText(t, cx, cy + R + 18 + i * 15); });
   g2.restore();
-  if (tti < thr && vz < -0.12) crashAlert(W, H, now, tti); // aterrizajes suaves (< 430 km/h de caída) no disparan la alerta
+  if (tti < thr && vz < -0.3) crashAlert(W, H, now, tti); // aterrizajes suaves (< 430 km/h de caída) no disparan la alerta
 }
 function crashAlert(W, H, now, tti) { // triángulo de peligro parpadeante en el centro de la pantalla; parpadea y pita más rápido cuanto menos falta
   const fast = tti < 3, ph = now / (fast ? 90 : 170), a = 0.5 + 0.5 * Math.sin(ph), x = W / 2, y = H * 0.3, s = 62 * (1 + 0.06 * Math.sin(ph));
@@ -807,7 +807,11 @@ function frame(now) {
 
   planets.update(S.pos, sunLight.position, fwd);
   const sky = planets.sky(S.pos, sunLight.position); renderer.setClearColor(sky.color); scene.fog.density = 0; // sin niebla (ni de suelo ni de cielo): se distingue el terreno del cielo
-  scene.fog.color.copy(sky.color); sunLight.intensity = 1.6 - 0.5 * sky.f; // cielo atmosférico (el sol se suaviza bajo la atmósfera)
+  scene.fog.color.copy(sky.color); { // cielo atmosférico (el sol se suaviza bajo la atmósfera) y, sobre mundos muy claros (hielo, arena blanca), menos luz para que se distinga el suelo
+    const fbb = planets.info.on ? bodies.find(x => x.n === planets.info.name) : null; let dim = 1;
+    if (fbb) { if (fbb.lum === undefined) { const a = new THREE.Color(fbb.c1), b2 = new THREE.Color(fbb.c2), L = c => 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b; fbb.lum = (L(a) + L(b2)) / 2; } dim = 1 - (0.12 + 0.45 * Math.max(0, Math.min(1, (fbb.lum - 0.25) / 0.35))) * Math.max(0, Math.min(1, 1 - planets.info.ground / 250)); }
+    sunLight.intensity = (1.6 - 0.5 * sky.f) * dim; ambLight.intensity = 0.22 * (0.6 + 0.4 * dim);
+  }
   SKY.set(sky.stars);
   // combate: respawn, disparos, proyectiles, remotos y cascos
   if (P.hp <= 0 && now >= P.deadUntil && (typeof BASE === 'undefined' || BASE.canRespawn())) { spawn(); P.cause = ''; P.heat = 0; Object.assign(P, { hp: P.hpMax, sh: P.shMax, plasma: MAXA.plasma, missiles: MAXA.missiles }); S.v = Math.min(300, P.vmax); Object.assign(S.warp, { on: false, bar: P.warpMax, lock: false }); }

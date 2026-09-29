@@ -2,7 +2,8 @@
 // Mientras el hangar exista, al morir reapareces en él tras una cuenta atrás; si lo destruyen, quedas derrotado y debes elegir otro planeta.
 // El servidor solo guarda { dueño, planeta, lat, lon, vida }. Las torretas las simula la víctima (igual que el daño de los proyectiles), así no hay retardo.
 const BASE = (() => {
-  const HG = new Map(), PAD_R = 0.055, TW_RANGE = 200, TW_RANGE_ATMO = 200, // las bases detectan y disparan a enemigos hasta 200 km (con o sin atmósfera)
+  const HG = new Map(), BK = 3, PAD_R = 0.055, // BK: las bases se ven y miden 3 veces más que el modelo base (km)
+   TW_RANGE = 200, TW_RANGE_ATMO = 200, // las bases detectan y disparan a enemigos hasta 200 km (con o sin atmósfera)
    TW_CD = 0.9, TW_SPD = 1.0, TW_HP = 150, // las torretas disparan a 1 km/s (3 600 km/h): el proyectil viaja y tarda en llegar
    HG_R = 0.075, HG_HPMAX = 600, css = document.createElement('style');
   const TW = [[0.034, 0.034], [-0.034, 0.034], [0.034, -0.034], [-0.034, -0.034]]; // posición local (x, z) de las torretas, km
@@ -32,7 +33,7 @@ const BASE = (() => {
   // ---------- emplazamiento: tierra firme, sin lava ni agua y lo más llana posible (la plataforma cubre el resto) ----------
   function pts(b, dir) { // centro + 2 anillos de puntos de la plataforma
     const d = new THREE.Vector3(...dir), e = new THREE.Vector3(0, 1, 0).cross(d); if (e.lengthSq() < 1e-6) e.set(1, 0, 0); e.normalize(); const n = d.clone().cross(e), out = [d.clone().multiplyScalar(b.R)];
-    for (const rad of [0.028, PAD_R]) for (let i = 0; i < 6; i++) { const a = i * Math.PI / 3; out.push(d.clone().multiplyScalar(b.R).addScaledVector(e, Math.cos(a) * rad).addScaledVector(n, Math.sin(a) * rad)); }
+    for (const rad of [0.028 * BK, PAD_R * BK]) for (let i = 0; i < 6; i++) { const a = i * Math.PI / 3; out.push(d.clone().multiplyScalar(b.R).addScaledVector(e, Math.cos(a) * rad).addScaledVector(n, Math.sin(a) * rad)); }
     return out;
   }
   function padInfo(b, dir) { // { ok, range, top }: alturas del terreno bajo la plataforma (mismo cálculo en todos los clientes)
@@ -45,7 +46,7 @@ const BASE = (() => {
     let best = null;
     for (let i = 0; i < 500; i++) {
       const la = Math.asin(Math.random() * 1.7 - 0.85), lo = Math.random() * 6.2832 - 3.1416, info = padInfo(b, dirOf(la, lo));
-      if (!info.ok) continue; if (!best || info.range < best.range) best = { la, lo, range: info.range }; if (info.range < 0.0025) break;
+      if (!info.ok) continue; if (!best || info.range < best.range) best = { la, lo, range: info.range }; if (info.range < 0.006) break;
     }
     return best;
   }
@@ -93,6 +94,7 @@ const BASE = (() => {
     for (let i = 0; i < 4; i++) { const a = i * PI / 2 + PI / 4; C.add(hDark, box(0.0006, 0.0140, 0.0010), [Math.cos(a) * 0.0031, 0.0143, Math.sin(a) * 0.0031], [0, -a, 0]); } // nervios de la columna
     K.build(t); C.build(col); t.add(col); return { g: t, col };
   }
+  let _bt = null; const beaconTex = () => _bt || (_bt = (() => { const c = document.createElement('canvas'); c.width = c.height = 64; const x = c.getContext('2d'), gr = x.createRadialGradient(32, 32, 0, 32, 32, 32); gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.2, 'rgba(255,255,255,0.6)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); x.fillStyle = gr; x.fillRect(0, 0, 64, 64); return new THREE.CanvasTexture(c); })());
   function build(h) {
     const g = new THREE.Group(), col = h.o === myId ? mySpec.c : (() => { try { return JSON.parse(remotes.get(h.o).spk).c; } catch { return 0xff6a3c; } })(), glow = new THREE.MeshBasicMaterial({ color: col });
     scenery(g, glow, 0.004 + h.info.range);
@@ -102,6 +104,7 @@ const BASE = (() => {
     });
     setHeads(h);
     h.dome = new THREE.Mesh(new THREE.SphereGeometry(0.095, 24, 16), new THREE.MeshBasicMaterial({ color: 0x66ccff, transparent: true, opacity: 0.12, depthWrite: false, side: THREE.DoubleSide })); h.dome.position.y = 0.01; h.dome.visible = false; g.add(h.dome);
+    h.beacon = new THREE.Sprite(new THREE.SpriteMaterial({ map: beaconTex(), color: h.o === myId ? 0x4db8ff : 0xff4030, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, sizeAttenuation: false })); h.beacon.scale.set(0.05, 0.05, 1); h.beacon.visible = false; scene.add(h.beacon);
     g.visible = false; scene.add(g); h.grp = g; h.q = new THREE.Quaternion().setFromUnitVectors(Y, new THREE.Vector3(...h.dir)); h.tcd = 0;
   }
   function model(ts, tw, shield, col) { // maqueta para el menú (pestaña BASE): mismo modelo que el del juego (unidades km), con las torretas apuntando hacia arriba y afuera
@@ -154,21 +157,21 @@ const BASE = (() => {
   }
   function setHeads(h) { if (!h.towers) return; h.towers.forEach((t, i) => { if (t.style === h.ts[i]) return; t.style = h.ts[i]; t.g.remove(t.head); t.head.traverse(o => { if (o.geometry) o.geometry.dispose(); }); const nh = styleHead(h.ts[i]); nh.position.y = HEAD_Y; nh.visible = t.head.visible; t.g.add(nh); t.head = nh; }); }
   const worldOf = h => { const b = bodyBy(h.b), r = b.R + h.info.top; return b.pos.map((c, i) => c + h.dir[i] * r); };
-  const localToWorld = (h, x, y, z) => { const w = worldOf(h), v = new THREE.Vector3(x, y, z).applyQuaternion(h.q); return [w[0] + v.x, w[1] + v.y, w[2] + v.z]; };
+  const localToWorld = (h, x, y, z) => { const w = worldOf(h), v = new THREE.Vector3(x * BK, y * BK, z * BK).applyQuaternion(h.q); return [w[0] + v.x, w[1] + v.y, w[2] + v.z]; };
 
   function applyTw(h, tw, silent) { // vida de las 4 torretas: al caer a 0 la torreta queda destruida (sin cabeza ni columna) y deja de disparar
     if (!tw || !h.towers) return;
     tw.forEach((v, i) => { const t = h.towers[i]; if (!t) return; const was = h.tw ? h.tw[i] : TW_HP; if (was > 0 && v <= 0 && !silent && h.grp.visible) boom(localToWorld(h, t.g.position.x, HEAD_Y * 0.8, t.g.position.z), 0.03); t.head.visible = v > 0; t.col.visible = v > 0; });
     h.tw = tw.slice();
   }
-  function drop(h) { if (h.grp) { scene.remove(h.grp); h.grp.traverse(o => { if (o.geometry) o.geometry.dispose(); }); } planets.removePad(h.b, h.dir); }
+  function drop(h) { if (h.beacon) { scene.remove(h.beacon); h.beacon.material.dispose(); } if (h.grp) { scene.remove(h.grp); h.grp.traverse(o => { if (o.geometry) o.geometry.dispose(); }); } planets.removePad(h.b, h.dir); }
   function sync(list) { // lista de hangares del servidor
     const seen = new Set();
     for (const e of list) {
       seen.add(e.o); let h = HG.get(e.o);
       if (!h) {
         const b = bodyBy(e.b); if (!b) continue; const dir = dirOf(e.la, e.lo), info = padInfo(b, dir);
-        h = { o: e.o, nm: e.nm, b: e.b, la: e.la, lo: e.lo, hp: e.hp, sh: e.sh || 0, up: e.up || {}, st: baseStats(e.up || {}), ts: (e.ts || ['plasma', 'plasma', 'plasma', 'plasma']).slice(), dir, info, tw: null, bot: !!e.bot }; HG.set(e.o, h); planets.addPad(e.b, dir, PAD_R, info.top); build(h); applyTw(h, e.tw || [h.st.twMax, h.st.twMax, h.st.twMax, h.st.twMax], true);
+        h = { o: e.o, nm: e.nm, b: e.b, la: e.la, lo: e.lo, hp: e.hp, sh: e.sh || 0, up: e.up || {}, st: baseStats(e.up || {}), ts: (e.ts || ['plasma', 'plasma', 'plasma', 'plasma']).slice(), dir, info, tw: null, bot: !!e.bot }; HG.set(e.o, h); planets.addPad(e.b, dir, PAD_R * BK, info.top); build(h); applyTw(h, e.tw || [h.st.twMax, h.st.twMax, h.st.twMax, h.st.twMax], true);
         if (e.o === myId) { hadHangar = true; defeated = false; if (LB.phase !== 'lobby' && !started) startGame(); else if (pendingSpawn) { pendingSpawn = false; if (P.hp > 0) { spawn(); P.deadUntil = 0; } } }
       } else { if (e.o === myId && lastHp !== null && e.hp < lastHp - 0.5 && performance.now() - lastAlert > 4000) { lastAlert = performance.now(); say('¡TU HANGAR ESTÁ BAJO ATAQUE!'); } h.hp = e.hp; h.sh = e.sh || 0; h.up = e.up || h.up; h.st = baseStats(h.up); h.nm = e.nm; h.bot = !!e.bot; applyTw(h, e.tw); if (e.ts && e.ts.some((v, i) => v !== h.ts[i])) { h.ts = e.ts.slice(); setHeads(h); } }
       if (e.o === myId) lastHp = e.hp;
@@ -292,8 +295,9 @@ const BASE = (() => {
     for (const h of HG.values()) {
       if (!h.grp) continue; const w = worldOf(h), d = Math.hypot(w[0] - S.pos[0], w[1] - S.pos[1], w[2] - S.pos[2]);
       h.grp.visible = d < 300; h.d = d;
+      if (h.beacon) { const bw = [w[0] + h.dir[0] * 3, w[1] + h.dir[1] * 3, w[2] + h.dir[2] * 3], bv = view(bw); h.beacon.position.set(bv.x, bv.y, bv.z); h.beacon.visible = d > 6; } // a 3 km sobre la base: no la tapa el suelo
       if (h.grp.visible && h.dome) { h.dome.visible = h.sh > 0; h.dome.material.opacity = 0.09 + 0.05 * Math.sin(now / 400); }
-      if (h.grp.visible) { const v = view(w); h.grp.position.set(v.x, v.y, v.z); h.grp.quaternion.copy(h.q); h.grp.scale.setScalar(v.s); }
+      if (h.grp.visible) { const v = view(w); h.grp.position.set(v.x, v.y, v.z); h.grp.quaternion.copy(h.q); h.grp.scale.setScalar(v.s * BK); }
       if (h.grp.visible && h.towers) for (const [ti, t] of h.towers.entries()) idle(t, ti, h.o === myId ? null : h, now); // vigilancia: mientras no disparan, miran de un lado a otro
       if (h.o === myId || !h.towers) continue;
       let tgt = null, tvel = 0, tq = S.q, td = d, rng = TW_RANGE, tid = myId; // las torretas apuntan a mí o a mi bot: cada cliente simula las torretas contra sus propios objetivos
@@ -309,17 +313,17 @@ const BASE = (() => {
         const dir = [ap[0] - mp[0], ap[1] - mp[1], ap[2] - mp[2]], l = Math.hypot(...dir); if (l < 0.01) continue; dir[0] /= l; dir[1] /= l; dir[2] /= l;
         if (dir[0] * h.dir[0] + dir[1] * h.dir[1] + dir[2] * h.dir[2] < 0.03 || !clearShot(bb, mp, ap)) { t.cd = 0.25; continue; } // solo disparan hacia arriba y nunca a través del terreno o del planeta
         const sty = TOWER_STYLES[h.ts[ti]] || TOWER_STYLES.plasma, dmg = sty.dmg * h.st.dmgMul, key = `${myId ?? 0}:t${++seq}`, life = Math.min(40, l / sty.spd * 1.4 + 2), kind = sty.homing ? 'm' : 'p', tg = sty.homing ? { k: 'p', id: tid } : null; t.cd = sty.cd * (0.8 + 0.4 * Math.random());
-        const mz = mp.map((c, i) => c + dir[i] * (MUZ[h.ts[ti]] ?? 0.012)); spawnProj(-h.o, key, kind, mz, dir, tg, dmg, { spd: sty.spd, col: sty.col, life }); send({ t: 'fire', key, kind, pos: mz, dir, tgt: tg, dmg, tw: 1, spd: sty.spd, rb: S.refB, rp: S.refB >= 0 ? sub(mz, bodies[S.refB].pos) : null }); sfx(kind, l); puff(mz, 0.004, sty.col, 0.15, 0.004);
+        const mz = mp.map((c, i) => c + dir[i] * (MUZ[h.ts[ti]] ?? 0.012) * BK); spawnProj(-h.o, key, kind, mz, dir, tg, dmg, { spd: sty.spd, col: sty.col, life }); send({ t: 'fire', key, kind, pos: mz, dir, tgt: tg, dmg, tw: 1, spd: sty.spd, rb: S.refB, rp: S.refB >= 0 ? sub(mz, bodies[S.refB].pos) : null }); sfx(kind, l); puff(mz, 0.004, sty.col, 0.15, 0.004);
       }
     }
   }
   function hit(old, pos, p) { // proyectiles míos o de mis bots contra el hangar de otro jugador (los bots solo atacan a humanos)
     for (const h of HG.values()) {
       if (h.o === myId || (p.owner >= 2000 && h.o >= 1000)) continue; const w = worldOf(h); if (Math.abs(w[0] - pos[0]) > 6 || Math.abs(w[1] - pos[1]) > 6 || Math.abs(w[2] - pos[2]) > 6) continue;
-      const c = [w[0] + h.dir[0] * 0.01, w[1] + h.dir[1] * 0.01, w[2] + h.dir[2] * 0.01];
-      if (h.sh > 0 && segDist(old, pos, c) < 0.095) { send({ t: 'hh', o: h.o, dmg: p.dmg }); h.sh -= p.dmg; boom(pos, 0.012); return true; } // el escudo de la base absorbe las balas
-      if (h.towers && h.tw) for (const [ti, t] of h.towers.entries()) { if (!(h.tw[ti] > 0)) continue; const tp = localToWorld(h, t.g.position.x, HEAD_Y * 0.8, t.g.position.z); if (segDist(old, pos, tp) < 0.011) { send({ t: 'hh', o: h.o, dmg: p.dmg, tw: ti }); h.tw[ti] -= p.dmg; boom(pos, 0.012); return true; } }
-      if (segDist(old, pos, c) < HG_R) { send({ t: 'hh', o: h.o, dmg: p.dmg }); h.hp -= p.dmg; boom(pos, p.kind === 'm' ? 0.04 : 0.01); return true; }
+      const c = [w[0] + h.dir[0] * 0.01 * BK, w[1] + h.dir[1] * 0.01 * BK, w[2] + h.dir[2] * 0.01 * BK];
+      if (h.sh > 0 && segDist(old, pos, c) < 0.095 * BK) { send({ t: 'hh', o: h.o, dmg: p.dmg }); h.sh -= p.dmg; boom(pos, 0.012); return true; } // el escudo de la base absorbe las balas
+      if (h.towers && h.tw) for (const [ti, t] of h.towers.entries()) { if (!(h.tw[ti] > 0)) continue; const tp = localToWorld(h, t.g.position.x, HEAD_Y * 0.8, t.g.position.z); if (segDist(old, pos, tp) < 0.011 * BK) { send({ t: 'hh', o: h.o, dmg: p.dmg, tw: ti }); h.tw[ti] -= p.dmg; boom(pos, 0.012); return true; } }
+      if (segDist(old, pos, c) < HG_R * BK) { send({ t: 'hh', o: h.o, dmg: p.dmg }); h.hp -= p.dmg; boom(pos, p.kind === 'm' ? 0.04 : 0.01); return true; }
     }
     return false;
   }
@@ -362,7 +366,7 @@ const BASE = (() => {
       for (const r of remotes.values()) if (r.hp > 0 && r.apos) { const dd = r.apos.map((c, i) => c - S.pos[i]), dl = r.dist ?? Math.hypot(...dd), hl = Math.hypot(...dd); if (hl > 0 && !losBlocked({ kind: 'p', dir: dd.map(c => c / hl), dist: hl })) marker('ship', r.apos, dl, (r.name || 'PILOTO').toUpperCase(), W, H, now); }
     }
     for (const h of HG.values()) { // barras de vida de las torretas de un hangar enemigo cercano
-      if (h.o === myId || !h.tw || !h.towers || !h.grp.visible || h.d > 2.5) continue;
+      if (h.o === myId || !h.tw || !h.towers || !h.grp.visible || h.d > 2.5 * BK) continue;
       h.towers.forEach((t, i) => { const p = localToWorld(h, t.g.position.x, HEAD_Y + 0.008, t.g.position.z); tv2.set(p[0] - S.pos[0], p[1] - S.pos[1], p[2] - S.pos[2]).project(camera); if (tv2.z >= 1 || Math.abs(tv2.x) > 1.05 || Math.abs(tv2.y) > 1.05) return;
         const x = (tv2.x * 0.5 + 0.5) * W, y = (-tv2.y * 0.5 + 0.5) * H, f = Math.max(0, h.tw[i] / h.st.twMax); g2.fillStyle = 'rgba(0,0,0,0.6)'; g2.fillRect(x - 21, y - 4, 42, 8); g2.fillStyle = f > 0.35 ? '#ff5a4a' : '#ffb347'; g2.fillRect(x - 20, y - 3, 40 * f, 6);
         g2.font = `9px ${MONO}`; g2.fillStyle = '#ffd7cf'; g2.fillText(f > 0 ? 'TORRETA' : 'DESTRUIDA', x, y - 8); });
