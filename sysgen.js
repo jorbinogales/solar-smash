@@ -72,8 +72,11 @@
   const ZONE_THEME = { oro: ['Cinturón Áureo', 'Veta Dorada'], plata: ['Nube Argéntea', 'Campo de Plata'], cobre: ['Escombros Cobrizos', 'Deriva de Cobre'], diamante: ['Cúmulo Diamantino', 'Geoda Estelar'], piedra: ['Pedregal', 'Campo de Rocas'], agua: ['Cometas de Hielo', 'Nube Helada'] };
   const ZONE_BUDGET = { agua: [250, 400], piedra: [300, 500], cobre: [150, 250], plata: [90, 150], oro: [60, 100], diamante: [20, 40] }; // recurso dominante principal; el secundario lleva la mitad
   const ZONE_SEC_W = { agua: 3, piedra: 3, cobre: 3, plata: 2, oro: 1.2, diamante: 0.6 }; // probabilidad relativa de cada recurso como dominante secundario
-  function genZones(sys) { // UN cúmulo por cada zona de control reclamable (todas menos la solar): fijo respecto a la estrella (ancla 0), dentro de su sector y lejos de las órbitas
-    const r = mulberry((((sys.seed >>> 0) || 1) ^ 0x2f6b1d3) >>> 0 || 7), RT = Object.keys(ZONE_BUDGET), czs = genControlZones(sys).filter(z => !z.noClaim), zones = [];
+  // UN cúmulo por cada zona de control reclamable SIN PLANETA (ni la solar ni el sector que ocupa un planeta principal en t0, ni el siguiente al que llegará en 12 h), fijo respecto a la estrella (ancla 0),
+  // dentro de su sector y lejos de las órbitas. t0 (s de reloj real): instante común de la sala (el servidor lo fija al crearla y lo envía a los clientes en seed.js como T0)
+  function genZones(sys, t0 = 0) {
+    const all = genControlZones(sys), withP = new Set(); sys.bodies.forEach((b, i) => { if (b.k !== 'sun' && !b.parent) for (const dt of [0, 43200]) withP.add(czAt(sys, all, bodyPosAt(sys, i, t0 + dt))); });
+    const r = mulberry((((sys.seed >>> 0) || 1) ^ 0x2f6b1d3) >>> 0 || 7), RT = Object.keys(ZONE_BUDGET), czs = all.filter(z => !z.noClaim && !withP.has(z.id)), zones = [];
     const mains = sys.bodies.filter(b => b.k !== 'sun' && !b.parent), orbs = mains.map(b => b.a * DS), f = Math.max(0.15, (mains.length + 3) / czs.length * 1.15); // f: el presupuesto TOTAL queda algo mayor que el de antes (nPlanetas + 3 cúmulos grandes) pero repartido entre muchos más
     const bud = (t, k) => Math.max(5, Math.round(k * f * (ZONE_BUDGET[t][0] + r() * (ZONE_BUDGET[t][1] - ZONE_BUDGET[t][0])) / 5) * 5);
     const order = RT.slice(); for (let i = order.length - 1; i > 0; i--) { const j = (r() * (i + 1)) | 0; [order[i], order[j]] = [order[j], order[i]]; }
@@ -120,6 +123,7 @@
     sectors: [4, 4, 5, 5, 6, 6, 6, 6], outerSectors: 6,
     starKill: { k: 3, tMax: 8, tMin: 1.5, reset: 1 }, // ZONA LETAL de la estrella: radio = máx(R★·(1+k), radio del Núcleo estelar); cuenta atrás clamp(tMax·d_superficie/(R_letal−R★), tMin, tMax) s; fuera se cancela tras `reset` s
     arrive: 6, alarmCd: 20, // s que tarda en LLEGAR una unidad desplegada (sale del viaje de luz) · s mínimos entre dos alarmas de un mismo buque
+    presence: { W: 1, F: 0.5 }, // presencia para reclamar zonas: un jugador dentro = 1 · cada buque desplegado = 1 · cada escuadrón de cazas = 0,5 (cuentan aunque su dueño no esté)
     gain: { n: 1, every: 10 }, // recursos pasivos: cada zona reclamada da a su dueño n unidades de su recurso cada `every` s (no salen de los cúmulos) // sectores de cada anillo de planeta (de dentro afuera) y de los Confines
     // buque de guerra (modelo de 3,46 km × scale = ~14 km); near: km junto a él que cuentan como «en base». Es la unidad de MÁS alcance del juego (cubre grandes espacios):
     // range 6000 km de detección y disparo (satélite 1200, cazas 3000, torres de base mucho menos) · spd 300 km/s (el servidor admite hasta 500) → a 6000 km tarda 20 s y el
@@ -150,7 +154,7 @@
     if (b.parent) { const o = bodyPosAt(sys, sys.bodies.findIndex(x => x.n === b.parent), t); return [o[0] + b.a * Math.cos(th), 0, o[2] + b.a * Math.sin(th)]; }
     return [b.a * DS * Math.cos(th), 0, b.a * DS * Math.sin(th)];
   }
-  const add3 = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]], angU = (x, z, a0) => ((Math.atan2(z, x) - a0) % TAU + TAU) % TAU; // ángulo relativo a a0 en [0, 2π)
+  const add3 = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]], d3 = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]), angU = (x, z, a0) => ((Math.atan2(z, x) - a0) % TAU + TAU) % TAU; // ángulo relativo a a0 en [0, 2π)
   function czAt(sys, zs, pos) { // zona que contiene ese punto: SIEMPRE una (anillo por el radio en el plano x-z, sector por el ángulo; se ignora y)
     const R = zs.rings, rr = Math.hypot(pos[0], pos[2]); let k = 0; while (k < R.length - 1 && rr >= R[k].r1) k++;
     const g = R[k]; return g.n === 1 ? g.first : g.first + Math.min(g.n - 1, Math.floor(angU(pos[0], pos[2], g.a0) / (TAU / g.n)) || 0);
@@ -166,6 +170,10 @@
   // at 'p': junto al planeta de la zona. Si el planeta tiene bases, sobre la vertical de la base (la mía; si solo hay rivales, la rival; con ambas, la más cercana a myPos),
   //   al borde de la exosfera (6·H + 30 km; sin atmósfera, 30 % del radio + 30 km), ANCLADO AL PLANETA (viaja con él), en abanico de 60 km (> 3 × los 14 km del buque).
   //   Sin bases: hacia fuera de su órbita (anclado a la estrella). · at 'c' (defecto): junto al cúmulo de la zona (anclado a la estrella).
+  function czOrbitPoint(sys, z, idx) { // punto de reserva en un sector sin cúmulo ni planeta: en el ángulo central del sector, fuera del margen de la órbita de su planeta (anclado a la estrella)
+    const b = sys.bodies.find(x => x.n === z.planet), am = z.a0 + z.da / 2 + ((idx % 8) - 3.5) * 0.02, rr = b ? b.a * DS + WARCFG.orbitClear + 20000 + Math.floor(idx / 8) * 6000 : czCenter(z)[0] ? Math.hypot(...czCenter(z)) : z.r0 * 1.2;
+    const o = [Math.round(rr * Math.cos(am)), 0, Math.round(rr * Math.sin(am))]; return { a: 0, off: o, abs: o };
+  }
   function czDeployPoint(sys, czs, zones, zi, idx, at, t, bases, me, myPos) {
     const z = czs[zi]; if (!z || z.noClaim) return null; const j = idx % 8, sg = (j % 2 ? 1 : -1) * Math.ceil(j / 2); t = t || 0;
     if (at === 'p') { const bi = sys.bodies.findIndex((b, i) => b.k !== 'sun' && !b.parent && czAt(sys, czs, bodyPosAt(sys, i, t)) === zi); if (bi >= 0) {
@@ -180,7 +188,8 @@
       }
       const rr = Math.hypot(P[0], P[2]) || 1, ux = P[0] / rr, uz = P[2] / rr, D = WARCFG.orbitClear + 20000 + Math.floor(idx / 8) * 6000, L = sg * 6000, o = [Math.round(P[0] + ux * D - uz * L), 0, Math.round(P[2] + uz * D + ux * L)];
       return { a: 0, off: o, abs: o }; } }
-    const cl = zones.find(q => q.cz === zi), cc = cl ? cl.off : czCenter(z), rad = cl ? cl.radius : 0;
+    const cl = zones.find(q => q.cz === zi); if (!cl) return at !== 'p' ? czDeployPoint(sys, czs, zones, zi, idx, 'p', t, bases, me, myPos) : czOrbitPoint(sys, z, idx); // zona sin cúmulo: junto a su planeta; si aún no ha llegado a ella, hacia fuera de la órbita de su anillo
+    const cc = cl ? cl.off : czCenter(z), rad = cl ? cl.radius : 0;
     const a = Math.atan2(-cc[2], -cc[0]) + sg * 0.8, d = rad * 1.4 + 2500 + Math.floor(idx / 8) * 3000, o = [Math.round(cc[0] + Math.cos(a) * d), 0, Math.round(cc[2] + Math.sin(a) * d)]; // del lado de la estrella y abriéndose a ambos lados
     return { a: 0, off: o, abs: o };
   }
@@ -191,10 +200,11 @@
     return '';
   }
   // ¿Se puede desplegar en la zona zi en el punto off (km, ABSOLUTO respecto a la estrella, en el plano orbital)? '' = sí; si no, el motivo
-  function czCheck(sys, zs, zi, off, me, owner, hangars, ships, t, anch) { // off: posición ABSOLUTA · anch > 0: desplegado junto a ese planeta (anclado a él): sin la regla de órbita, fuera de su atmósfera
+  function czCheck(sys, zs, zi, off, me, owner, hangars, ships, t, anch, kind) { // kind: 'W' buque y 'F' cazas también en zonas SIN DUEÑO (sus unidades la reclaman) · 'S' satélite solo en zona propia // off: posición ABSOLUTA · anch > 0: desplegado junto a ese planeta (anclado a él): sin la regla de órbita, fuera de su atmósfera
     const z = zs[zi]; if (!z || !Array.isArray(off) || off.length !== 3 || !off.every(Number.isFinite) || Math.abs(off[1]) > 5000) return 'Zona no válida';
     if (z.noClaim) return 'Zona solar: no se puede desplegar';
-    if (owner !== me) return 'Zona no reclamada por ti: reclámala primero (permanece dentro)';
+    if (owner && owner !== me) return 'Zona de otro jugador: no se puede desplegar';
+    if (!owner && kind === 'S') return 'Los satélites solo en zonas reclamadas por ti';
     if (czAt(sys, zs, off) !== zi) return 'Fuera de la zona';
     const rr = Math.hypot(off[0], off[2]); if (rr < WARCFG.starClear) return 'Demasiado cerca de la estrella';
     if (anch > 0) { const b = sys.bodies[anch], H = sys.atmo[b.n] ? sys.atmo[b.n].H : 0; if (d3(off, bodyPosAt(sys, anch, t)) < b.R + 5.5 * H + 5) return 'Dentro de la atmósfera'; return czDanger(sys, zs, zi, me, hangars, ships, t, anch); }

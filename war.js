@@ -31,7 +31,7 @@ const WAR = (() => {
     if (k === 'W' && mineW().length >= C.ws.max) return `Máximo ${C.ws.max} buques desplegados`;
     if (k === 'F' && mineF().length >= F.max) return `Máximo ${F.max} escuadrones de cazas`;
     if (k === 'S' && [...SA.values()].filter(s => s.o === myId && s.zi === zi).length >= C.sat.maxZone) return `Máximo ${C.sat.maxZone} satélites por zona`;
-    return czCheck(SYS, CZ, zi, off, myId, CZS[zi] ? CZS[zi].o : 0, [...BASE.HG.values()], [...WS.values()], simT, anch);
+    return czCheck(SYS, CZ, zi, off, myId, CZS[zi] ? CZS[zi].o : 0, [...BASE.HG.values()], [...WS.values()], simT, anch, k);
   }
 
   // ---------- modelos (km; proa hacia -z): los construye models.js (MODELS) una vez y todas las instancias comparten geometría y materiales del bando (mine = aliado, si no enemigo) ----------
@@ -276,7 +276,7 @@ const WAR = (() => {
     S.pos = p.slice(); S.shipPos = p.slice(); S.v = 0; S.foot.on = false; S.park.on = false; S.auto = false; S.gearK = 0; S.q.copy(s.q); camQ.copy(S.q); S.w.p = S.w.y = S.w.r = 0;
     say('Despegas desde la cubierta de tu buque de guerra'); return true;
   }
-  function deploy(k, zi, at = 'c') { // punto AUTOMÁTICO (sysgen.czDeployPoint, igual que el servidor): at 'p' junto al planeta (sobre su base si la tiene) · 'c' junto al cúmulo
+  function deploy(k, zi, at = 'c') { // (zona sin dueño: válida para buques y cazas; sus unidades la reclaman) // punto AUTOMÁTICO (sysgen.czDeployPoint, igual que el servidor): at 'p' junto al planeta (sobre su base si la tiene) · 'c' junto al cúmulo
     const dp = czDeployPoint(SYS, CZ, ZONES, zi, inZone(zi), at, simT, [...BASE.HG.values()], myId, S.pos); return { off: dp && dp.off, abs: dp && dp.abs, a: dp ? dp.a : 0, why: dp ? check(k, zi, dp.abs, dp.a) : 'Zona solar: no se puede desplegar', at };
   }
   const near = () => { const p = S.foot.on ? S.shipPos : S.pos; return mineW().some(s => s.w && len(sub(s.w, p)) < C.ws.near); }; // junto a mi buque cuenta como «en base»
@@ -289,7 +289,7 @@ const WAR = (() => {
     F: `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">${DEF}<g stroke="#050f1c" stroke-width="2.5" stroke-linejoin="round"><path d="M28 32 6 17V25L28 44Z" fill="url(#gm)"/><path d="M36 32 58 17V25L36 44Z" fill="url(#gm)"/><path d="M28 46 20 58H27Z" fill="url(#gm)"/><path d="M36 46 44 58H37Z" fill="url(#gm)"/><path d="M32 3 36.5 14V46L35 53H29L27.5 46V14Z" fill="url(#gm)"/></g><path d="M9 20 27 33M55 20 37 33" stroke="#4db8ff" stroke-width="2.2"/><ellipse cx="32" cy="18" rx="2.6" ry="5.5" fill="url(#gb)" stroke="#050f1c" stroke-width="1.6"/><g fill="#050f1c"><rect x="14" y="27" width="2.4" height="8" rx="1"/><rect x="47.6" y="27" width="2.4" height="8" rx="1"/></g><circle cx="5.5" cy="21" r="2" fill="#ff3b30" stroke="#050f1c" stroke-width="1.2"/><circle cx="58.5" cy="21" r="2" fill="#5dff8a" stroke="#050f1c" stroke-width="1.2"/><ellipse cx="30" cy="55" rx="2.4" ry="3" fill="url(#gf)" stroke="#050f1c" stroke-width="1.2"/><ellipse cx="34" cy="55" rx="2.4" ry="3" fill="url(#gf)" stroke="#050f1c" stroke-width="1.2"/></svg>`,
   };
   const COST = { W: C.ws.cost, S: C.sat.cost, F: F.cost }, DEPL = { W: 'DESPLEGAR', S: 'CONSTRUIR', F: 'DESPLEGAR' };
-  const DESC = { W: `Nave capital de ~14 km con el mayor alcance del juego (${C.ws.range} km): reapareces en su cubierta y junto a ella compras como en la base.`, S: 'Base flotante estática con misiles guiados de largo alcance. Se desactiva si pierdes su zona.', F: `${F.n} cazas ligeros que patrullan la zona y atacan enemigos y neutrales. Si caen los ${F.n}, se pierde.` };
+  const DESC = { W: `Nave capital de ~14 km con el mayor alcance del juego (${C.ws.range} km): reapareces en su cubierta y junto a ella compras como en la base.`, S: 'Base flotante estática con misiles guiados de largo alcance. Solo en zonas tuyas; se desactiva si pierdes la zona.', F: `${F.n} cazas ligeros que patrullan la zona y atacan enemigos y neutrales; en una zona sin dueño, ayudan a reclamarla. Si caen los ${F.n}, se pierde.` };
   const STATS = k => k === 'W' ? [['Casco', C.ws.hp, 3000, '#5dff8a'], ['Escudo', C.ws.sh, 1000, '#4db8ff'], ['Alcance (km)', C.ws.range, 6000, '#ffd23f'], ['Daño/disparo', C.ws.dmg, 40, '#ff8a3c'], ['Disparos/s', +(1 / C.ws.cd).toFixed(1), 6, '#c8ff5d'], ['Velocidad (km/s)', 0, 400, '#f5a8ff'], ['Unidades', 1, 3, '#9fd4ee'], ['Máximo', C.ws.max, 3, '#9fd4ee']]
     : k === 'S' ? [['Vida', C.sat.hp, 3000, '#5dff8a'], ['Escudo', 0, 1000, '#4db8ff'], ['Alcance (km)', C.sat.range, 6000, '#ffd23f'], ['Daño/disparo', C.sat.dmg, 40, '#ff8a3c'], ['Disparos/s', +(1 / C.sat.cd).toFixed(2), 6, '#c8ff5d'], ['Velocidad (km/s)', 0, 400, '#f5a8ff'], ['Unidades', 1, 3, '#9fd4ee'], ['Por zona', C.sat.maxZone, 3, '#9fd4ee']]
     : [['Vida (cada caza)', F.hp, 3000, '#5dff8a'], ['Escudo', 0, 1000, '#4db8ff'], ['Alcance (km)', F.range, 6000, '#ffd23f'], ['Daño/disparo', F.dmg, 40, '#ff8a3c'], ['Disparos/s', +(F.n / F.cd).toFixed(1), 6, '#c8ff5d'], ['Velocidad (km/s)', F.vmax, 400, '#f5a8ff'], ['Unidades', F.n, 3, '#9fd4ee'], ['Escuadrones', 'sin límite', 1, '#9fd4ee']];
@@ -321,9 +321,41 @@ const WAR = (() => {
     if (sp) { pref = sp.dataset.wsp === 'base' ? 'base' : +sp.dataset.wsp; refresh(); return; }
     if (fs && !e.target.closest('.buy')) { fsel = fs.dataset.fsel; refresh(); return; }
     if (!d || d.disabled || !atBase()) return; // fuera de la base: atenuado, sin mensaje
-    if (!CZS.some(Z => Z.o === myId)) return say('Primero reclama una zona de control: permanece dentro de ella hasta el 100 %');
+    if (d.dataset.wdep === 'S' && !CZS.some(Z => Z.o === myId)) return say('Los satélites solo en zonas tuyas: reclama una primero'); // buques y cazas también en zonas sin dueño (las reclaman)
     ov.style.display = 'none'; MAP.place(d.dataset.wdep); // el mapa se abre en modo colocación
   });
+  // ---------- DESPLIEGUE RÁPIDO (tecla B): panel con las unidades en reserva; se despliegan en el sector donde está mi nave (mismas reglas que desde el mapa) ----------
+  const qd = document.createElement('div'); qd.id = 'qd'; qd.style.cssText = 'position:fixed;left:50%;top:24%;transform:translateX(-50%);z-index:9;display:none;min-width:330px;background:#0b2233f2;border:4px solid #050f1c;box-shadow:6px 6px 0 #050f1c;border-radius:14px;padding:10px 14px;color:#dff4ff;font:600 13px ui-monospace,Consolas,monospace'; document.body.append(qd);
+  let qdOn = false, qdSel = 0, qdMsg = '';
+  const qdList = () => ['W', 'S', 'F'].filter(k => stock[k] > 0);
+  function qdRender() {
+    const L = qdList(), zi = czAt(SYS, CZ, S.pos, simT); qdSel = Math.min(qdSel, Math.max(0, L.length - 1));
+    qd.innerHTML = `<div style="letter-spacing:.14em;color:#9fd4ee;margin-bottom:6px">DESPLIEGUE RÁPIDO · ${owner(zi).toUpperCase()}</div>`
+      + (L.length ? L.map((k, i) => `<button data-qd="${k}" style="display:flex;align-items:center;gap:10px;width:100%;margin:4px 0;padding:6px 8px;border:3px solid #050f1c;border-radius:10px;background:${i === qdSel ? '#123a55' : '#0a1f30'};color:#dff4ff;font:inherit;cursor:pointer;text-align:left"><kbd>${i + 1}</kbd><i style="display:block;width:34px;height:34px">${SVG[k]}</i><span>${UN[k]}</span><b style="margin-left:auto">×${stock[k]}</b></button>`).join('')
+        : '<div style="color:#ffd23f;margin:6px 0">Sin unidades en reserva — compra en FLOTA (Esc)</div>')
+      + `<div style="margin-top:6px;font-size:11px;color:${qdMsg ? '#ff8a7a' : '#7fb6d4'}">${qdMsg || '1-9 o ↑↓ + Enter: desplegar en este sector · B / Esc: cerrar'}</div>`;
+  }
+  function qdOpen(on) { qdOn = on; qdMsg = ''; qd.style.display = on ? 'block' : 'none'; if (on) qdRender(); }
+  function qdGo(k) { // mismo punto automático y mismas validaciones que el despliegue desde el mapa (el servidor vuelve a validar)
+    if (!k) return; const zi = czAt(SYS, CZ, S.pos, simT), d = deploy(k, zi, 'c'); if (d.why) { qdMsg = d.why; return qdRender(); }
+    send({ t: 'wdep', k, zi, at: 'c' }); qdOpen(false);
+  }
+  addEventListener('keydown', e => { // en fase de captura: con el panel abierto, los números y las flechas no llegan a la nave
+    if (e.code === 'KeyB' && !e.repeat && !(e.target && e.target.tagName === 'INPUT')) {
+      if (qdOn) qdOpen(false); else if (BASE.started() && !BASE.loading() && P.hp > 0 && S.warp.cd <= 0 && !S.warp.on && ov.style.display === 'none' && !window.MAPOPEN) qdOpen(true);
+      e.stopImmediatePropagation(); return;
+    }
+    if (!qdOn) return; if (P.hp <= 0 || S.warp.cd > 0 || S.warp.on) { qdOpen(false); return; }
+    const L = qdList(), i = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8', 'Digit9'].indexOf(e.code);
+    if (e.code === 'Escape') qdOpen(false);
+    else if (i >= 0) qdGo(L[i]);
+    else if (e.code === 'ArrowDown' || e.code === 'ArrowUp') { const n = Math.max(1, L.length); qdSel = (qdSel + (e.code === 'ArrowDown' ? 1 : -1) + n) % n; qdRender(); }
+    else if (e.code === 'Enter' || e.code === 'NumpadEnter') qdGo(L[qdSel]);
+    else return;
+    e.preventDefault(); e.stopImmediatePropagation();
+  }, true);
+  qd.addEventListener('click', e => { const b = e.target.closest('[data-qd]'); if (b) qdGo(b.dataset.qd); });
+  setInterval(() => { if (qdOn) qdRender(); }, 600);
   const sig = () => JSON.stringify([stock, pref, fsel, CZS.map(Z => Z.o), all().map(s => [s.id, s.o, s.on]), [...FQ.values()].map(f => [f.id, f.hp.map(h => h > 0)])]);
   const fOwner = id => { const f = FQ.get(id); return f ? f.o : null; };
 

@@ -24,7 +24,7 @@ const AUDIO = (() => {
   const flt = (type, f, q = 0.7) => { const b = A.createBiquadFilter(); b.type = type; b.frequency.value = f; b.Q.value = q; return b; };
   const env = (g, t, peak, att, dec) => { g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(Math.max(0.0002, peak), t + att); g.gain.exponentialRampToValueAtTime(0.0001, t + att + dec); return g; };
   function nburst(out, t, dur, peak, type, f0, f1, q, buf = NZ, att = 0.004) { const s = src(buf, t, dur), f = flt(type, f0, q), g = A.createGain(); if (f1 && f1 !== f0) f.frequency.exponentialRampToValueAtTime(f1, t + dur); s.connect(f).connect(env(g, t, peak, att, dur)).connect(out); }
-  function osc(out, t, type, f0, f1, dur, peak, att = 0.005, sat = false, sweep = dur) { const o = A.createOscillator(), g = A.createGain(); o.type = type; o.frequency.setValueAtTime(f0, t); if (f1 !== f0) o.frequency.exponentialRampToValueAtTime(f1, t + sweep); let n = o; if (sat) { const w = A.createWaveShaper(); w.curve = SAT; n = o.connect(w); } n.connect(env(g, t, peak, att, dur)).connect(out); o.start(t); o.stop(t + att + dur + 0.05); }
+  function osc(out, t, type, f0, f1, dur, peak, att = 0.005, sat = false, sweep = dur) { const o = A.createOscillator(), g = A.createGain(); o.type = type; o.frequency.setValueAtTime(f0, t); if (f1 !== f0) o.frequency.exponentialRampToValueAtTime(f1, t + sweep); let n = o; if (sat) { const w = A.createWaveShaper(); w.curve = SAT; n = o.connect(w); } n.connect(env(g, t, peak, att, dur)).connect(out); o.start(t); o.stop(t + att + dur + 0.01); }
   function echo(out, t, time, fb, lp, dur) { const d = A.createDelay(1), g = A.createGain(), f = flt('lowpass', lp); d.delayTime.value = time; g.gain.value = fb; out.connect(d); d.connect(f).connect(g).connect(d); const o = A.createGain(); o.gain.value = 0.8; f.connect(o).connect(M); setTimeout(() => { try { out.disconnect(d); } catch (e) {} }, (dur + 3) * 1000); }
   // ---------- voz espacial ----------
   function voice(kind, pos, o = {}) { // → { t, out, x (0 cerca · 1 al borde del radio), mine } o null si no se oye
@@ -47,8 +47,8 @@ const AUDIO = (() => {
     misil(v) { const { t, out } = v; nburst(out, t, 0.01, 0.4, 'highpass', 2500); nburst(out, t, 0.9, 0.3, 'bandpass', 600, 2800, 1.2, PK, 0.08); osc(out, t, 'sawtooth', 62, 55, 1.2, 0.12, 0.05); osc(out, t, 'sawtooth', 64.5, 56, 1.2, 0.1, 0.05); }, // encendido: silbido/whoosh y ronroneo
     cannon(v, big) { const { t, out } = v, k = big ? 1.6 : 1; nburst(out, t, 0.45 * k, 0.8, 'lowpass', 3500, 240, 0.7, PK, 0.004); osc(out, t, 'sine', 85 / k, 36, 0.5 * k, 0.9, 0.004, true); nburst(out, t, 0.012, 0.5, 'highpass', 2000); echo(out, t, big ? 0.22 : 0.16, 0.3, 1200, 1.2 * k); }, // estampido con eco
     torreta(v) { FX.cannon(v, false); }, buqueDisparo(v) { FX.cannon(v, true); }, satDisparo(v) { FX.misil(v); FX.cannon(v, false); },
-    impacto(v) { const { t, out } = v; nburst(out, t, 0.01, 0.6, 'bandpass', 2500, 2500, 1); for (const f of [900, 1630, 2470]) osc(out, t, 'sine', f * (0.9 + 0.2 * Math.random()), f * 0.97, 0.12 + 0.1 * Math.random(), 0.1, 0.002); nburst(out, t, 0.18, 0.12, 'lowpass', 1500, 300); }, // chispazo en otro objeto
-    escudo(v) { const { t, out } = v, bp = flt('bandpass', 900, 4), trem = A.createOscillator(), tg = A.createGain(), g = A.createGain(); trem.frequency.value = 32; tg.gain.value = 0.5; trem.connect(tg).connect(g.gain); bp.connect(env(g, t, 0.35, 0.01, 0.34)).connect(out); trem.start(t); trem.stop(t + 0.4); for (const f of [118, 181]) { const o = A.createOscillator(); o.type = 'sawtooth'; o.frequency.value = f; o.connect(bp); o.start(t); o.stop(t + 0.4); } nburst(out, t, 0.06, 0.15, 'highpass', 6000); }, // zumbido eléctrico
+    impacto(v) { const { t, out } = v, rnd = (a, b) => a + Math.random() * (b - a); nburst(out, t, rnd(0.005, 0.01), 0.6, 'highpass', 1500); for (let i = 0, n = 2 + (Math.random() * 2 | 0); i < n; i++) nburst(out, t + i * rnd(0.008, 0.018), rnd(0.02, 0.04), 0.3 * (1 - i / (n + 1)), 'bandpass', rnd(1500, 5000), 0, rnd(0.8, 1.8)); nburst(out, t + 0.008, 0.05, 0.08, 'bandpass', rnd(6000, 9000), 0, 1.2); }, // golpe en otro objeto: ruido (sin notas)
+    escudo(v) { const { t, out } = v, rnd = (a, b) => a + Math.random() * (b - a); nburst(out, t, 0.12, 0.35, 'bandpass', rnd(900, 1400), 0, 2); for (let i = 0; i < 6; i++) nburst(out, t + rnd(0, 0.14), rnd(0.008, 0.02), rnd(0.08, 0.18), 'highpass', rnd(3000, 7000)); nburst(out, t, 0.02, 0.2, 'highpass', 5000); }, // escudo: zumbido eléctrico de ruido + chisporroteo (sin tonos)
     explosion(v, size) { // estallido (barrido descendente) + golpe sub + crepitar de escombros + cola; lejos solo queda el retumbo grave
       const { t, out, x } = v, k = Math.max(0.35, Math.min(3, size / 60));
       if (x < 0.65) nburst(out, t, 0.55 * k, 0.9, 'lowpass', 8000, 260, 0.7, NZ, 0.003);
@@ -73,13 +73,15 @@ const AUDIO = (() => {
     const v = voice(kind, pos, { ...o, dur: DUR[kind] }); if (!v) return;
     if (kind === 'explosionNave' || kind === 'explosionGrande') FX.explosion(v, o.size || (kind === 'explosionGrande' ? 160 : 60)); else if (FX[kind]) FX[kind](v);
   }
-  function hitMe(dmg, hull) { // impacto en MI nave: metálico (golpe seco + resonancias inarmónicas + chirrido); si es grande, retumbo · si lo absorbió el escudo, zumbido eléctrico
-    if (!A) return; const v = voice('impacto', null, { dur: 1 }); if (!v) return; const { t, out } = v, big = dmg > 20;
-    if (!hull) return FX.escudo(v);
-    nburst(out, t, 0.012, 0.9, 'bandpass', 3000, 3000, 0.9);
-    for (const f of [820, 1370, 1990, 2710, 3450]) { const ff = f * (0.9 + 0.2 * Math.random()), bp = flt('bandpass', ff, 12), o2 = A.createOscillator(), g = A.createGain(); o2.frequency.value = ff; o2.connect(bp).connect(env(g, t, 0.18 + Math.random() * 0.12, 0.002, 0.08 + Math.random() * 0.3)).connect(out); o2.start(t); o2.stop(t + 0.5); }
-    osc(out, t + 0.01, 'sawtooth', 3200 + Math.random() * 800, 1600, 0.18, 0.03);
-    if (big) { osc(out, t, 'sine', 70, 32, 0.55, 0.9, 0.004, true); nburst(out, t, 0.6, 0.35, 'lowpass', 180, 80, 0.7, PK); }
+  function hitMe(dmg, hull) { // impacto en MI nave: golpe de METAL (ruido), no notas: transitorio + golpe seco grave + «crunch» de chapa en micro-ráfagas + chispas; grande: más grave, retumbo y crujido largo · escudo: zumbido eléctrico
+    if (!A) return; const v = voice('impacto', null, { dur: 0.6 }); if (!v) return; if (!hull) return FX.escudo(v);
+    const { t, out } = v, big = dmg > 20, rnd = (a, b) => a + Math.random() * (b - a), k = big ? 1.5 : 1;
+    nburst(out, t, rnd(0.005, 0.012), 1, 'highpass', 900, 0, 0.7, NZ, 0.0005); // transitorio de ruido blanco (ataque instantáneo)
+    osc(out, t, 'sine', 90 * rnd(0.85, 1.15) / (big ? 1.35 : 1), 45 / (big ? 1.3 : 1), (big ? 0.1 : 0.09) * rnd(0.8, 1.1), 0.85, 0.002, big); // golpe seco grave, sin sostén (≤ 0,13 s)
+    for (let i = 0, n = (big ? 5 : 3) + (Math.random() * 3 | 0); i < n; i++) nburst(out, t + 0.004 + i * rnd(0.006, 0.02) * k, rnd(0.02, 0.05) * k, rnd(0.3, 0.55) * (1 - i / (n + 2)), 'bandpass', rnd(1500, 5000), 0, rnd(0.7, 1.9)); // chapa golpeada: ráfagas de ruido pasa-banda ancho (Q ≤ 2)
+    nburst(out, t + 0.012, 0.06 * rnd(0.8, 1.2) * k, 0.14, 'bandpass', rnd(6000, 9000), 0, 1.3); // chispas / fricción
+    osc(out, t, 'triangle', rnd(1700, 4300), rnd(1400, 3900), 0.03, 0.035, 0.001); // matiz metálico brevísimo (≤ 40 ms), frecuencia aleatoria y muy bajo: no se percibe como nota
+    if (big) nburst(out, t, rnd(0.2, 0.25), 0.45, 'lowpass', 240, 90, 0.7, PK, 0.004); // retumbo (ruido grave, no tono)
   }
   // ---------- interfaz y mi nave (siempre al 100 %: no pasan por el radio) ----------
   const UI = {

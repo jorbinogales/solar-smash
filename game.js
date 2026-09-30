@@ -4,7 +4,7 @@ const DIST_SCALE = 0.06, C = 299792.458, AU = 149597870.7 * DIST_SCALE, DAY = 86
 // Sistema procedural (sysgen.js) a partir de la semilla del servidor (seed.js): solo mundos habitables, compactos; hasta 10 cuerpos.
 const SYS = genSystem(SEED, NPL); Object.assign(SURF, SYS.surf); Object.assign(ATMO, SYS.atmo); const DATA = SYS.bodies, BELT = SYS.belt;
 // Zonas de recursos (sysgen.genZones, las mismas que calcula el servidor): solo sus asteroides dan recursos y lo que queda (ZR) lo dicta el servidor en cada tick
-const ZONES = genZones(SYS); let ZR = ZONES.map(z => z.dominant.map(d => d.budget)), LOOTED = new Set(); // LOOTED: cascos ya saqueados en la sala
+const ZONES = genZones(SYS, typeof T0 !== 'undefined' ? T0 : 0); let ZR = ZONES.map(z => z.dominant.map(d => d.budget)), LOOTED = new Set(); // LOOTED: cascos ya saqueados en la sala
 const ZT = ZONES.map((z, i) => ({ zi: i, zone: z, n: z.name, R: z.radius, pos: [0, 0, 0] })); // destinos de zona (N, mapa, salto luz); pos se actualiza cada cuadro
 const zoneLeft = (zi, type) => { const k = ZONES[zi] ? ZONES[zi].dominant.findIndex(d => d.type === type) : -1; return k < 0 || !ZR[zi] ? 0 : ZR[zi][k] || 0; };
 const zoneRes = zi => ZONES[zi].dominant.map((d, k) => ({ type: d.type, n: (ZR[zi] && ZR[zi][k]) || 0 })); // [{type, n}] con lo que queda
@@ -116,7 +116,7 @@ addEventListener('keydown', e => {
   keys[e.code] = true;
   if (e.code === 'Tab') { e.preventDefault(); if (!e.repeat) scoreboard(true); } // Tab mantenida: estadísticas de los jugadores
   if (e.code === 'KeyN' && !e.repeat) nextDest();
-  if (e.code === 'KeyB' && !e.repeat) nextShip();
+  if (e.code === 'KeyY' && !e.repeat) nextShip(); // Y: siguiente nave (B es el despliegue rápido: war.js)
   if (e.code === 'KeyX') { S.v = 0; S.auto = false; }
   if (e.code === 'KeyG' && S.warp.cd > 0) { S.warp.cd = 0; say('Cuenta atrás cancelada'); }
   else if (e.code === 'KeyG' && !S.foot.on && !S.warp.on && P.hp > 0) { // G: fija el rumbo (y el salto luz) hacia el planeta o el cúmulo bajo la mira (otra vez: libera)
@@ -386,9 +386,9 @@ function warpBlock() { // null = se puede saltar; si no, el cuerpo que lo impide
   }
   S.warp.ex = ex; return null;
 }
-function clusterNear(b) { // cúmulo de la zona de control que contiene ese planeta (a < 1,5 M km de él y aún sin haber llegado): el salto luz va a él
-  if (!b || b.zone || b.k === 'sun' || typeof WAR === 'undefined') return null; const czi = czAt(SYS, WAR.CZ, b.pos), t = ZT.find(q => q.zone.cz === czi);
-  return t && len(sub(t.pos, b.pos)) < 1.5e6 && len(sub(t.pos, S.pos)) > t.R + ZONE_ARR + 500 ? t : null;
+function clusterNear(b) { // cúmulo más cercano a ese planeta (a < 1,5 M km de él y aún sin haber llegado): el salto luz va a él
+  if (!b || b.zone || b.k === 'sun') return null; let t = null, bd = 1.5e6; for (const q of ZT) { const d = len(sub(q.pos, b.pos)); if (d < bd) { bd = d; t = q; } } // los sectores con planeta no tienen cúmulo: el más cercano al planeta (< 1,5 M km)
+  return t && len(sub(t.pos, S.pos)) > t.R + ZONE_ARR + 500 ? t : null;
 }
 function toggleWarp(ctrl) { // ctrl: Ctrl+Shift = directo al planeta (sin desviar al cúmulo)
   const w = S.warp; if (w.on) return endWarp('Velocidad luz desactivada');
@@ -398,7 +398,7 @@ function toggleWarp(ctrl) { // ctrl: Ctrl+Shift = directo al planeta (sin desvia
   if (w.lock || w.bar < 2) return say('Motor de velocidad luz recargando…');
   { const blk = warpBlock(); if (blk) return say(blk.k === 'sun' ? `Demasiado cerca de ${blk.n} para velocidad luz` : `Cerca de ${blk.n}: sal de su atmósfera y mira hacia fuera del planeta para saltar`); }
   if (!warpTarget()) return say('Sin destino para el salto'); w.pick = warpTarget();
-  { const pl = w.pick, zc = !ctrl && S.lockB == null ? clusterNear(pl) : null; if (zc) { w.pick = zc; say(`Rumbo al cúmulo ${zc.n} junto a ${pl.n} · Ctrl+Shift: directo al planeta`); } else say(`Salto hacia ${w.pick.n}`); } // rumbo fijado con G (vuelo directo) o Ctrl: al planeta // el destino queda fijado durante la cuenta atrás
+  { const pl = w.pick, zc = !ctrl && S.lockB == null ? clusterNear(pl) : null; if (zc) { w.pick = zc; say(`Rumbo al cúmulo ${zc.n}, el más cercano a ${pl.n} · Ctrl+Shift: directo al planeta`); } else say(`Salto hacia ${w.pick.n}`); } // rumbo fijado con G (vuelo directo) o Ctrl: al planeta // el destino queda fijado durante la cuenta atrás
   w.cd = 5; w.n = 6; S.v = 0; // cuenta atrás de 5 s con pitido por número; al llegar a 0 se activa el salto (ver startWarp)
 }
 function warpTarget() { // destino del salto: el rumbo fijado con G, el elegido al empezar la cuenta atrás, el cúmulo bajo la mira, la zona elegida con N o en el mapa (si aún no estás en ella) o, si no, el cuerpo más cercano a la dirección de la mira (nunca sales del sistema)

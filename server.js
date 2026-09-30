@@ -8,7 +8,7 @@ const { genSystem, genZones, wreckLoot, BASE_UP, baseStats, TOWER_STYLES, WARCFG
 const HG_HP = 600, TW_HP = 150; // hangar: dueño -> { o, nm, b (planeta), la, lo (rad), hp, tw[4], bot }: un planeta = un hangar
 const rooms = new Map(); // código -> sala: { code, name, seed, np, fillBots, phase, host (token), launchAt, SYS, SOLID, zones, zr, looted, members (token -> jugador), lobby (id de conexión -> jugador ya en la página del juego), hangars, botPlanets, players, bots, deadWrecks, nextBot }
 // zones: zonas de recursos de la semilla (sysgen.genZones); zr[z][k]: lo que queda del recurso dominante k de la zona z (el servidor es quien lo descuenta)
-const setSystem = (R, seed, np) => { R.seed = seed; R.np = np; R.SYS = genSystem(seed, np); R.SOLID = new Set(R.SYS.bodies.filter(b => b.k !== 'sun').map(b => b.n)); R.zones = genZones(R.SYS); R.zr = R.zones.map(z => z.dominant.map(d => d.budget)); R.czs = genControlZones(R.SYS); R.cz = R.czs.map(() => ({ o: 0, c: 0, p: 0 })); R.wships = new Map(); R.sats = new Map(); R.wn = 0; R.fighters = new Map(); R.fn = 0; R.fs = []; }; // fighters: escuadrones de cazas id (7000+) -> { id, o, zi, off, hp[n] } · fs: posiciones de los cazas (las simula el anfitrión)
+const setSystem = (R, seed, np) => { R.seed = seed; R.np = np; R.t0 = Math.floor(Date.now() / 1000); R.SYS = genSystem(seed, np); R.SOLID = new Set(R.SYS.bodies.filter(b => b.k !== 'sun').map(b => b.n)); R.zones = genZones(R.SYS, R.t0); R.zr = R.zones.map(z => z.dominant.map(d => d.budget)); R.czs = genControlZones(R.SYS); R.cz = R.czs.map(() => ({ o: 0, c: 0, p: 0 })); R.wships = new Map(); R.sats = new Map(); R.wn = 0; R.fighters = new Map(); R.fn = 0; R.fs = []; }; // fighters: escuadrones de cazas id (7000+) -> { id, o, zi, off, hp[n] } · fs: posiciones de los cazas (las simula el anfitrión) // t0: instante común de la sala para los cúmulos (sin cúmulo en los sectores con planeta)
 // zonas de control: cz[i] = { o: dueño (id de jugador, 0 = nadie), c: quien la está reclamando, p: progreso 0-100 } · wships/sats: id -> { id, o, zi, a (cuerpo ancla), off, hp, sh, shT, on }
 const dropWar = (R, id) => { if (R.czLast) R.czLast.delete(id); for (const M of [R.wships, R.sats, R.fighters]) for (const [k, s] of [...M]) if (s.o === id) M.delete(k); for (const Z of R.cz) { if (Z.o === id) Z.o = 0; if (Z.c === id) { Z.c = 0; Z.p = 0; } } }; // el jugador se fue: sus zonas quedan libres
 function claimHome(R) { // al crear las bases: la zona que contiene el planeta de cada JUGADOR queda reclamada por él y su recurso pasa a AGUA (único sitio donde se fuerza; viaja a los clientes en la fila `cz`); la de un BOT queda controlada por el bot
@@ -22,12 +22,13 @@ function czTick(R, now) { // captura: un único jugador (vivo) dentro de una zon
     const a0 = R.czLast.get(p.id) || p.pos; R.czLast.set(p.id, p.pos);
     for (let k = 1; k <= 4; k++) { const f = k / 4, zi = czAt(R.SYS, R.czs, [a0[0] + (p.pos[0] - a0[0]) * f, 0, a0[2] + (p.pos[2] - a0[2]) * f], t); share[zi].set(p.id, (share[zi].get(p.id) || 0) + 0.25); }
   }
+  for (const [M, w] of [[R.wships, WARCFG.presence.W], [R.fighters, WARCFG.presence.F]]) for (const u of M.values()) if (!(u.ar > now) && u.o < 1000 && share[u.zi]) share[u.zi].set(u.o, (share[u.zi].get(u.o) || 0) + w); // las UNIDADES reclaman: presencia de su dueño aunque él no esté (no las que aún llegan)
   R.cz.forEach((Z, zi) => {
     if (R.czs[zi].noClaim) { Z.o = Z.c = Z.p = 0; return; } // zona solar: no reclamable
     if (Z.o >= 1000) { if (R.hangars.has(Z.o)) { Z.c = Z.p = 0; return; } Z.o = 0; } // zona de un bot: no se puede capturar mientras exista su hangar
-    const ids = [...share[zi].keys()];
-    if (ids.length === 1 && ids[0] !== Z.o) { const id0 = ids[0], mult = 1 + 0.5 * [...R.wships.values()].filter(s => s.o === id0 && s.zi === zi).length; if (Z.c !== id0) { Z.c = id0; Z.p = 0; } Z.p += base * mult * dt * share[zi].get(id0); if (Z.p >= 100) { Z.o = Z.c; Z.c = 0; Z.p = 0; } } // con su buque dentro, 1,5× por buque
-    else if (Z.c) { Z.p -= base * (ids.length > 1 ? 0.5 : ids.length ? 1 : 1 / 3) * dt; if (Z.p <= 0) { Z.c = 0; Z.p = 0; } }
+    const pr = [...share[zi]].sort((x, y) => y[1] - x[1]), lead = pr[0], margin = lead ? lead[1] - (pr[1] ? pr[1][1] : 0) : 0; // presencia de cada dueño; avanza el que más tiene, al ritmo de su ventaja
+    if (lead && lead[0] !== Z.o && margin > 0) { const id0 = lead[0]; if (Z.c !== id0) { Z.c = id0; Z.p = 0; } Z.p += base * margin * dt; if (Z.p >= 100) { Z.o = Z.c; Z.c = 0; Z.p = 0; } } // solo: su presencia · disputada: la ventaja sobre el segundo
+    else if (Z.c) { Z.p -= base * (pr.length > 1 ? 0.5 : pr.length ? 1 : 1 / 3) * dt; if (Z.p <= 0) { Z.c = 0; Z.p = 0; } } // la zona ya reclamada no se pierde si queda vacía
   });
   const slot = Math.floor(now / (WARCFG.gain.every * 1000)); // recursos pasivos: al cambiar de franja (cada 10 s de reloj real, igual en todos los clientes) cada dueño conectado recibe lo de sus zonas
   if (R.czSlot !== undefined && slot !== R.czSlot) R.cz.forEach((Z, zi) => { const z = R.czs[zi]; if (!Z.o || z.noClaim || !z.res) return; for (const cl of wss.clients) if (cl.R === R && cl.pid === Z.o) send(cl, { zgain: 1, zi, type: z.res, n: WARCFG.gain.n }); });
@@ -43,7 +44,7 @@ const server = http.createServer((req, res) => {
   const u = req.url.split('?')[0];
   const tk = new URL(req.url, 'http://x').searchParams.get('token') || '', R = byToken(tk);
   if (u === '/api/me') return res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }).end(JSON.stringify({ ok: !!(R && R.phase !== 'lobby') })); // la página del juego solo arranca si eres jugador de una partida
-  if (u === '/seed.js') return res.writeHead(200, { 'Content-Type': TYPES['.js'], 'Cache-Control': 'no-store' }).end(`const SEED = ${R ? R.seed : 1}, NPL = ${R ? R.np : 4};`); // el sistema es el de TU sala
+  if (u === '/seed.js') return res.writeHead(200, { 'Content-Type': TYPES['.js'], 'Cache-Control': 'no-store' }).end(`const SEED = ${R ? R.seed : 1}, NPL = ${R ? R.np : 4}, T0 = ${R ? R.t0 : 0};`); // el sistema es el de TU sala
   const f = FILES[u];
   if (!f) return res.writeHead(404).end();
   res.writeHead(200, { 'Content-Type': TYPES[path.extname(f)], 'Cache-Control': 'no-store' });
@@ -159,7 +160,7 @@ wss.on('connection', ws => {
         const k = m.k, M = k === 'W' ? R.wships : k === 'S' ? R.sats : R.fighters, mine = [...M.values()].filter(s => s.o === id), t = Date.now() / 1000;
         const idx = [...R.wships.values(), ...R.sats.values(), ...R.fighters.values()].filter(s => s.zi === m.zi).length, dp = czDeployPoint(R.SYS, R.czs, R.zones, m.zi, idx, m.at === 'p' ? 'p' : 'c', t, [...R.hangars.values()], id, (R.players.get(id) || {}).pos);
         const why = (k === 'W' ? (mine.length >= WARCFG.ws.max ? `Máximo ${WARCFG.ws.max} buques desplegados` : '') : k === 'F' ? (mine.length >= WARCFG.ftr.max ? `Máximo ${WARCFG.ftr.max} escuadrones de cazas` : '') : (mine.filter(s => s.zi === m.zi).length >= WARCFG.sat.maxZone ? `Máximo ${WARCFG.sat.maxZone} satélites por zona` : ''))
-          || (dp ? czCheck(R.SYS, R.czs, m.zi, dp.abs, id, R.cz[m.zi].o, [...R.hangars.values()], [...R.wships.values()], t, dp.a) : 'Zona solar: no se puede desplegar');
+          || (dp ? czCheck(R.SYS, R.czs, m.zi, dp.abs, id, R.cz[m.zi].o, [...R.hangars.values()], [...R.wships.values()], t, dp.a, k) : 'Zona solar: no se puede desplegar');
         if (!why) { const sid = (k === 'W' ? 5000 : k === 'S' ? 6000 : 7000) + ((k === 'F' ? R.fn++ : R.wn++) % 1000), o3 = dp.off;
           M.set(sid, k === 'F' ? { id: sid, o: id, zi: m.zi, a: dp.a, off: o3, ar: Date.now() + WARCFG.arrive * 1000, hp: Array(WARCFG.ftr.n).fill(WARCFG.ftr.hp) } : { id: sid, o: id, zi: m.zi, a: dp.a, off: o3, ar: Date.now() + WARCFG.arrive * 1000, hp: k === 'W' ? WARCFG.ws.hp : WARCFG.sat.hp, sh: k === 'W' ? WARCFG.ws.sh : 0, shT: 0, on: 1 }); }
         send(ws, { wok: why ? 0 : 1, k: m.k, why });

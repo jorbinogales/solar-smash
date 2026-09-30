@@ -116,7 +116,7 @@ const MAP = (() => {
     const s = st.sel; if (!s) { card.hidden = true; return; }
     const sig = JSON.stringify([s.kind, s.i, ZR, S.tgt, s.kind === 'cz' ? [WAR.CZS[s.i], WAR.look(s.i).txt] : 0]); if (sig === st.cardSig && !card.hidden) return; st.cardSig = sig; card.hidden = false;
     if (s.kind === 'zone') { card.innerHTML = zoneBlock(s.i); return; }
-    const b = bodies[s.i], d = Math.hypot(b.pos[0] - S.pos[0], b.pos[1] - S.pos[1], b.pos[2] - S.pos[2]) - b.R, zs = b.k === 'sun' || typeof WAR === 'undefined' ? [] : ZT.filter(t => t.zone.cz === czAt(SYS, WAR.CZ, b.pos)), occ = BASES.find(x => x.body === b.n);
+    const b = bodies[s.i], d = Math.hypot(b.pos[0] - S.pos[0], b.pos[1] - S.pos[1], b.pos[2] - S.pos[2]) - b.R, zs = b.k === 'sun' ? [] : ZT.map(t => [t, Math.hypot(t.pos[0] - b.pos[0], t.pos[1] - b.pos[1], t.pos[2] - b.pos[2])]).filter(x => x[1] < 1.5e6).sort((x, y) => x[1] - y[1]).slice(0, 1).map(x => x[0]), occ = BASES.find(x => x.body === b.n);
     card.innerHTML = `<h3>${b.n}</h3><small>${b.k === 'sun' ? 'estrella' : b.parent ? 'luna de ' + b.parent.n : (b.label || 'planeta')} · ${fD(Math.max(0, d))}${d > 1 ? ' · a 5 c: ' + fT(d / (5 * C)) : ''}${occ ? ' · hangar de ' + occ.owner : ''}</small>`
       + (zs.length ? zs.map(t => zoneBlock(t.zi)).join('') : '<div class="zb"><small>Sin zona de recursos cercana.</small></div>');
   }
@@ -274,9 +274,9 @@ const MAP = (() => {
         const col = plOk ? '#5dff8a' : '#ff3b30'; st.ghost = { zi: hz, why: pd.why, at };
         const q = pd.abs && projU(entityPos(pd.abs, czV)); // posición real (junto al planeta si va anclada a él)
         if (q) { g.beginPath(); g.arc(q[0], q[1], 9 + 3 * Math.sin(now / 150), 0, 7); g.globalAlpha = 0.4; g.fillStyle = col; g.fill(); g.globalAlpha = 1; g.lineWidth = 5; g.strokeStyle = '#050f1c'; g.stroke(); g.lineWidth = 2; g.strokeStyle = col; g.stroke(); g.beginPath(); g.moveTo(q[0], q[1] - 6); g.lineTo(q[0] + 6, q[1]); g.lineTo(q[0], q[1] + 6); g.lineTo(q[0] - 6, q[1]); g.closePath(); g.fillStyle = col; g.fill(); g.setLineDash([5, 5]); g.beginPath(); g.moveTo(st.mx, st.my); g.lineTo(q[0], q[1]); g.stroke(); g.setLineDash([]); }
-        g.textAlign = 'center'; g.font = `bold 12px ${MONO}`; g.lineWidth = 4; g.strokeStyle = '#000'; g.fillStyle = col; const tx = pd.why || `CLIC: ${pl.k === 'W' ? 'DESPLEGAR EL BUQUE' : pl.k === 'F' ? 'DESPLEGAR LOS CAZAS' : 'CONSTRUIR EL SATÉLITE'} JUNTO AL ${at === 'p' ? 'PLANETA' : 'CÚMULO'}`; g.strokeText(tx, st.mx, st.my + 30); g.fillText(tx, st.mx, st.my + 30);
+        g.textAlign = 'center'; g.font = `bold 12px ${MONO}`; g.lineWidth = 4; g.strokeStyle = '#000'; g.fillStyle = col; const free = !pd.why && WAR.CZS[hz] && !WAR.CZS[hz].o, tx = pd.why || `CLIC: ${pl.k === 'W' ? 'DESPLEGAR EL BUQUE' : pl.k === 'F' ? 'DESPLEGAR LOS CAZAS' : 'CONSTRUIR EL SATÉLITE'} JUNTO AL ${at === 'p' || !pd.off || pd.a ? 'PLANETA' : 'CÚMULO'}${free ? ' · SIN RECLAMAR: TUS UNIDADES LA RECLAMARÁN' : ''}`; if (free) g.fillStyle = '#ffd23f'; g.strokeText(tx, st.mx, st.my + 30); g.fillText(tx, st.mx, st.my + 30);
       }
-      const W = c2.width, tx = `${pl.k === 'W' ? 'DESPLIEGUE · BUQUE DE GUERRA' : pl.k === 'F' ? 'DESPLIEGUE · CAZAS' : 'CONSTRUCCIÓN · SATÉLITE DEFENSIVO'} — clic en una zona AZUL (tuya): sobre su planeta, junto al planeta; si no, junto a su cúmulo · Esc: cancelar`; g.font = `bold 13px ${MONO}`; const w = g.measureText(tx).width + 36;
+      const W = c2.width, tx = `${pl.k === 'W' ? 'DESPLIEGUE · BUQUE DE GUERRA' : pl.k === 'F' ? 'DESPLIEGUE · CAZAS' : 'CONSTRUCCIÓN · SATÉLITE DEFENSIVO'} — clic en una zona tuya o SIN DUEÑO (satélites: solo tuyas): sobre un planeta, junto a él; sobre un cúmulo, junto a él · Esc: cancelar`; g.font = `bold 13px ${MONO}`; const w = g.measureText(tx).width + 36;
       g.fillStyle = '#050f1c'; g.fillRect(W / 2 - w / 2 + 4, 52, w, 34); g.fillStyle = '#0b2233'; g.fillRect(W / 2 - w / 2, 48, w, 34); g.lineWidth = 3; g.strokeStyle = '#050f1c'; g.strokeRect(W / 2 - w / 2, 48, w, 34); g.textAlign = 'center'; g.fillStyle = '#ffd23f'; g.fillText(tx, W / 2, 70);
     }
     g.restore();

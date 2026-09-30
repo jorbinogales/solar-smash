@@ -47,7 +47,7 @@
     });
     items.push({ sun: true, q: pr(0, 0, 0), r: 0.075 * S, dep: 0 });
     { // cúmulos de recursos (sysgen.genZones: los mismos que en la partida): junto a su planeta, en la dirección real de su desplazamiento, o fijos en el cinturón
-      const Z = sys._z || (sys._z = genZones(sys)), itOf = {}; items.forEach(it => { if (it.p) itOf[it.p.n] = it; });
+      const Z = sys._z || (sys._z = genZones(sys, Date.now() / 1000)), itOf = {}; items.forEach(it => { if (it.p) itOf[it.p.n] = it; });
       for (const z of Z) {
         const b = sys.bodies[z.anchor], ol = Math.hypot(z.off[0], z.off[1], z.off[2]) || 1; let px, py, pz, zr;
         if (b.k === 'sun') { const d = Math.hypot(z.off[0], z.off[2]) / 0.06, rr = 0.2 + 0.8 * Math.sqrt(Math.max(0, (d - amin) / (amax - amin + 1e-9))), a = Math.atan2(z.off[2], z.off[0]) + (t || 0) / 1000 * 0.05 / Math.pow(rr, 1.5); px = Math.cos(a) * rr; py = 0; pz = Math.sin(a) * rr; zr = 0.03; } // 0,06 = DIST_SCALE: 'a' de los planetas va sin escalar
