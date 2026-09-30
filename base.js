@@ -202,9 +202,9 @@ const BASE = (() => {
       seen.add(e.o); let h = HG.get(e.o);
       if (!h) {
         const b = bodyBy(e.b); if (!b) continue; const dir = dirOf(e.la, e.lo), info = padInfo(b, dir);
-        h = { o: e.o, nm: e.nm, b: e.b, la: e.la, lo: e.lo, hp: e.hp, sh: e.sh || 0, up: e.up || {}, st: baseStats(e.up || {}), ts: (e.ts || ['plasma', 'plasma', 'plasma', 'plasma']).slice(), dir, info, tw: null, bot: !!e.bot }; HG.set(e.o, h); planets.addPad(e.b, dir, PAD_R * BK, info.top); build(h); applyTw(h, e.tw || [h.st.twMax, h.st.twMax, h.st.twMax, h.st.twMax], true);
+        h = { o: e.o, nm: e.nm, b: e.b, la: e.la, lo: e.lo, hp: e.hp, sh: e.sh || 0, up: e.up || {}, st: baseStats(e.up || {}), ts: (e.ts || ['plasma', 'plasma', 'plasma', 'plasma']).slice(), dir, info, tw: null, bot: !!e.bot, sp: e.sp || null }; HG.set(e.o, h); planets.addPad(e.b, dir, PAD_R * BK, info.top); build(h); applyTw(h, e.tw || [h.st.twMax, h.st.twMax, h.st.twMax, h.st.twMax], true);
         if (e.o === myId) { hadHangar = true; defeated = false; if (LB.phase !== 'lobby' && !started) startGame(); else if (pendingSpawn) { pendingSpawn = false; if (P.hp > 0) { spawn(); P.deadUntil = 0; } } }
-      } else { if (e.o === myId && lastHp !== null && e.hp < lastHp - 0.5 && performance.now() - lastAlert > 4000) { lastAlert = performance.now(); say('¡TU HANGAR ESTÁ BAJO ATAQUE!'); if (typeof attackAlert === 'function') attackAlert('b', '', null); } h.hp = e.hp; h.sh = e.sh || 0; h.up = e.up || h.up; h.st = baseStats(h.up); h.nm = e.nm; h.bot = !!e.bot; applyTw(h, e.tw); if (e.ts && e.ts.some((v, i) => v !== h.ts[i])) { h.ts = e.ts.slice(); setHeads(h); } }
+      } else { if (e.o === myId && lastHp !== null && e.hp < lastHp - 0.5 && performance.now() - lastAlert > 4000) { lastAlert = performance.now(); say('¡TU HANGAR ESTÁ BAJO ATAQUE!'); if (typeof attackAlert === 'function') attackAlert('b', '', null); } h.sp = e.sp || null; h.hp = e.hp; h.sh = e.sh || 0; h.up = e.up || h.up; h.st = baseStats(h.up); h.nm = e.nm; h.bot = !!e.bot; applyTw(h, e.tw); if (e.ts && e.ts.some((v, i) => v !== h.ts[i])) { h.ts = e.ts.slice(); setHeads(h); } }
       if (e.o === myId) lastHp = e.hp;
     }
     for (const [o, h] of [...HG]) if (!seen.has(o)) { drop(h); HG.delete(o); if (o === myId && hadHangar) lost(); }
@@ -459,5 +459,6 @@ const BASE = (() => {
   }
   const AT_BASE_KM = 3; // la plataforma mide el doble (BK 6)
   const targetPos = id => { const h = HG.get(id); if (!h || h.hp <= 0) return null; const w = worldOf(h); return [w[0] + h.dir[0] * 0.012, w[1] + h.dir[1] * 0.012, w[2] + h.dir[2] * 0.012]; };
-  return { model, dispose: o => o.traverse(x => { if (x.geometry && !x.geometry.userData.keep) x.geometry.dispose(); }), targets, targetPos, atBase, mine: () => HG.get(myId) || null, canRespawn: () => !!HG.get(myId) || (typeof WAR !== 'undefined' && WAR.mine().length > 0), sync, onEvent, onClaim, onLobby, LB, started: () => started, choose: show, spawnAt, frame, hit, hud, HG, worldOf, isHost: () => LB.adm === myId, booted: () => MM.booted, onWelcome, onRoomMsg, loading: () => loading };
+  const towerPos = (h, i) => { const t = h.towers && h.towers[i]; return t ? localToWorld(h, t.g.position.x, HEAD_Y, t.g.position.z) : null; }; // (bot.js) cabeza de la torreta i de un hangar, en el mundo
+  return { towerPos, model, dispose: o => o.traverse(x => { if (x.geometry && !x.geometry.userData.keep) x.geometry.dispose(); }), targets, targetPos, atBase, mine: () => HG.get(myId) || null, canRespawn: () => !!HG.get(myId) || (typeof WAR !== 'undefined' && WAR.mine().length > 0), sync, onEvent, onClaim, onLobby, LB, started: () => started, choose: show, spawnAt, frame, hit, hud, HG, worldOf, isHost: () => LB.adm === myId, booted: () => MM.booted, onWelcome, onRoomMsg, loading: () => loading };
 })();

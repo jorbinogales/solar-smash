@@ -6,7 +6,7 @@
 const WAR = (() => {
   const C = WARCFG, CZ = genControlZones(SYS), CZS = CZ.map(() => ({ o: 0, c: 0, p: 0 })), WS = new Map(), SA = new Map(), FQ = new Map(), stock = { W: 0, S: 0, F: 0 }; // FQ: escuadrones de cazas · stock: comprados sin desplegar (los recursos ya se gastaron)
   let pref = 'base', synced = false, fsel = 'W', fsT = 0; // pref: punto de reaparición · fsel: unidad elegida en FLOTA · fsT: último envío del estado de los cazas (anfitrión)
-  const RESN = ['agua', 'piedra', 'cobre', 'plata', 'oro', 'diamante'], SCW = C.ws.scale || 1, F = C.ftr, models = MODELS; // SCW: escala del buque (×4 ≈ 14 km)
+  const RESN = ['agua', 'piedra', 'cobre', 'plata', 'oro', 'diamante'], SCW = C.ws.scale || 1, F = C.ftr, FSC = F.scale || 1, models = MODELS; // SCW: escala del buque (×4 ≈ 14 km)
   const all = () => [...WS.values(), ...SA.values()], mineW = () => [...WS.values()].filter(s => s.o === myId), mineF = () => [...FQ.values()].filter(f => f.o === myId), T = s => s.k === 'W' ? C.ws : C.sat;
   const nmOf = o => o >= 1000 ? ((BASE.HG.get(o) || {}).nm || 'BOT') : o === myId ? myName : ((BASE.LB.list.find(x => x.id === o) || {}).nm || (remotes.get(o) || {}).name || 'Piloto');
   const wpos = s => { const A = bodies[s.a].pos; return [A[0] + s.off[0], A[1] + s.off[1], A[2] + s.off[2]]; };
@@ -43,7 +43,7 @@ const WAR = (() => {
     s.q = lookQ(d[0] || d[2] ? d : [0, 0, -1]); s.g = unitModel(s.k, s.o === myId); s.g.visible = false; scene.add(s.g);
     if (s.k === 'W') { s.halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: haloTex(), color: s.o === myId ? 0x4db8ff : 0xff4030, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, sizeAttenuation: false })); s.halo.scale.set(0.045, 0.045, 1); s.halo.visible = false; scene.add(s.halo); } } // halo: se ve desde cientos de miles de km
   const dropS = s => { if (s.g) scene.remove(s.g); if (s.halo) { scene.remove(s.halo); s.halo.material.dispose(); } };
-  const dropF = f => { for (const c of f.c) if (c.g) scene.remove(c.g); };
+  const dropF = f => { for (const c of f.c) { if (c.g) scene.remove(c.g); if (c.halo) { scene.remove(c.halo); c.halo.material.dispose(); } } };
 
   // ---------- red ----------
   function upd(M, rows, k) { // filas del tick: [id, dueño, zona, cuerpo ancla, x, y, z, vida, escudo (buque) | activo (satélite)]
@@ -133,14 +133,14 @@ const WAR = (() => {
       let tg = null;
       if (f.o !== myId && P.hp > 0 && !S.foot.on && len(sub(S.pos, cen)) < F.engage) tg = { pos: S.pos, v: S.ve || 0, q: S.q, id: myId };
       if (!tg) for (const r of remotes.values()) if (r.id !== f.o && r.id < 2000 && r.hp > 0 && r.apos && len(sub(r.apos, cen)) < F.engage) { tg = { pos: r.apos, v: r.v || 0, q: r.q, id: r.id }; break; }
-      if (!tg) { const h = hostT(c.pos, F.range * 1.5); if (h && len(sub(h.pos, cen)) < F.engage) tg = h; }
+      if (!tg && f.o < 1000) { const h = hostT(c.pos, F.range * 1.5); if (h && len(sub(h.pos, cen)) < F.engage) tg = h; } // los cazas de un bot no atacan a bots
       if (!c.wp || len(sub(c.wp, c.pos)) < 300) { const a = Math.random() * 6.2832, rr = F.patrol * (0.3 + 0.7 * Math.random()); c.wp = [cen[0] + Math.cos(a) * rr, cen[1] + (Math.random() - 0.5) * 1500, cen[2] + Math.sin(a) * rr]; }
       const T0 = tg ? tg.pos : c.wp, d = sub(T0, c.pos), dl = len(d), vDes = tg ? Math.min(F.vmax, Math.max(30, (dl - 400) * 0.6)) : Math.min(F.vmax * 0.5, 20 + dl * 0.2);
-      c.q.rotateTowards(lookQ(nrm(d)), 2.4 * dt); c.v += (vDes - c.v) * (1 - Math.exp(-dt * 1.5)); const fw = new THREE.Vector3(0, 0, -1).applyQuaternion(c.q);
+      c.q.rotateTowards(lookQ(nrm(d)), (F.turn || 1.1) * dt); c.v += (vDes - c.v) * (1 - Math.exp(-dt * 0.7)); const fw = new THREE.Vector3(0, 0, -1).applyQuaternion(c.q); // giro 1,1 rad/s (antes 2,4) y aceleración suave: no maniobran mejor que el jugador
       c.pos = [c.pos[0] + fw.x * c.v * dt, c.pos[1] + fw.y * c.v * dt, c.pos[2] + fw.z * c.v * dt]; c.cd -= dt;
       if (tg && c.cd <= 0 && dl < F.range && (fw.x * d[0] + fw.y * d[1] + fw.z * d[2]) / dl > Math.cos(0.3) && !blocked(c.pos, tg.pos)) { // plasma ligero (lo decide la víctima: el disparo se retransmite con ow = escuadrón)
-        c.cd = weaponCd(WEAPONS[F.w] || WEAPONS.plasma, c, F.cd); c.mz = c.mz === 1 ? -1 : 1; const key = `${myId ?? 0}:f${++seq}`, mz = toWorld(c.pos, c.q, c.mz * 0.0197, -0.002, -0.011), dir = nrm(sub(tg.pos, mz).map(x => x + (Math.random() - 0.5) * 0.02 * dl)); // vaina de punta de ala, una y otra por turnos
-        spawnProj(-f.o, key, 'p', mz, dir, null, F.dmg); sfx('plasma', mz); flash(mz, dir, 0.006, 0xffb070);
+        c.cd = weaponCd(WEAPONS[F.w] || WEAPONS.plasma, c, F.cd); c.mz = c.mz === 1 ? -1 : 1; const key = `${myId ?? 0}:f${++seq}`, mz = toWorld(c.pos, c.q, c.mz * 0.0197 * FSC, -0.002 * FSC, -0.011 * FSC), dir = nrm(sub(tg.pos, mz).map(x => x + (Math.random() - 0.5) * 0.03 * dl)); // vaina de punta de ala, una y otra por turnos
+        spawnProj(-f.o, key, 'p', mz, dir, null, F.dmg); sfx('plasma', mz); flash(mz, dir, 0.006 * FSC, 0xffb070);
         send({ t: 'fire', key, kind: 'p', pos: mz, dir, tgt: null, dmg: F.dmg, rb: -1, rp: null, ow: f.id }); if (tg.id === myId) attackAlert('p', 'Cazas de ' + nmOf(f.o), c.pos);
       }
       rows.push([f.id, j, Math.round(c.pos[0] * 10) / 10, Math.round(c.pos[1] * 10) / 10, Math.round(c.pos[2] * 10) / 10, +c.q.x.toFixed(3), +c.q.y.toFixed(3), +c.q.z.toFixed(3), +c.q.w.toFixed(3), Math.round(c.v)]);
@@ -157,10 +157,10 @@ const WAR = (() => {
     const host = BASE.isHost() && BASE.started() && !BASE.loading() && BASE.LB.phase === 'playing';
     if (host) fsim(dt, now);
     for (const f of FQ.values()) f.c.forEach((c, j) => { // dibujo de los cazas (los demás clientes extrapolan desde el último estado)
-      if (!c.g) { c.g = unitModel('F', f.o === myId); scene.add(c.g); }
+      if (!c.g) { c.g = unitModel('F', f.o === myId); scene.add(c.g); c.halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: haloTex(), color: f.o === myId ? 0x4db8ff : 0xff4030, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, sizeAttenuation: false })); c.halo.scale.set(0.022, 0.022, 1); scene.add(c.halo); } // halo de bando: visible a miles de km
       let w = c.pos; if (!host && c.t0) { const fw = new THREE.Vector3(0, 0, -1).applyQuaternion(c.q), k = c.v * Math.min(1, (now - c.t0) / 1000); w = [w[0] + fw.x * k, w[1] + fw.y * k, w[2] + fw.z * k]; }
-      c.w = w; const v = view(w); c.d = v.d; c.g.visible = !f.arr && f.hp[j] > 0 && v.d < 300000; if (!c.g.visible) return;
-      c.g.position.set(v.x, v.y, v.z); stretch(c.g, Math.max(v.s, v.rd * 0.12), f, now); c.g.quaternion.copy(c.q); setThrust(c.g, c.v, now); updateShipFx(c.g, now, 0);
+      c.w = w; const v = view(w); c.d = v.d; c.g.visible = !f.arr && f.hp[j] > 0 && v.d < 300000; c.halo.visible = c.g.visible && v.d > 20; if (!c.g.visible) return;
+      c.halo.position.set(v.x, v.y, v.z); c.g.position.set(v.x, v.y, v.z); stretch(c.g, Math.max(v.s * FSC, v.rd * 0.4), f, now); c.g.quaternion.copy(c.q); setThrust(c.g, c.v, now); updateShipFx(c.g, now, 0); // modelo ×6 y tamaño mínimo en pantalla (~0,7°)
     });
     if (!BASE.started() || BASE.loading() || BASE.LB.phase !== 'playing') return;
     const alive = P.hp > 0 && !S.warp.on && !S.foot.on;
@@ -168,7 +168,7 @@ const WAR = (() => {
       if ((s.k === 'S' && !s.on) || s.arr) continue; const t = T(s); s.cd = (s.cd ?? Math.random() * t.cd) - dt; if (s.cd > 0) continue;
       let tg = null;
       if (s.o !== myId && alive && s.d < t.range) tg = { pos: S.pos, v: S.ve || 0, q: S.q, id: myId };
-      else if (host) tg = hostT(s.w, t.range);
+      else if (host && s.o < 1000) tg = hostT(s.w, t.range); // unidades de bots: solo contra humanos (cada humano las simula contra sí mismo)
       const seen = !!tg && !blocked(s.w, tg.pos);
       if (s.k === 'W') { if (seen) { if (!s.det && now - (s.alT || 0) > C.alarmCd * 1000) { s.alT = now; send({ t: 'walarm', i: s.id }); } s.det = now; } else if (s.det && now - s.det > 3000) s.det = 0; } // detección nueva de un enemigo: alarma (el servidor la reparte a todos)
       if (!seen) { s.cd = 0.5; continue; }
@@ -183,7 +183,7 @@ const WAR = (() => {
       if (!ok) continue;
       send({ t: 'wh', k: s.k, i: s.id, dmg: p.dmg, nb: neu ? 1 : 0 }); const a = Math.min(s.sh || 0, p.dmg); if (s.k === 'W') s.sh -= a; s.hp -= p.dmg - a; boom(pos, p.kind === 'm' ? 0.08 : 0.02); if (!neu) P.lastCombat = performance.now(); return true;
     }
-    const R = p.spd !== undefined || ak > 0.02 ? 0.05 : HIT_R;
+    const R = p.spd !== undefined || ak > 0.02 ? 0.05 * FSC : HIT_R;
     for (const f of FQ.values()) { if ((!neu && f.o === myId) || f.arr) continue; for (let j = 0; j < F.n; j++) { const c = f.c[j]; if (!(f.hp[j] > 0) || !c.w || segDist(old, pos, c.w) > R) continue; send({ t: 'wh', k: 'F', i: f.id, j, dmg: p.dmg, nb: neu ? 1 : 0 }); f.hp[j] -= p.dmg; boom(pos, 0.02); return true; } }
     return false;
   }
@@ -277,10 +277,10 @@ const WAR = (() => {
     }
     return false;
   }
-  function units() { // unidades desplegadas (buques, satélites y escuadrones de cazas: su centro) para el HUD y el mapa
+  function units() { // unidades desplegadas (buques, satélites y cada CAZA por separado) para el HUD y el mapa
     const now = performance.now(), ap = u => u.arr ? Math.max(0, Math.min(1, 1 - (u.arT - now) / (C.arrive * 1000))) : 0; // ap: progreso de la llegada (0 = llegó)
     const out = all().filter(s => s.w).map(s => ({ k: s.k, o: s.o, w: s.w, d: s.d, id: s.id, on: s.on, arr: s.arr, ap: ap(s), bl: s.blinkT }));
-    for (const f of FQ.values()) { const al = f.c.filter((c, j) => f.hp[j] > 0 && (c.w || f.arr)); if (!al.length) continue; const w = f.arr ? fcen(f) : [0, 1, 2].map(i => al.reduce((a, c) => a + c.w[i], 0) / al.length); out.push({ k: 'F', o: f.o, w, d: len(sub(w, S.pos)), id: f.id, n: al.length, arr: f.arr, ap: ap(f) }); }
+    for (const f of FQ.values()) f.c.forEach((c, j) => { if (!(f.hp[j] > 0)) return; const w = c.w || c.pos; if (!w) return; out.push({ k: 'F', o: f.o, w, d: len(sub(w, S.pos)), id: f.id * 10 + j, sq: f.id, hp: f.hp[j], arr: f.arr, ap: ap(f) }); }); // cada caza por separado (id = escuadrón × 10 + caza)
     return out;
   }
   const IMG = {}; const iconImg = k => IMG[k] || (IMG[k] = Object.assign(new Image(), { src: 'data:image/svg+xml;utf8,' + encodeURIComponent(SVG[k]) })); // iconos de la tienda como imagen para los canvas
@@ -337,7 +337,7 @@ const WAR = (() => {
         const dd = sub(u.w, S.pos); if (!mine && losBlocked({ kind: 'W', dir: dd.map(q => q / dl), dist: dl })) continue;
         const p = scrPos(u.w, W, H); if (p.edge && !mine) continue; if (!p.edge && dl < (u.k === 'W' ? 12 * SCW : 1)) p.y -= 60; // muy cerca: el icono no tapa el modelo
         badge(p, u.k, mine, u);
-        if (!p.edge && dl < (u.k === 'W' ? LABEL_KM.buque : u.k === 'S' ? LABEL_KM.satelite : LABEL_KM.nave) && !aimedIs(u.k, u.id)) hudText(p.x, p.y + 32, [[`${u.k === 'W' ? 'BUQUE' : u.k === 'S' ? 'SATÉLITE' : `CAZAS ×${u.n}`} · ${mine ? 'TUYO' : nmOf(u.o).toUpperCase()}${u.k === 'S' && !u.on ? ' · INACTIVO' : ''} · ${fDs(dl)}`, mine ? '#9fd8ff' : '#ff8a7a', `bold 10px ${MONO}`]], 6); // texto solo cerca
+        if (!p.edge && dl < (u.k === 'W' ? LABEL_KM.buque : u.k === 'S' ? LABEL_KM.satelite : LABEL_KM.nave) && !aimedIs(u.k, u.id)) hudText(p.x, p.y + 32, [[`${u.k === 'W' ? 'BUQUE' : u.k === 'S' ? 'SATÉLITE' : 'CAZA'} · ${mine ? 'TUYO' : nmOf(u.o).toUpperCase()}${u.k === 'S' && !u.on ? ' · INACTIVO' : ''} · ${fDs(dl)}`, mine ? '#9fd8ff' : '#ff8a7a', `bold 10px ${MONO}`]], 6); // texto solo cerca
       }
       const zi = czAt(SYS, CZ, S.pos, simT); if (CZS[zi].c && CZS[zi].p > 0 && !S.warp.on && !(S.warp.cd > 0)) banner(zi, W, now); // solo mientras se reclama o se disputa (al llegar al 100 % desaparece: aviso puntual en #nt)
     }

@@ -10,7 +10,7 @@ const MAP = (() => {
   const RTS_PITCH = -1.0, RTS_YAW = 0, RTS_DIST = 2.2, DIST_MAX = 80; // vista RTS: cámara alta mirando en diagonal (57° sobre el plano), rumbo fijo; distancia inicial cerca de tu nave y hasta ver todo el sistema
   const st = { open: false, drag: null, btn: 0, moved: 0, mx: 0, my: 0, yaw: RTS_YAW, pitch: RTS_PITCH, pos: new THREE.Vector3(), goal: null, keys: {}, sel: null, cardSig: '', hover: [], t: 0, follow: true, dist: RTS_DIST }; // follow: la cámara sigue a tu nave hasta que la muevas a mano (C la vuelve a fijar)
   let sys = null, c3 = null, pmr = null;
-  const K = 1e-6; // km -> unidades del mapa
+  const K = 1e-6 / SYS_SCALE; // km -> unidades del mapa (compensa la compactación: el mapa se ve igual de grande y los zooms siguen valiendo)
   const accent = r => { try { return JSON.parse(r.spk).c; } catch { return 0xff6a3c; } };
   const hex = c => '#' + (c >>> 0).toString(16).padStart(6, '0');
   const others = () => [...remotes.values()].filter(r => r.apos && r.hp > 0).concat(typeof BOT !== 'undefined' ? [...BOT.bots.values()].filter(B => !B.dead && B.grp.visible).map(B => ({ apos: B.pos, q: B.q, name: B.name || 'BOT', spk: '{"c":16728112}' })) : []); // en el anfitrión sus bots no son remotos
@@ -76,7 +76,7 @@ const MAP = (() => {
   }
   function entityPos(P, out) { // un punto del espacio real -> mapa (junto al cuerpo más cercano si está cerca de él)
     let best = null, bd = 1e30; for (const b of bodies) { const d = Math.hypot(P[0] - b.pos[0], P[1] - b.pos[1], P[2] - b.pos[2]); if (d < bd) { bd = d; best = b; } }
-    if (best && bd < best.R * 40 + 5e4 && best.k !== 'sun') { const v = new THREE.Vector3(P[0] - best.pos[0], P[1] - best.pos[1], P[2] - best.pos[2]).normalize(); dpos(best, out); return out.addScaledVector(v, dispR(best) * (1.5 + Math.min(1.5, (bd - best.R) / (best.R * 40)))); }
+    if (best && bd < best.R * 40 + 5e4 * SYS_SCALE && best.k !== 'sun') { const v = new THREE.Vector3(P[0] - best.pos[0], P[1] - best.pos[1], P[2] - best.pos[2]).normalize(); dpos(best, out); return out.addScaledVector(v, dispR(best) * (1.5 + Math.min(1.5, (bd - best.R) / (best.R * 40)))); }
     return out.set(P[0] * K, P[1] * K, P[2] * K);
   }
   const vTmp = new THREE.Vector3(), vTmp2 = new THREE.Vector3();
@@ -116,7 +116,7 @@ const MAP = (() => {
     const s = st.sel; if (!s) { card.hidden = true; return; }
     const sig = JSON.stringify([s.kind, s.i, ZR, S.tgt, s.kind === 'cz' ? [WAR.CZS[s.i], WAR.look(s.i).txt] : 0]); if (sig === st.cardSig && !card.hidden) return; st.cardSig = sig; card.hidden = false;
     if (s.kind === 'zone') { card.innerHTML = zoneBlock(s.i); return; }
-    const b = bodies[s.i], d = Math.hypot(b.pos[0] - S.pos[0], b.pos[1] - S.pos[1], b.pos[2] - S.pos[2]) - b.R, zs = b.k === 'sun' ? [] : ZT.map(t => [t, Math.hypot(t.pos[0] - b.pos[0], t.pos[1] - b.pos[1], t.pos[2] - b.pos[2])]).filter(x => x[1] < 1.5e6).sort((x, y) => x[1] - y[1]).slice(0, 1).map(x => x[0]), occ = BASES.find(x => x.body === b.n);
+    const b = bodies[s.i], d = Math.hypot(b.pos[0] - S.pos[0], b.pos[1] - S.pos[1], b.pos[2] - S.pos[2]) - b.R, zs = b.k === 'sun' ? [] : ZT.map(t => [t, Math.hypot(t.pos[0] - b.pos[0], t.pos[1] - b.pos[1], t.pos[2] - b.pos[2])]).filter(x => x[1] < 1.5e6 * SYS_SCALE).sort((x, y) => x[1] - y[1]).slice(0, 1).map(x => x[0]), occ = BASES.find(x => x.body === b.n);
     card.innerHTML = `<h3>${b.n}</h3><small>${b.k === 'sun' ? 'estrella' : b.parent ? 'luna de ' + b.parent.n : (b.label || 'planeta')} · ${fD(Math.max(0, d))}${d > 1 ? ' · a 5 c: ' + fT(d / (5 * C)) : ''}${occ ? ' · hangar de ' + occ.owner : ''}</small>`
       + (zs.length ? zs.map(t => zoneBlock(t.zi)).join('') : '<div class="zb"><small>Sin zona de recursos cercana.</small></div>');
   }
@@ -258,15 +258,24 @@ const MAP = (() => {
       g.restore();
     }
     st.czHz = hz; // zona bajo el cursor: drawSys muestra solo a quién pertenece
-    for (const u of WAR.units()) { // toda la flota desplegada (buques, satélites y escuadrones de cazas) con el ICONO de la tienda: contorno azul la mía, rojo la ajena (junto a su planeta si está anclada a él)
-      const q = projU(entityPos(u.w, czV)); if (!q) continue; const mine = u.o === myId, col = mine ? '#4db8ff' : '#ff3b30', im = WAR.iconImg(u.k);
-      g.beginPath(); g.arc(q[0], q[1], 14, 0, 7); g.fillStyle = '#050f1c'; g.fill(); g.beginPath(); g.arc(q[0], q[1], 11.5, 0, 7); g.fillStyle = mine ? '#062a4a' : '#4a0a06'; g.fill(); g.lineWidth = 3; g.strokeStyle = col; g.stroke();
-      if (u.arr) g.globalAlpha = 0.5; if (im.complete && im.naturalWidth) g.drawImage(im, q[0] - 9, q[1] - 9, 18, 18); g.globalAlpha = 1;
-      if (u.arr) { g.lineWidth = 3; g.strokeStyle = '#9fe8ff'; g.beginPath(); g.arc(q[0], q[1], 17, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * u.ap); g.stroke(); } // llegando: anillo de progreso
-      if (u.bl && performance.now() - u.bl < 2500 && Math.floor(performance.now() / 180) % 2) { g.lineWidth = 3; g.strokeStyle = mine ? '#ffd23f' : '#ff3b30'; g.beginPath(); g.arc(q[0], q[1], 19, 0, 7); g.stroke(); } // alarma: parpadeo
-      const nm = `${u.k === 'W' ? 'BUQUE' : u.k === 'S' ? 'SATÉLITE' : 'CAZAS'} · ${mine ? 'TUYO' : WAR.nmOf(u.o)}`;
-      if (u.d < (u.k === 'W' ? LABEL_KM.buque : u.k === 'S' ? LABEL_KM.satelite : LABEL_KM.nave)) Q(q[0], q[1] + 8, nm, mine ? '#9fd8ff' : '#ff8a7a', 6, { bold: true, size: 10 }); // texto solo cerca
-      pts.push({ x: q[0], y: q[1], n: nm, kind: u.k === 'W' ? 'buque de guerra' : u.k === 'S' ? 'satélite defensivo' : 'escuadrón de cazas', pos: u.w });
+    { // FLOTA desplegada: un icono POR UNIDAD (cada caza aparte) con el SVG de la tienda, azul la mía y rojo la ajena; los que caen a < 36 px se reparten en anillo alrededor de su centroide (orden estable por id) con una línea guía hasta su posición real
+      const R = 15 * Math.min(1.4, Math.max(1, Math.sqrt(RTS_DIST / st.dist))), L = [];
+      for (const u of WAR.units()) { const q = projU(entityPos(u.w, czV)); if (q) L.push({ u, q, x: q[0], y: q[1] }); }
+      L.sort((a, b) => (a.u.k + a.u.id < b.u.k + b.u.id ? -1 : 1)); const grp = [];
+      for (const e of L) { const G = grp.find(G => Math.hypot(G.cx - e.q[0], G.cy - e.q[1]) < 36); if (G) { G.m.push(e); G.cx = G.m.reduce((a, x) => a + x.q[0], 0) / G.m.length; G.cy = G.m.reduce((a, x) => a + x.q[1], 0) / G.m.length; } else grp.push({ cx: e.q[0], cy: e.q[1], m: [e] }); }
+      for (const G of grp) if (G.m.length > 1) { const n = G.m.length, rr = Math.max(2 * R + 6, n * (2 * R + 6) / (2 * Math.PI)); G.m.forEach((e, k) => { const a = -Math.PI / 2 + k * 2 * Math.PI / n; e.x = G.cx + Math.cos(a) * rr; e.y = G.cy + Math.sin(a) * rr; }); }
+      for (const { u, q, x, y } of L) {
+        const mine = u.o === myId, col = mine ? '#4db8ff' : '#ff3b30', im = WAR.iconImg(u.k);
+        if (x !== q[0] || y !== q[1]) { g.lineWidth = 1; g.strokeStyle = col; g.globalAlpha = 0.6; g.beginPath(); g.moveTo(q[0], q[1]); g.lineTo(x, y); g.stroke(); g.globalAlpha = 1; g.beginPath(); g.arc(q[0], q[1], 2.5, 0, 7); g.fillStyle = col; g.fill(); } // guía hasta la posición real
+        g.beginPath(); g.arc(x, y, R + 2.5, 0, 7); g.fillStyle = '#050f1c'; g.fill(); g.beginPath(); g.arc(x, y, R, 0, 7); g.fillStyle = mine ? '#062a4a' : '#4a0a06'; g.fill(); g.lineWidth = 3; g.strokeStyle = col; g.stroke();
+        if (u.arr) g.globalAlpha = 0.5; if (im.complete && im.naturalWidth) g.drawImage(im, x - R * 0.8, y - R * 0.8, R * 1.6, R * 1.6); g.globalAlpha = 1;
+        if (u.arr) { g.lineWidth = 3; g.strokeStyle = '#9fe8ff'; g.beginPath(); g.arc(x, y, R + 5, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * u.ap); g.stroke(); } // llegando: anillo de progreso
+        if (u.bl && performance.now() - u.bl < 2500 && Math.floor(performance.now() / 180) % 2) { g.lineWidth = 3; g.strokeStyle = mine ? '#ffd23f' : '#ff3b30'; g.beginPath(); g.arc(x, y, R + 7, 0, 7); g.stroke(); } // alarma: parpadeo
+        const nm = `${u.k === 'W' ? 'BUQUE' : u.k === 'S' ? 'SATÉLITE' : 'CAZA'} · ${mine ? 'TUYO' : WAR.nmOf(u.o)}`;
+        if (u.d < (u.k === 'W' ? LABEL_KM.buque : u.k === 'S' ? LABEL_KM.satelite : LABEL_KM.nave)) Q(x, y + R - 6, nm, mine ? '#9fd8ff' : '#ff8a7a', 6, { bold: true, size: 10 }); // texto solo cerca
+        pts.push({ x, y, n: nm, kind: u.k === 'W' ? 'buque de guerra' : u.k === 'S' ? 'satélite defensivo' : 'caza', pos: u.w });
+      }
+      st.fleetIcons = L.map(e => [e.u.k, e.u.id, Math.round(e.x), Math.round(e.y), R]); // (pruebas) iconos dibujados este cuadro
     }
     st.ghost = null;
     if (pl) { // fantasma bajo el cursor: verde = válido, rojo = inválido (con el motivo); el clic lo confirma

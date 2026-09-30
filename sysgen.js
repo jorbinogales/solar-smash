@@ -2,6 +2,12 @@
 // Solo planetas habitables (sin gigantes gaseosos): templados, tipo Marte, tipo Venus, helados y rojos volcánicos, más lunas rocosas. Órbitas compactas.
 (function (root) {
   const DS = 0.06, AU_GAME = 149597870.7 * DS; // igual que DIST_SCALE de game.js: 'a' se guarda sin escalar
+  // SYS_SCALE: COMPACTACIÓN del sistema (única fuente; la leen space.js, map.js, game.js y neutral.js). Multiplica: semiejes de las órbitas (y por tanto anillos y
+  // sectores de las zonas de control, cinturón, núcleo/zona letal de la estrella), radios de planetas y lunas, atmósferas (H), relieve (amp, cañones, cráteres) y tamaño de los continentes (cs, planets.js),
+  // radios y celdas de los cúmulos, y los márgenes de despliegue/exclusión derivados (orbitClear, exclHg, exclWs...). NO toca: la estrella (R★ y su radiación),
+  // approachKm (300 km absolutos), alcances de armas/radar ni los periodos orbitales (T se calcula con la órbita SIN compactar: mismas vueltas, trayectorias más cortas).
+  // El generador consume exactamente los mismos números aleatorios que con 1: cada semilla da el mismo sistema, a escala.
+  const SYS_SCALE = 0.5;
   const mulberry = s => () => { s = (s + 0x6D2B79F5) | 0; let t = Math.imul(s ^ (s >>> 15), 1 | s); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
   const hex = n => '#' + (n >>> 0).toString(16).padStart(6, '0');
 
@@ -21,16 +27,16 @@
     const r = mulberry((seed >>> 0) || 1), used = new Set();
     const name = () => { for (let i = 0; i < 50; i++) { const n = SYL_A[(r() * SYL_A.length) | 0] + SYL_B[(r() * SYL_B.length) | 0]; if (!used.has(n)) { used.add(n); return n; } } return 'Cuerpo' + used.size; };
     const tint = (c, amt) => { const ch = s => Math.max(0, Math.min(255, ((c >> s) & 255) + Math.round((r() - 0.5) * amt))); return (ch(16) << 16) | (ch(8) << 8) | ch(0); };
-    const R = (a, b) => a + r() * (b - a), SC = 0.28, HS = 0.45; // SC: escala de los mundos; HS: escala de las atmósferas
+    const R = (a, b) => a + r() * (b - a), SC = 0.28 * SYS_SCALE, HS = 0.45 * SYS_SCALE; // SC: escala de los mundos; HS: escala de las atmósferas (ambas compactadas)
 
     const STARS = [[0xffcf5a, 0xff6a00], [0xffe9b0, 0xffb347], [0xffb070, 0xe04a10]], sc = STARS[(r() * STARS.length) | 0];
     const star = { n: name() + ' (estrella)', R: 250000, a: 0, T: 0, k: 'sun', c1: hex(sc[0]), c2: hex(sc[1]), type: 'sun', label: 'Estrella' };
     const surf = {}, atmo = {}, bodies = [star];
 
     const nRand = 4 + ((r() * 4) | 0), nP = nPlan ? Math.max(2, Math.min(8, nPlan)) : nRand; // con lunas nunca más de 10 cuerpos
-    let a = R(5e6, 6.2e6); // primer planeta fuera de la turbulencia de la estrella (16 radios = 4e6 km)
+    let a = R(5e6, 6.2e6) * SYS_SCALE; // primer planeta fuera de la turbulencia de la estrella (16·SYS_SCALE radios, game.js) y de su zona letal (≤ la mitad de esta órbita)
     const orbits = [];
-    for (let i = 0; i < nP; i++) { orbits.push(a); a += R(1.3e6, 2.4e6); }
+    for (let i = 0; i < nP; i++) { orbits.push(a); a += R(1.3e6, 2.4e6) * SYS_SCALE; }
 
     const pick = t => { // tipo según la zona: infernales y rojos por dentro, templados y desiertos en medio, helados por fuera
       const w = { venus: 1.3 * (1 - t) * (1 - t) + 0.05, red: 0.7, earth: Math.max(0.25, 1.6 - Math.abs(t - 0.4) * 3), mars: t > 0.15 ? 1 : 0.2, frozen: 1.6 * t * t + 0.05 };
@@ -48,23 +54,24 @@
       else if (type === 'frozen') { d = { R: R(3000 * SC, 6000 * SC), c1: hex(tint(0x9fc3d8, 30)), c2: hex(tint(0xf4fbff, 20)) }; s = { kind: 'rock', amp: R(10, 18), seed: seedN, c: [tint(0xa9c6d8, 30), 0xf5fbff], cr: [[200, 0.5], [40, 0.35]], objs: [0xdff0fa, tint(0xa9c8dc, 20)], style: { ore: 'shard', flora: 'crystalTree' } }; at = { c: tint(0xbfe3ff, 30), H: R(50 * HS, 80 * HS) }; }
       else if (type === 'red') { d = { R: R(3200 * SC, 6000 * SC), c1: hex(tint(0x3a1410, 20)), c2: hex(tint(0xd0502c, 40)) }; s = { kind: 'rock', amp: R(18, 26), seed: seedN, c: [tint(0x3a1410, 20), tint(0xc2452a, 40)], cr: [[180, 0.6], [28, 0.5], [6, 0.3]], objs: [tint(0x8a3a28, 30), 0x4a1c14], style: { ore: 'nugget', flora: 'slag' } }; at = { c: tint(0xc26040, 30), H: R(45 * HS, 70 * HS) }; }
       else { const g = (r() * 3) | 0, base = [[0x4d4d4d, 0x9c9c9c], [0x5a4c40, 0xb09a86], [0x44505a, 0xa0b0bc]][g]; d = { R: R(800 * SC, 2200 * SC), c1: hex(base[0]), c2: hex(base[1]) }; s = { kind: 'rock', amp: R(5, 9), seed: seedN, c: base, cr: [[180, 1], [30, 0.7], [5, 0.4]], objs: [0xb8b8b8, 0x8a8a8a], style: { ore: 'shard', flora: 'crystalTree' } }; }
+      s.amp *= SYS_SCALE; s.cs = SYS_SCALE; if (s.canyon) s.canyon *= SYS_SCALE; if (s.cr) s.cr = s.cr.map(([c, k]) => [c * SYS_SCALE, k]); // relieve compactado como el radio (tras sortear: no altera la secuencia aleatoria)
       surf[n] = s; if (at) atmo[n] = at;
       return { n, k: type === 'earth' ? 'earth' : 'rock', type, label: TYPES[type].label, desc: TYPES[type].desc, ...d };
     };
 
-    const planets = orbits.map((ag, i) => { const b = make(types[i], name()); b.a = ag / DS; b.T = 365.25 * Math.pow(ag / AU_GAME, 1.5); b.ph = r() * 6.2832; return b; });
+    const planets = orbits.map((ag, i) => { const b = make(types[i], name()); b.a = ag / DS; b.T = 365.25 * Math.pow(ag / SYS_SCALE / AU_GAME, 1.5); b.ph = r() * 6.2832; return b; });
     const moons = []; let total = nP;
     planets.forEach(p => {
-      if (total >= 10 || r() > 0.45 || p.R < 900) return;
+      if (total >= 10 || r() > 0.45 || p.R < 900 * SYS_SCALE) return;
       const m = make('moon', p.n + ' ' + ROMAN[0]); m.parent = p.n; total++;
-      const far = r() < 0.4; m.a = p.R * (far ? R(18, 32) : R(3.2, 8)); m.T = Math.max(0.3, 27.32 * Math.pow(m.a / 384400, 1.5)); m.ph = r() * 6.2832;
+      const far = r() < 0.4; m.a = p.R * (far ? R(18, 32) : R(3.2, 8)); m.T = Math.max(0.3, 27.32 * Math.pow(m.a / SYS_SCALE / 384400, 1.5)); m.ph = r() * 6.2832;
       moons.push(m);
     });
     planets.forEach(p => { bodies.push(p); moons.filter(m => m.parent === p.n).forEach(m => bodies.push(m)); });
 
     // cinturón de asteroides en el mayor hueco entre órbitas
     let gi = 0, gap = 0; for (let i = 0; i < nP - 1; i++) if (orbits[i + 1] - orbits[i] > gap) { gap = orbits[i + 1] - orbits[i]; gi = i; }
-    const bi = orbits[gi] + gap * 0.3, bo = orbits[gi + 1] - gap * 0.3, belt = { i: bi, o: bo, h: Math.min(0.3e6, (bo - bi) * 0.35) };
+    const bi = orbits[gi] + gap * 0.3, bo = orbits[gi + 1] - gap * 0.3, belt = { i: bi, o: bo, h: Math.min(0.3e6 * SYS_SCALE, (bo - bi) * 0.35) };
     return { seed, star, bodies, surf, atmo, belt, types: TYPES };
   }
   // Zonas de recursos: el sistema tiene un presupuesto FINITO de cada recurso repartido en cúmulos de asteroides con 1-2 recursos dominantes.
@@ -83,7 +90,7 @@
     for (const cz of czs) {
       const k = zones.length, t = order[k % order.length], dom = [{ type: t, budget: bud(t, 1) }];
       if (r() < 0.55) { let sw = 0; for (const q of RT) if (q !== t) sw += ZONE_SEC_W[q]; let x = r() * sw; for (const q of RT) { if (q === t) continue; x -= ZONE_SEC_W[q]; if (x <= 0) { dom.push({ type: q, budget: bud(q, 0.5) }); break; } } }
-      const radius = Math.round(2500 + r() * 2500), clear = WARCFG.orbitClear + 3 * radius + 20000, lo = cz.r0 + 2 * radius + 20000, hi = (cz.r1 === Infinity ? cz.r0 * 1.35 : cz.r1) - 2 * radius - 20000;
+      const M = 20000 * SYS_SCALE, radius = Math.round((2500 + r() * 2500) * SYS_SCALE), clear = WARCFG.orbitClear + 3 * radius + M, lo = cz.r0 + 2 * radius + M, hi = (cz.r1 === Infinity ? cz.r0 * 1.35 : cz.r1) - 2 * radius - M; // radio y celda ×SYS_SCALE: mismas rocas por cúmulo, la mitad de separadas
       let best = null, bd = -1; // radio en el sector: lejos de TODAS las órbitas (el planeta y sus lunas pasan por ahí); se reintenta con el mismo generador (determinista)
       for (let i = 0; i < 40; i++) { const rr = lo + r() * Math.max(0, hi - lo), dd = Math.min(...orbs.map(o => Math.abs(rr - o))); if (dd > bd) { bd = dd; best = rr; } if (dd >= clear) break; }
       const a = cz.a0 + cz.da * (0.2 + 0.6 * r()), th = ZONE_THEME[t][(r() * 2) | 0];
@@ -135,8 +142,8 @@
   // que además apenas se mueven en una partida: sus años duran meses reales). Se reclaman permaneciendo dentro; reclamadas permiten desplegar buques y construir satélites.
   const WARCFG = {
     capS: 50, // s para reclamar una zona en solitario (más rápido con tu buque dentro; baja si hay enemigos dentro o nadie)
-    exclHg: 150000, exclWs: 100000, // ZONA ROJA (no se despliega): la zona que contiene un planeta con hangar enemigo o un buque enemigo, y las vecinas a las que llega ese radio
-    starClear: 1000000, orbitClear: 80000, // no se despliega a menos de esto de la estrella ni de la órbita de un planeta principal (sus lunas quedan dentro de ese margen)
+    exclHg: 150000 * SYS_SCALE, exclWs: 100000 * SYS_SCALE, // ZONA ROJA (no se despliega): la zona que contiene un planeta con hangar enemigo o un buque enemigo, y las vecinas a las que llega ese radio
+    starClear: 1000000, orbitClear: 80000 * SYS_SCALE, // no se despliega a menos de esto de la estrella (sin compactar: la estrella no cambia; el Núcleo, no reclamable, ya lo cubre) ni de la órbita de un planeta principal (sus lunas quedan dentro de ese margen)
     sectors: [4, 4, 5, 5, 6, 6, 6, 6], outerSectors: 6,
     starKill: { k: 3, tMax: 8, tMin: 1.5, reset: 1 }, // ZONA LETAL de la estrella: radio = máx(R★·(1+k), radio del Núcleo estelar); cuenta atrás clamp(tMax·d_superficie/(R_letal−R★), tMin, tMax) s; fuera se cancela tras `reset` s
     arrive: 6, alarmCd: 20, // s que tarda en LLEGAR una unidad desplegada (sale del viaje de luz) · s mínimos entre dos alarmas de un mismo buque
@@ -148,13 +155,13 @@
     // proyectil vive l/spd·1,5 + 3 s (≤ 60) · hr 0,25 km: radio de espoleta de proximidad del proyectil (las demás torretas, 0,04-0,05) · cd 1,1 s entre disparos del buque,
     // que alternan entre las 3 torretas gemelas del costado que mira al blanco (cada torreta dispara cada 3,3 s, cañón izquierdo y derecho por turnos)
     ws: { max: 2, hp: 3000, sh: 1000, scale: 4, near: 32, range: 6000, dmg: 6, cd: 1.1, spd: 300, hr: 0.25, w: 'cannon', cost: { oro: 40, diamante: 8, plata: 60, cobre: 100, piedra: 150 } },
-    ftr: { max: 30, n: 3, hp: 60, dmg: 4, cd: 0.8, range: 3000, w: 'plasma', engage: 8000, patrol: 6000, vmax: 400, cost: { plata: 15, cobre: 30, piedra: 30 } }, // escuadrón de CAZAS: n cazas de hp cada uno, plasma ligero; patrullan patrol km en torno a su punto y atacan hasta engage km de él
+    ftr: { max: 30, n: 3, hp: 60, dmg: 4, cd: 0.8, range: 3000, w: 'plasma', engage: 8000, patrol: 6000, vmax: 200, turn: 1.1, scale: 6, cost: { plata: 15, cobre: 30, piedra: 30 } }, // escuadrón de CAZAS: n cazas de hp cada uno (cada caza es una UNIDAD: icono, objetivo y daño propios), plasma ligero; vmax 200 km/s (< las naves de jugador), giro 1,1 rad/s, modelo ×6; patrullan patrol km en torno a su punto y atacan hasta engage km de él
     sat: { maxZone: 3, hp: 800, range: 1200, dmg: 20, cd: 4, spd: 50, w: 'missile', radar: 1500000, cost: { oro: 8, plata: 20, cobre: 40, piedra: 60 } }, // satélite defensivo (~1 km): misiles guiados de largo alcance
   };
   const TAU = Math.PI * 2;
   function genControlZones(sys) { // zonas: { id, name, ring, r0, r1 (Infinity en los Confines), a0 (ángulo inicial), da (amplitud), n (sectores del anillo), planet, res (recurso pasivo), noClaim (zona solar) } · zs.rings: [{ r0, r1, a0, n, first }]
     const r = mulberry((((sys.seed >>> 0) || 1) ^ 0x51c3a7) >>> 0 || 11), zs = [], rings = [], mains = sys.bodies.filter(b => b.k !== 'sun' && !b.parent), orb = mains.map(b => b.a * DS); // órbitas de dentro afuera
-    const edges = [0, orb[0] / 2, ...orb.slice(1).map((o, k) => (orb[k] + o) / 2), orb[orb.length - 1] + (orb.length > 1 ? orb[orb.length - 1] - orb[orb.length - 2] : 1.5e6) / 2, Infinity];
+    const edges = [0, orb[0] / 2, ...orb.slice(1).map((o, k) => (orb[k] + o) / 2), orb[orb.length - 1] + (orb.length > 1 ? orb[orb.length - 1] - orb[orb.length - 2] : 1.5e6 * SYS_SCALE) / 2, Infinity];
     const ring = (k, n, name) => {
       const a0 = n > 1 ? r() * TAU / n : 0, da = TAU / n; rings.push({ r0: edges[k], r1: edges[k + 1], a0, n, first: zs.length });
       for (let j = 0; j < n; j++) zs.push({ id: zs.length, name: n > 1 ? `${name} · Sector ${j + 1}` : name, ring: k, r0: edges[k], r1: edges[k + 1], a0: a0 + j * da, da, n, planet: k >= 1 && k <= mains.length ? mains[k - 1].n : null });
@@ -189,7 +196,7 @@
   //   a WARCFG.approachKm (300 km) de altitud (si 6·H + 30 km es mayor, sobre la exosfera), ANCLADO AL PLANETA (viaja con él), en abanico de 60 km (> 3 × los 14 km del buque).
   //   Sin bases: igual, del lado de la estrella. · at 'c' (defecto): a 300 km del BORDE del cúmulo de la zona (anclado a la estrella).
   function czOrbitPoint(sys, z, idx) { // punto de reserva en un sector sin cúmulo ni planeta: en el ángulo central del sector, fuera del margen de la órbita de su planeta (anclado a la estrella)
-    const b = sys.bodies.find(x => x.n === z.planet), am = z.a0 + z.da / 2 + ((idx % 8) - 3.5) * 0.02, rr = b ? b.a * DS + WARCFG.orbitClear + 20000 + Math.floor(idx / 8) * 6000 : czCenter(z)[0] ? Math.hypot(...czCenter(z)) : z.r0 * 1.2;
+    const b = sys.bodies.find(x => x.n === z.planet), am = z.a0 + z.da / 2 + ((idx % 8) - 3.5) * 0.02, rr = b ? b.a * DS + WARCFG.orbitClear + 20000 * SYS_SCALE + Math.floor(idx / 8) * 6000 : czCenter(z)[0] ? Math.hypot(...czCenter(z)) : z.r0 * 1.2;
     const o = [Math.round(rr * Math.cos(am)), 0, Math.round(rr * Math.sin(am))]; return { a: 0, off: o, abs: o };
   }
   function czDeployPoint(sys, czs, zones, zi, idx, at, t, bases, me, myPos) {
@@ -225,13 +232,13 @@
     if (z.noClaim) return 'Zona solar: no se puede desplegar';
     const attack = anch > 0 && hangars.some(h => h.o !== me && h.b === (sys.bodies[anch] || {}).n); // ATAQUE: junto a un planeta con base rival (o de bot): vale aunque la zona sea suya o roja
     if (owner && owner !== me && !attack) return 'Zona de otro jugador: solo junto a su planeta con base (ataque)';
-    if (czAt(sys, zs, off) !== zi) return 'Fuera de la zona';
+    if (czAt(sys, zs, off) !== zi && !(anch > 0 && czAt(sys, zs, bodyPosAt(sys, anch, t)) === zi)) return 'Fuera de la zona'; // anclado a un planeta: cuenta la zona del PLANETA (a 300 km de altitud el punto puede asomar al sector vecino si el planeta está junto al borde)
     const rr = Math.hypot(off[0], off[2]); if (rr < WARCFG.starClear) return 'Demasiado cerca de la estrella';
     if (anch > 0) { const b = sys.bodies[anch], H = sys.atmo[b.n] ? sys.atmo[b.n].H : 0; if (d3(off, bodyPosAt(sys, anch, t)) < b.R + 5.5 * H + 5) return 'Dentro de la atmósfera'; return attack ? '' : czDanger(sys, zs, zi, me, hangars, ships, t, anch); }
     for (const b of sys.bodies) if (b.k !== 'sun' && !b.parent && Math.abs(rr - b.a * DS) < WARCFG.orbitClear) return `Demasiado cerca de la órbita de ${b.n}`;
     return czDanger(sys, zs, zi, me, hangars, ships, t);
   }
-  root.genSystem = genSystem; root.genZones = genZones; root.wreckLoot = wreckLoot; root.BASE_UP = BASE_UP; root.baseStats = baseStats; root.TOWER_STYLES = TOWER_STYLES; root.WEAPONS = WEAPONS; root.weaponCd = weaponCd;
+  root.SYS_SCALE = SYS_SCALE; root.genSystem = genSystem; root.genZones = genZones; root.wreckLoot = wreckLoot; root.BASE_UP = BASE_UP; root.baseStats = baseStats; root.TOWER_STYLES = TOWER_STYLES; root.WEAPONS = WEAPONS; root.weaponCd = weaponCd;
   root.WARCFG = WARCFG; root.genControlZones = genControlZones; root.bodyPosAt = bodyPosAt; root.czAt = czAt; root.czCheck = czCheck; root.czDist = czDist; root.czCenter = czCenter; root.czDanger = czDanger; root.czDeployPoint = czDeployPoint;
-  if (typeof module !== 'undefined') module.exports = { genSystem, genZones, wreckLoot, BASE_UP, baseStats, TOWER_STYLES, WEAPONS, weaponCd, WARCFG, genControlZones, bodyPosAt, czAt, czCheck, czDist, czCenter, czDanger, czDeployPoint };
+  if (typeof module !== 'undefined') module.exports = { SYS_SCALE, genSystem, genZones, wreckLoot, BASE_UP, baseStats, TOWER_STYLES, WEAPONS, weaponCd, WARCFG, genControlZones, bodyPosAt, czAt, czCheck, czDist, czCenter, czDanger, czDeployPoint };
 })(typeof window !== 'undefined' ? window : globalThis);

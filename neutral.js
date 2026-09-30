@@ -16,9 +16,9 @@ const NEU = (() => {
   const r1 = x => Math.round(x * 10) / 10, r3 = x => Math.round(x * 1e3) / 1e3;
   function model(n) { if (n.grp) scene.remove(n.grp); n.grp = makeShip({ t: n.t, a: [0, 0, 0, 0, 0, 0], c: ACC }, HULL); n.grp.gear.visible = false; n.grp.visible = false; scene.add(n.grp); } // geometría compartida (caché de ships.js); oculta hasta que frame() la coloque
   function drop(id) { const n = E.get(id); if (n && n.grp) scene.remove(n.grp); E.delete(id); }
-  const safeAlt = b => b.k === 'sun' ? STAR_KILL_R - b.R + 20000 : Math.max(2500, 6 * (ATMO[b.n] ? ATMO[b.n].H : 0)); // nunca bajan a la atmósfera (así tampoco se acercan a las bases)
-  // puntos de encuentro: cada zona de recursos y cada planeta principal (rutas habituales de los jugadores); c: centro relativo al cuerpo ancla a, r: radio por el que vagan
-  const SPOTS = [...ZONES.map(z => ({ a: z.anchor, c: z.off, r: z.radius + 8000 })), ...MAINS.map(b => ({ a: b.i, c: [0, 0, 0], r: b.R + safeAlt(b) + 25000 }))];
+  const safeAlt = b => b.k === 'sun' ? STAR_KILL_R - b.R + 20000 : Math.max(2500 * SYS_SCALE, 6 * (ATMO[b.n] ? ATMO[b.n].H : 0)); // nunca bajan a la atmósfera (así tampoco se acercan a las bases)
+  // puntos de encuentro: cada zona de recursos y cada planeta principal (rutas habituales de los jugadores); c: centro relativo al cuerpo ancla a, r: radio por el que vagan (compactado con el sistema)
+  const SPOTS = [...ZONES.map(z => ({ a: z.anchor, c: z.off, r: z.radius + 8000 * SYS_SCALE })), ...MAINS.map(b => ({ a: b.i, c: [0, 0, 0], r: b.R + safeAlt(b) + 25000 * SYS_SCALE }))];
   const spotPos = s => { const A = bodies[s.a].pos; return [A[0] + s.c[0], A[1] + s.c[1], A[2] + s.c[2]]; };
   function keepOut(n, w, D) { // desvía el rumbo hacia fuera al acercarse a un astro y, si aun así entra en la zona prohibida, la saca
     for (const b of bodies) {

@@ -102,7 +102,7 @@ function spawn() { // en la plataforma de tu hangar; sin hangar (menú inicial),
   const hg = typeof BASE !== 'undefined' && BASE.mine(); if (typeof WAR !== 'undefined' && WAR.spawn(!hg)) return; if (hg && BASE.spawnAt(hg)) return; // en un buque de guerra si lo elegiste (o si no tienes base)
   const e = bodies[1], sd = nrm([-e.pos[0], 0, -e.pos[2]]), r = e.R * 3.5;
   S.pos = [e.pos[0] + sd[0] * r, e.pos[1] + e.R * 0.6, e.pos[2] + sd[2] * r];
-  S.pos = S.pos.map(c => c + (Math.random() - 0.5) * 2000);
+  S.pos = S.pos.map(c => c + (Math.random() - 0.5) * 2000 * SYS_SCALE); // dispersión compactada como el planeta (si no, en los mundos pequeños podría caer dentro)
   S.q.copy(lookQ(nrm(sub(e.pos, S.pos)))); camQ.copy(S.q);
 }
 spawn();
@@ -430,7 +430,7 @@ function warpBlock() { // null = se puede saltar; si no, el cuerpo que lo impide
   S.warp.ex = ex; return null;
 }
 function clusterNear(b) { // cúmulo más cercano a ese planeta (a < 1,5 M km de él y aún sin haber llegado): el salto luz va a él
-  if (!b || b.zone || b.k === 'sun') return null; let t = null, bd = 1.5e6; for (const q of ZT) { const d = len(sub(q.pos, b.pos)); if (d < bd) { bd = d; t = q; } } // los sectores con planeta no tienen cúmulo: el más cercano al planeta (< 1,5 M km)
+  if (!b || b.zone || b.k === 'sun') return null; let t = null, bd = 1.5e6 * SYS_SCALE; for (const q of ZT) { const d = len(sub(q.pos, b.pos)); if (d < bd) { bd = d; t = q; } } // los sectores con planeta no tienen cúmulo: el más cercano al planeta (< 1,5 M km × SYS_SCALE)
   return t && len(sub(t.pos, S.pos)) > t.R + ZONE_ARR + 500 ? t : null;
 }
 function toggleWarp(ctrl) { // ctrl: Ctrl+Shift = directo al planeta (sin desviar al cúmulo)
@@ -996,7 +996,7 @@ function frame(now) {
   if (typeof WAR !== 'undefined' && !warp.on && P.hp > 0 && !S.park.on && !S.foot.on) WAR.collide(oldPos, vEff, now); // buques y satélites son sólidos: te puedes estrellar
   { // turbulencia y calentamiento por fricción al entrar en una atmósfera: demasiada velocidad con aire denso desintegra la nave
     const dn = S.rhoB ? sstep(0.2, 0.8, ((fwd.x * (S.rhoB.pos[0] - S.pos[0]) + fwd.y * (S.rhoB.pos[1] - S.pos[1]) + fwd.z * (S.rhoB.pos[2] - S.pos[2])) / Math.hypot(S.rhoB.pos[0] - S.pos[0], S.rhoB.pos[1] - S.pos[1], S.rhoB.pos[2] - S.pos[2])) ) : 0; // la fricción solo actúa al descender: al salir o alejarse no hay
-    const sun0 = bodies[0], xs = len(sub(S.pos, sun0.pos)) / sun0.R, ss = sstep(16, 1.5, xs), Tst = warp.on ? 0 : 1.5 * ss * ss, hs = 90 * sstep(3.6, 1.4, xs); // ESTRELLA: turbulencia desde 16 radios solares (siempre, sin importar la velocidad) y radiación letal bajo ~3 radios, mucho antes de su atmósfera
+    const sun0 = bodies[0], xs = len(sub(S.pos, sun0.pos)) / sun0.R, ss = sstep(16 * SYS_SCALE, 1.5, xs), Tst = warp.on ? 0 : 1.5 * ss * ss, hs = 90 * sstep(3.6, 1.4, xs); // ESTRELLA: turbulencia desde 16·SYS_SCALE radios solares (antes de la primera órbita) (siempre, sin importar la velocidad) y radiación letal bajo ~3 radios, mucho antes de su atmósfera
     P.heatStar = hs > 1;
     const rd = S.rho * dn, rh = S.rhoH * dn, T0 = Math.max(Tst, warp.on || P.hp <= 0 ? 0 : Math.min(1.5, Math.min(vEff / bk, 80) / 20 * rd)), T = T0 < 0.05 ? 0 : T0; // sin zumbido residual fuera de la atmósfera
     P.turb += (T - P.turb) * (1 - Math.exp(-dt * 6));

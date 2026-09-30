@@ -55,7 +55,7 @@ function sample(cfg, x, y, z, o, sp = 0, sf = sp) { // (x,y,z) = punto de la sup
   const detail = sf < 60 ? (fb(X / 22 + s, Y / 22, Z / 22, 3) - 0.5) * 0.12 : 0;                 // rugosidad fina (solo con resolución suficiente)
   const sc = Math.max(0.4, A / 16), mid = sf < 400 ? (fb(X / 9 + s * 2, Y / 9, Z / 9, 3) - 0.5) * 2 : 0, roll = sf < 80 ? (fb(X / 2.2 + s * 4, Y / 2.2, Z / 2.2, 3) - 0.5) * 2 : 0, knoll = sf < 30 ? (fb(X / 0.55 + s * 6, Y / 0.55, Z / 0.55, 2) - 0.5) * 2 : 0, micro = (mid * 1.6 + roll * 0.5 + knoll * 0.08) * sc; // lomas de ~9 km, ondulaciones de ~2 km y montículos de ~0,5 km: el terreno se nota andando
   if (cfg.kind === 'earth') {
-    const cont = fb(X / 1800 + s, Y / 1800, Z / 1800, 4) - 0.5 - (cfg.sea || 0); // sea: cuánto mar tiene este mundo
+    const kc = 1800 * (cfg.cs || 1), cont = fb(X / kc + s, Y / kc, Z / kc, 4) - 0.5 - (cfg.sea || 0); // sea: cuánto mar tiene este mundo · cs: escala de los continentes (SYS_SCALE en los mundos generados: mismos continentes por planeta aunque sea más pequeño)
     if (cont <= 0) { o.h = 0; o.water = Math.min(1, -cont * 7); return; }
     const up = Math.pow(Math.min(1, cont * 3), 1.3);                                             // costas suaves: el relieve sube tierra adentro
     o.h = up * (mask * peak * A + mask * ridge * A * 0.22 + hills * 3 + 0.3 + micro * 1.4) + detail * up; if (o.h < 0) o.h *= 0.15; // hondonadas suavizadas para no hundir la tierra bajo el nivel del mar
@@ -114,7 +114,7 @@ function colorRGB(cfg, o, up, out, x, y, z, cc) {
   } else {
     const c1 = cc[1], sub = cfg.canyon ? 0 : c1[0] > 0.9 && c1[1] > 0.9 && c1[2] > 0.9 ? 1 : c1[0] > 1.6 * c1[1] ? 2 : 0; // 1 = helado, 2 = volcánico
     const ma = fb(x / 420 + s, y / 420, z / 420, 3); // grandes regiones de albedo (mares lunares, llanuras oscuras, cuencas de hielo o de lava)
-    mixA(out, cc[0], cc[1], Math.max(0, Math.min(1, det * 1.1 + (mv - 0.5) * 0.6 + sstep(2, 12, o.h) * 0.3)));
+    const hk = cfg.cs || 1; mixA(out, cc[0], cc[1], Math.max(0, Math.min(1, det * 1.1 + (mv - 0.5) * 0.6 + sstep(2 * hk, 12 * hk, o.h) * 0.3))); // hk: el relieve de los mundos compactados es cs veces menor
     const dk = (0.9 + 0.2 * fb(x / 30 + 1, y / 30, z / 30, 3)) * (1 - 0.45 * o.dark); out[0] *= dk; out[1] *= dk; out[2] *= dk;
     if (sub === 1) { // hielo: cuencas azuladas, grietas largas y paredes en sombra azul
       const cr = 1 - Math.abs(2 * fb(x / 150 + s, y / 150, z / 150, 2) - 1), A = cfg.amp || 10;

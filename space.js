@@ -152,7 +152,7 @@ function createFields(scene, bodies) {
   }
   // SOLO existen los asteroides de los cúmulos (zonas de recursos) y solo mientras les quede algún recurso: sin basura orbital, sin asteroides sueltos ni cinturón decorativo
   let last = null; const sph = new THREE.Sphere(), gone = new Set();
-  const ZCELL = 2000, ZROCK = { agua: 3, piedra: 1, cobre: 2, plata: 2, oro: 2, diamante: 3 }; // celda del cúmulo de una zona (km) y tipo de roca preferido según su recurso principal
+  const ZCELL = 2000 * SYS_SCALE, ZROCK = { agua: 3, piedra: 1, cobre: 2, plata: 2, oro: 2, diamante: 3 }; // celda del cúmulo de una zona (km) y tipo de roca preferido según su recurso principal
   const push = (im, n) => { // solo se sube a la GPU la parte usada de los buffers y las mallas vacías no se dibujan
     im.count = n; im.visible = n > 0; if (!n) return; im.instanceMatrix.updateRange.count = n * 16; im.instanceMatrix.needsUpdate = true; if (im.instanceColor) { im.instanceColor.updateRange.count = n * 3; im.instanceColor.needsUpdate = true; }
   };
