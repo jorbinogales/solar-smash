@@ -52,7 +52,7 @@ const BOT = (() => {
   function hit(old, pos, p, key, ak) { // proyectil (de humanos o torretas de humanos) contra un bot: lo decide el administrador
     if (p.owner <= -1000) return false; // las torretas de las bases bot solo disparan a humanos
     for (const [idx, B] of bots) {
-      if (B.dead || segDist(old, pos, B.pos) >= (p.spd !== undefined || ak > 0.02 ? 0.05 : HIT_R)) continue;
+      if (B.dead || segDist(old, pos, B.pos) >= (p.hr ?? (p.spd !== undefined || ak > 0.02 ? 0.05 : HIT_R))) continue;
       if (p.nl && Math.random() >= NOLOCK_HIT) { puff(pos, 0.01, 0xffd070, 0.3, 0.006); return true; } // disparo sin bloqueo: solo cuenta el 45 % de los impactos
       const over = p.dmg - B.sh; B.sh = Math.max(0, B.sh - p.dmg); if (over > 0) B.hp -= over;
       const dead = B.hp <= 0; if (dead) { B.dead = performance.now() + 20000; boom(B.pos, 30); if (B.grp) B.grp.visible = false; }

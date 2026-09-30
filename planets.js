@@ -76,26 +76,66 @@ const K = h => new THREE.Color(h);
 // Todo lo de esta sección son funciones puras sobre arrays [r,g,b] y typed arrays (sin THREE): las usan igual el hilo principal (terreno, textura base) y los workers
 // (textura de alta resolución, nubes, cielo). El terreno cercano y la textura lejana comparten colorRGB(): por eso coinciden al acercarse.
 const hx = h => [(h >> 16 & 255) / 255, (h >> 8 & 255) / 255, (h & 255) / 255];
-const CC = { deep: hx(0x082255), shallow: hx(0x16708f), sand: hx(0xd8c98f), grass: hx(0x5a8f3a), grass2: hx(0x7aa04a), forest: hx(0x2f5f2a), rock: hx(0x77726b), rockHi: hx(0x9a948c), snow: hx(0xf2f6f8),
-  lava: hx(0xff5a10).map(c => c * 1.6), desert: hx(0xc2a468), tundra: hx(0x7f8a70), ice: hx(0xe6f1f7), frost: hx(0xeee4e0) };
+const CC = { deep: hx(0x03123a), mid: hx(0x0a3a78), shallow: hx(0x14879f), reef: hx(0x38c2b4), sand: hx(0xe2d09a), grass: hx(0x4c8a32), grass2: hx(0x88aa4a), forest: hx(0x1e5424), jungle: hx(0x124a20),
+  taiga: hx(0x2c4a34), savanna: hx(0xae9a52), rock: hx(0x77726b), rockHi: hx(0xa59e94), rockDk: hx(0x3e3934), snow: hx(0xf2f6f8), lava: hx(0xff5a10).map(c => c * 1.6), lavaHot: hx(0xffd35a).map(c => c * 1.3),
+  crust: hx(0x4a1206), desert: hx(0xd4b06e), dune: hx(0xc8844c), tundra: hx(0x7f8a70), ice: hx(0xe6f1f7), iceBlue: hx(0x8cc0e2), crack: hx(0x2a6a9c), frost: hx(0xeee4e0), basalt: hx(0x3b322e) };
 CC.rock6 = CC.rock.map(c => c * 0.6);
 function mixA(o, a, b, t) { o[0] = a[0] + (b[0] - a[0]) * t; o[1] = a[1] + (b[1] - a[1]) * t; o[2] = a[2] + (b[2] - a[2]) * t; return o; }
-function colorRGB(cfg, o, up, out, x, y, z, cc) { // color por altura, pendiente, latitud y bioma; x,y,z = punto de la superficie (km, relativo al centro)
-  const slope = 1 - up, det = fb(x / 6 + 5, y / 6, z / 6, 3), ay = Math.abs(y) / (Math.hypot(x, y, z) || 1); // ay: |seno de la latitud|
+// Color por altura, pendiente, latitud y bioma; x,y,z = punto de la superficie (km, relativo al centro). Es la ÚNICA paleta: la usan la textura lejana (bakePlanet) y el terreno
+// cercano (colorAt), así que cualquier cambio aquí se ve igual en los dos. Subtipos de los mundos rocosos (se deducen de su paleta, sin campos nuevos): con cañones = desierto
+// tipo Marte; paleta clara casi blanca = helado (hielo agrietado y cuencas azules); rojo muy saturado = volcánico (basalto con mares y ríos de lava); el resto = luna/rocoso.
+function colorRGB(cfg, o, up, out, x, y, z, cc) {
+  const slope = 1 - up, det = fb(x / 6 + 5, y / 6, z / 6, 3), ay = Math.abs(y) / (Math.hypot(x, y, z) || 1), s = cfg.seed || 0; // ay: |seno de la latitud|
+  const mv = fb(x / 90 + 2.3, y / 90, z / 90, 2); // variación de albedo a media escala (~100 km): rompe las manchas de color plano
   if (cfg.kind === 'earth') {
-    const ice = sstep(0.8, 0.9, ay + (det - 0.5) * 0.1); // casquetes polares de borde irregular (sobre tierra y mar)
-    if (o.water >= 0) { mixA(out, CC.deep, CC.shallow, 1 - o.water); return ice > 0 ? mixA(out, out, CC.ice, ice * 0.92) : out; }
-    const dry = sstep(0.52, 0.66, fb(x / 1300 + cfg.seed * 1.7, y / 1300, z / 1300, 3)) * (1 - sstep(0.55, 0.8, ay)); // zonas secas: desiertos fuera de los polos
-    mixA(out, CC.grass, CC.grass2, det); mixA(out, out, CC.forest, o.forest * 0.85); mixA(out, out, CC.desert, dry * 0.85 * (1 - o.forest * 0.6));
-    mixA(out, out, CC.tundra, sstep(0.66, 0.82, ay) * 0.8); mixA(out, out, CC.sand, sstep(0.05, 0.0, o.h));
-    mixA(out, out, CC.rock, Math.max(o.rock * 0.85, sstep(0.1, 0.3, slope))); mixA(out, out, CC.rockHi, sstep(3.5, 6, o.h) * 0.6);
-    mixA(out, out, CC.snow, sstep(5.0, 6.2, o.h + (det - 0.5) * 0.8) * (0.5 + 0.5 * up));
-    return ice > 0 ? mixA(out, out, CC.snow, ice) : out;
+    const ice = sstep(0.8, 0.9, ay + (det - 0.5) * 0.1 + (mv - 0.5) * 0.08); // casquetes polares de borde irregular (sobre tierra y mar)
+    if (o.water >= 0) { // océano: arrecifes turquesa junto a la costa, plataforma continental y fondo abisal
+      const w = o.water + (mv - 0.5) * 0.06;
+      mixA(out, CC.reef, CC.shallow, sstep(0.0, 0.1, w)); mixA(out, out, CC.mid, sstep(0.06, 0.4, w)); mixA(out, out, CC.deep, sstep(0.35, 1.0, w));
+      if (ice > 0) mixA(out, out, CC.ice, ice * 0.92);
+    } else {
+      const cold = sstep(0.55, 0.8, ay), warm = 1 - sstep(0.12, 0.42, ay), dv = fb(x / 1300 + s * 1.7, y / 1300, z / 1300, 3) + 0.05 * Math.exp(-(ay - 0.4) * (ay - 0.4) / 0.02); // cinturones secos subtropicales
+      const dry = sstep(0.54, 0.66, dv) * (1 - cold), sav = sstep(0.45, 0.56, dv) * (1 - cold), fo = o.forest;
+      mixA(out, CC.grass, CC.grass2, det * 0.7 + mv * 0.3);
+      mixA(out, out, CC.savanna, sav * 0.75 * (1 - fo));                                                   // pradera → sabana → desierto
+      mixA(out, out, CC.forest, fo * 0.85); mixA(out, out, CC.jungle, fo * warm * 0.55); mixA(out, out, CC.taiga, fo * cold * 0.7); // selva en los trópicos, taiga hacia los polos
+      mixA(out, out, CC.desert, dry * 0.88 * (1 - fo * 0.6)); mixA(out, out, CC.dune, dry * sstep(0.45, 0.75, mv) * 0.45); // campos de dunas rojizas
+      mixA(out, out, CC.tundra, sstep(0.64, 0.8, ay) * 0.8); mixA(out, out, CC.sand, sstep(0.07, 0.0, o.h) * (1 - cold * 0.6)); // playas
+      mixA(out, out, CC.rock, Math.max(o.rock * 0.85, sstep(0.1, 0.3, slope))); mixA(out, out, CC.rockDk, sstep(0.25, 0.6, slope) * 0.45); // laderas abruptas más oscuras
+      mixA(out, out, CC.rockHi, sstep(3.5, 6, o.h) * 0.6);
+      mixA(out, out, CC.snow, sstep(5.0, 6.2, o.h + (det - 0.5) * 0.8) * (0.3 + 0.7 * up * up));            // la nieve no cuaja en las paredes
+      if (ice > 0) mixA(out, out, CC.snow, ice);
+    }
+  } else if (cfg.kind === 'venus') { // mesetas con teselas agrietadas y ríos de lava con costra oscura y núcleo incandescente
+    const cr = 1 - Math.abs(2 * fb(x / 160 + s, y / 160, z / 160, 3) - 1);
+    mixA(out, cc[0], cc[1], Math.max(0, Math.min(1, det * 0.9 + (mv - 0.5) * 0.9 + 0.05)));
+    mixA(out, out, CC.rockDk, sstep(0.9, 0.97, cr) * 0.4 + sstep(0.1, 0.3, slope) * 0.35);
+    if (o.lava > 0.05) { mixA(out, out, CC.crust, sstep(0.05, 0.3, o.lava)); mixA(out, out, CC.lava, sstep(0.3, 0.65, o.lava)); mixA(out, out, CC.lavaHot, sstep(0.8, 1, o.lava) * det); }
+  } else {
+    const c1 = cc[1], sub = cfg.canyon ? 0 : c1[0] > 0.9 && c1[1] > 0.9 && c1[2] > 0.9 ? 1 : c1[0] > 1.6 * c1[1] ? 2 : 0; // 1 = helado, 2 = volcánico
+    const ma = fb(x / 420 + s, y / 420, z / 420, 3); // grandes regiones de albedo (mares lunares, llanuras oscuras, cuencas de hielo o de lava)
+    mixA(out, cc[0], cc[1], Math.max(0, Math.min(1, det * 1.1 + (mv - 0.5) * 0.6 + sstep(2, 12, o.h) * 0.3)));
+    const dk = (0.9 + 0.2 * fb(x / 30 + 1, y / 30, z / 30, 3)) * (1 - 0.45 * o.dark); out[0] *= dk; out[1] *= dk; out[2] *= dk;
+    if (sub === 1) { // hielo: cuencas azuladas, grietas largas y paredes en sombra azul
+      const cr = 1 - Math.abs(2 * fb(x / 150 + s, y / 150, z / 150, 2) - 1), A = cfg.amp || 10;
+      out[0] *= 0.88; out[1] *= 0.9; out[2] *= 0.92;
+      mixA(out, out, CC.iceBlue, Math.min(0.7, sstep(0.54, 0.68, ma) * 0.5 + sstep(0, -0.3 * A, o.h) * 0.3 + o.dark * 0.35)); // los cráteres, cuencos de hielo azul
+      mixA(out, out, CC.crack, sstep(0.955, 0.99, cr) * 0.65 + sstep(0.15, 0.45, slope) * 0.3);
+    } else if (sub === 2) { // volcánico: basalto oscuro con óxidos, mares de lava en las llanuras y ríos incandescentes
+      const cr = 1 - Math.abs(2 * fb(x / 150 + s, y / 150, z / 150, 2) - 1), A = cfg.amp || 10;
+      mixA(out, out, CC.basalt, 0.72 - 0.3 * mv); mixA(out, out, CC.rock6, sstep(0.15, 0.4, slope) * 0.4);
+      const lv = Math.max(sstep(0.62, 0.72, ma + sstep(0.1 * A, -0.3 * A, o.h) * 0.06), sstep(0.965, 0.992, cr) * 0.8);
+      if (lv > 0) { mixA(out, out, CC.crust, sstep(0.0, 0.35, lv)); mixA(out, out, CC.lava, sstep(0.35, 0.85, lv) * (0.75 + 0.25 * det)); mixA(out, out, CC.lavaHot, sstep(0.93, 1, lv) * det * 0.7); }
+    } else { // lunas, rocosos y desiertos: llanuras oscuras (mares) y tierras altas claras
+      mixA(out, out, CC.rock6, sstep(0.15, 0.4, slope) * 0.5);
+      const m = sstep(0.54, 0.68, ma) * (cfg.canyon ? 0.3 : 0.35), hl = sstep(0.45, 0.3, ma) * 0.12; // hl: tierras altas algo más claras
+      out[0] *= 1 - m + hl; out[1] *= 1 - m * 1.02 + hl; out[2] *= 1 - m * 1.05 + hl;
+      if (cfg.canyon) mixA(out, out, CC.frost, sstep(0.93, 0.97, ay + (det - 0.5) * 0.05) * 0.85); // mundos desérticos: casquetes polares finos
+    }
   }
-  if (cfg.kind === 'venus') { mixA(out, cc[0], cc[1], det * 1.2); mixA(out, out, CC.rock, sstep(0.1, 0.3, slope) * 0.6); return o.lava > 0.05 ? mixA(out, out, CC.lava, o.lava) : out; }
-  mixA(out, cc[0], cc[1], Math.min(1, det * 1.4 + sstep(2, 12, o.h) * 0.3)); const dk = (0.9 + 0.2 * fb(x / 30 + 1, y / 30, z / 30, 3)) * (1 - 0.45 * o.dark); out[0] *= dk; out[1] *= dk; out[2] *= dk;
-  mixA(out, out, CC.rock6, sstep(0.15, 0.4, slope) * 0.5);
-  if (cfg.canyon) return mixA(out, out, CC.frost, sstep(0.93, 0.97, ay + (det - 0.5) * 0.05) * 0.85); // mundos desérticos: casquetes polares finos
+  // gradación final (común): +12 % de saturación y +6 % de contraste con hombro suave en las luces para no quemar (la lava puede pasar de 1: brilla)
+  const L = 0.2126 * out[0] + 0.7152 * out[1] + 0.0722 * out[2];
+  for (let k = 0; k < 3; k++) { let v = 0.42 + (L + (out[k] - L) * 1.12 - 0.42) * 1.06; if (v > 0.88) v = 0.88 + (v - 0.88) * 0.45; out[k] = v < 0 ? 0 : v > 1.5 ? 1.5 : v; }
   return out;
 }
 const _ca = [0, 0, 0];
@@ -128,14 +168,20 @@ function bakePlanet(P, j0, j1) {
   }
   return { rgba, ht };
 }
-function bakeGas(P, j0, j1) { // gigante gaseoso: bandas turbulentas y tormentas ovaladas
+function bakeGas(P, j0, j1) { // gigante gaseoso: cinturones oscuros y cálidos, zonas claras, bandas finas, vetas a lo largo del viento y tormentas ovaladas con anillo claro
   const W = P.W, H = P.H, s = P.seed, c1 = hx(P.c1), c2 = hx(P.c2), rgba = new Uint8ClampedArray((j1 - j0) * W * 4), ht = new Uint8Array((j1 - j0) * W).fill(128), c3 = [0, 0, 0], STORM = [[1.1, 0.32, 0.16], [4.2, -0.5, 0.1], [2.6, 0.62, 0.07]];
+  const dark = c1.map(c => c * 0.72), light = mixA([0, 0, 0], c2, [0.98, 0.96, 0.92], 0.2), warm = mixA([0, 0, 0], c1, [0.78, 0.42, 0.26], 0.4); // cinturón oscuro, zona clara y tono cálido de las tormentas
   for (let j = j0; j < j1; j++) {
-    const lat = ((j + 0.5) / H - 0.5) * Math.PI, cl = Math.cos(lat), sl = Math.sin(lat);
+    const lat = ((j + 0.5) / H - 0.5) * Math.PI, cl = Math.cos(lat), sl = Math.sin(lat), pole = 1 - 0.28 * sstep(0.72, 0.97, Math.abs(sl));
     for (let i = 0; i < W; i++) {
-      const a = 6.283185307 * (i + 0.5) / W, x = -Math.cos(a) * cl, z = Math.sin(a) * cl, t = Math.sin(sl * 14 + fb(x * 2 + s, sl * 6, z * 2, 4) * 5 + fb(x * 9, sl * 30 + s, z * 9, 3) * 0.8) * 0.5 + 0.5;
-      mixA(c3, c1, c2, t);
-      for (const [l0, y0, r0] of STORM) { let dl = a - l0; dl -= 6.283185307 * Math.round(dl / 6.283185307); const e = Math.exp(-(dl * dl * cl * cl / (r0 * r0 * 4) + (lat - y0) * (lat - y0) / (r0 * r0))); mixA(c3, c3, [0.86, 0.62, 0.5], Math.min(1, e * 0.9)); }
+      const a = 6.283185307 * (i + 0.5) / W, x = -Math.cos(a) * cl, z = Math.sin(a) * cl, wob = fb(x * 2 + s, sl * 6, z * 2, 4), t = Math.sin(sl * 14 + wob * 5 + fb(x * 9, sl * 30 + s, z * 9, 3) * 0.8) * 0.5 + 0.5;
+      const b2 = Math.sin(sl * 41 + wob * 3 + s) * 0.5 + 0.5, st = fb(x * 26 + s, sl * 90, z * 26, 2); // bandas finas y vetas estiradas por el viento
+      mixA(c3, dark, light, sstep(0.12, 0.88, t)); mixA(c3, c3, warm, (1 - t) * b2 * 0.4);
+      const k = (0.9 + 0.2 * st) * pole; c3[0] *= k; c3[1] *= k; c3[2] *= k;
+      for (const [l0, y0, r0] of STORM) {
+        let dl = a - l0; dl -= 6.283185307 * Math.round(dl / 6.283185307); const rr = Math.sqrt(dl * dl * cl * cl / (r0 * r0 * 4) + (lat - y0) * (lat - y0) / (r0 * r0)); if (rr > 2) continue;
+        mixA(c3, c3, light, Math.exp(-(rr - 1.05) * (rr - 1.05) / 0.06) * 0.55); mixA(c3, c3, warm, Math.min(1, Math.exp(-rr * rr) * 0.95)); // anillo claro alrededor del óvalo cálido
+      }
       const p = ((j - j0) * W + i) * 4; rgba[p] = c3[0] * 255; rgba[p + 1] = c3[1] * 255; rgba[p + 2] = c3[2] * 255; rgba[p + 3] = 255;
     }
   }
@@ -162,6 +208,7 @@ function bakeCloud(P, j0, j1) { // densidad de nubes (un canal, compartida por t
       const a = 6.283185307 * (i + 0.5) / W, x = -Math.cos(a) * cl, z = Math.sin(a) * cl, q = fb(x * 2.1 + 5.2, sl * 2.1, z * 2.1, 3), q2 = fb(x * 2.1, sl * 2.1 + 3.3, z * 2.1, 3);
       let d = fb(x * 2.8 + q * 1.6, sl * 3.6 + q2 * 1.6, z * 2.8 + q * 1.6, 5) * 0.72 + fb(x * 10 + q2, sl * 10, z * 10 + q, 3) * 0.28;
       d += (band - 0.5) * 0.16;
+      const bl = 1 - Math.abs(2 * fb(x * 18 + q * 2, sl * 18, z * 18 + q2 * 2, 2) - 1); d += (bl - 0.62) * 0.11 * sstep(0.35, 0.6, d); // cúmulos: bordes en coliflor solo donde ya hay nube
       for (const [l0, y0, r0, dir] of ST) { let dl = a - l0; dl -= 6.283185307 * Math.round(dl / 6.283185307); const dx = dl * cl, dy = lat - y0, rr = Math.sqrt(dx * dx + dy * dy) / r0; if (rr < 1.7) { const th = Math.atan2(dy, dx) * dir + rr * 5.5; d += (0.34 * Math.exp(-rr * rr * 1.1)) * (0.65 + 0.35 * Math.cos(th * 2)) - 0.12 * Math.exp(-rr * rr * 9); } } // ojo despejado en el centro
       ht[(j - j0) * W + i] = Math.min(255, Math.max(0, d * 255));
     }
@@ -242,7 +289,7 @@ void main() {
   #include <logdepthbuf_vertex>
 }`;
 const PLANET_FS = `uniform sampler2D uMap; uniform sampler2D uHt; uniform sampler2D uCloud;
-uniform vec3 uSun; uniform vec3 uAtm; uniform vec4 uCP; uniform vec2 uCU; uniform vec4 uB; uniform vec4 uK; uniform float uOp;
+uniform vec3 uSun; uniform vec3 uAtm; uniform vec4 uCP; uniform vec2 uCU; uniform vec4 uB; uniform vec4 uK; uniform float uOp; uniform float uGl;
 varying vec2 vUv; varying vec3 vN; varying vec3 vP;
 #include <common>
 #include <logdepthbuf_pars_fragment>
@@ -273,7 +320,11 @@ void main() {
   col *= mix(vec3(1.0), vec3(1.0, 0.7, 0.5), twil * day * min(atm, 1.0));
   vec3 rimC = mix(uAtm, vec3(1.0, 0.5, 0.24), twil * 0.75);
   col = mix(col, uAtm * (0.22 + 0.9 * dif), pow(fr, 2.4) * atm * 0.5);
-  col += rimC * pow(fr, 4.0) * atm * (0.15 + day) * 0.85;
+  col += rimC * pow(fr, 4.0) * atm * (0.15 + day) * 1.05 + uAtm * pow(fr, 1.6) * atm * day * 0.06;
+  if (uGl > 0.0) { // mundos volcánicos: la lava (rojo intenso con poco azul en la textura) brilla con luz propia, sobre todo en la cara nocturna
+    float lava = smoothstep(0.8, 0.97, alb.r) * (1.0 - smoothstep(0.1, 0.3, alb.b)) * smoothstep(0.2, 0.4, alb.g);
+    col += alb * vec3(1.0, 0.75, 0.55) * lava * uGl * (0.25 + 0.9 * (1.0 - dif));
+  }
   gl_FragColor = vec4(col, uOp);
 }`;
 const SUN_FS = `uniform sampler2D uMap; varying vec2 vUv; varying vec3 vN; varying vec3 vP;
@@ -297,8 +348,10 @@ void main() {
   vec3 T = vec3(N0.z, 0.0, -N0.x) / sl, Nn = cross(N0, T);
   vec2 sh = vec2(dot(L, T) / (6.2832 * sl), dot(L, Nn) / 3.1416) * 0.01 * vec2(1.0, 1.0 - 2.0 * uCU.y);
   float selfS = clamp(1.0 - (smoothstep(uCP.x, uCP.y, texture2D(uCloud, cuv + sh).r) - cov) * 0.8, 0.5, 1.12);
+  selfS *= clamp(1.0 - (smoothstep(uCP.x, uCP.y, texture2D(uCloud, cuv + sh * 2.5).r) - cov) * 0.35, 0.8, 1.06); // segunda muestra más lejos: volumen y sombras más suaves
   float ndl = dot(N0, L), dif = smoothstep(-0.14, 0.4, ndl), twil = 1.0 - smoothstep(0.0, 0.4, ndl), fr = 1.0 - max(dot(N0, V), 0.0);
-  vec3 col = uCTint * (0.05 + dif) * selfS;
+  vec3 col = uCTint * (0.05 + dif) * selfS * (0.9 + 0.18 * smoothstep(0.3, 1.0, cov)); // los núcleos densos, más blancos; los bordes deshilachados, algo grises
+  col += uCTint * pow(fr, 3.0) * dif * 0.18; // borde plateado a contraluz
   col *= mix(vec3(1.0), vec3(1.0, 0.6, 0.4), twil * dif * 0.9);
   gl_FragColor = vec4(col, min(cov * uCP.z * uCP.w * (0.85 + 0.35 * fr), 1.0));
 }`;
@@ -314,6 +367,7 @@ void main() {
   vec3 nc = normalize(Nb - V * dot(Nb, V));
   float lit = dot(nc, L), day = smoothstep(-0.4, 0.4, lit), twil = exp(-pow(lit / 0.26, 2.0)), fwd = pow(max(dot(-V, L), 0.0), 3.0);
   vec3 c = mix(uAtm, vec3(1.0, 0.48, 0.2), twil * uAP.z);
+  c = max(mix(vec3(dot(c, vec3(0.2126, 0.7152, 0.0722))), c, 1.2), 0.0); // halo algo más saturado
   gl_FragColor = vec4(c * glow * (day * 0.95 + twil * 0.4 * uAP.z + fwd * 0.8) * uAP.y, 1.0);
 }`;
 const hashStr = s => { let h = 2166136261; for (const ch of s) h = Math.imul(h ^ ch.charCodeAt(0), 16777619); return (h >>> 0) / 4294967296; };
@@ -321,13 +375,14 @@ const hexOf = c => typeof c === 'string' ? parseInt(c.slice(1), 16) : c;
 function reliefKm(cfg) { return cfg.kind === 'earth' ? 1.207 * cfg.amp : 1.9 * cfg.amp; } // km por unidad de la textura de altura (ver bakePlanet)
 function makeBodyMat(b) { // material de la esfera lejana; conserva .map (textura activa) porque lo usan el mapa del sistema y el radar
   const sun = b.k === 'sun', cfg = SURF[b.n], at = ATMO[b.n], type = b.type || (b.k === 'earth' ? 'earth' : 'moon'), cl = CLOUDS[type], atmK = at ? Math.max(0.35, Math.min(1.4, at.H / 45)) : 0;
-  const c = at ? new THREE.Color(at.c) : new THREE.Color(0x000000), h1 = hashStr(b.n), h2 = hashStr(b.n + '#');
+  const c = at ? new THREE.Color(at.c) : new THREE.Color(0x000000), h1 = hashStr(b.n), h2 = hashStr(b.n + '#'), h3c = (hashStr(b.n + '~') - 0.5) * 0.07; // h3c: cada mundo con algo más o menos nubes
   b.sunDir = new THREE.Vector3(1, 0, 0);
   b.U = { // uniformes compartidos por la esfera, las nubes y la aureola de este cuerpo
-    uSun: { value: b.sunDir }, uAtm: { value: c }, uCloud: CLOUD_U, uCP: { value: new THREE.Vector4(cl ? cl.lo : 0, cl ? cl.hi : 1, cl ? cl.op : 0, 1) }, uCU: { value: new THREE.Vector2(h1, h2 < 0.5 ? 0 : 1) },
+    uSun: { value: b.sunDir }, uAtm: { value: c }, uCloud: CLOUD_U, uCP: { value: new THREE.Vector4(cl ? cl.lo + h3c : 0, cl ? cl.hi + h3c : 1, cl ? cl.op : 0, 1) }, uCU: { value: new THREE.Vector2(h1, h2 < 0.5 ? 0 : 1) },
   };
+  const glow = b.type === 'red' || b.type === 'venus' || (cfg && cfg.kind === 'venus') ? 1 : 0; // lava con luz propia
   const m = new THREE.ShaderMaterial({
-    uniforms: sun ? { uMap: { value: DUMMY } } : Object.assign({ uMap: { value: DUMMY }, uHt: { value: DUMMYR }, uOp: { value: 1 }, uCTint: { value: new THREE.Color() },
+    uniforms: sun ? { uMap: { value: DUMMY } } : Object.assign({ uMap: { value: DUMMY }, uHt: { value: DUMMYR }, uOp: { value: 1 }, uGl: { value: glow }, uCTint: { value: new THREE.Color() },
       uB: { value: new THREE.Vector4(cfg ? reliefKm(cfg) : 0, b.R, 1 / 256, 1 / 128) }, uK: { value: new THREE.Vector4(atmK, cfg && cfg.kind === 'earth' ? 1 : 0, SUN_I, at ? 0.09 : 0.04) } }, b.U),
     vertexShader: BODY_VS, fragmentShader: sun ? SUN_FS : PLANET_FS, extensions: { derivatives: true },
   });
@@ -405,7 +460,7 @@ function createPlanets(scene, bodies, skyDome) {
     if (b.k === 'sun') continue; const at = ATMO[b.n], cl = CLOUDS[b.type || (b.k === 'earth' ? 'earth' : 'moon')];
     if (at) {
       const w = Math.max(0.03, Math.min(0.1, 1.6 * at.H / b.R)), rd = at.c >> 16 & 255;
-      const m = new THREE.ShaderMaterial({ uniforms: { uSun: b.U.uSun, uAtm: b.U.uAtm, uAP: { value: new THREE.Vector4(1 / (1 + w), 1.0, 0.85, 0) } }, vertexShader: BODY_VS, fragmentShader: ATM_FS, side: THREE.BackSide, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false });
+      const m = new THREE.ShaderMaterial({ uniforms: { uSun: b.U.uSun, uAtm: b.U.uAtm, uAP: { value: new THREE.Vector4(1 / (1 + w), 1.15, 0.85, 0) } }, vertexShader: BODY_VS, fragmentShader: ATM_FS, side: THREE.BackSide, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false });
       const sh = new THREE.Mesh(atmGeo, m); sh.scale.setScalar(1 + w); sh.renderOrder = 3; sh.userData.w = w; sh.visible = false; b.group.add(sh); b.atmo = sh;
     }
     if (cl) {

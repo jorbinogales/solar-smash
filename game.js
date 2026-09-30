@@ -314,11 +314,11 @@ function makeMissile() {
   g.flame = new THREE.Mesh(new THREE.ConeGeometry(0.11, 1, 8).rotateX(Math.PI / 2), glow(0xffa030, 0.9)); g.flame.position.z = 0.95;
   g.add(b, nose, f1, f2, g.flame); return g;
 }
-function spawnProj(owner, key, kind, pos, dir, tgt, dmg, o = {}) { // o: { spd (km/s fija), col, life, bot } para proyectiles especiales (torretas, bots)
+function spawnProj(owner, key, kind, pos, dir, tgt, dmg, o = {}) { // o: { spd (km/s fija), col, life, bot, hr (radio de impacto, km: espoleta de proximidad de los buques) } para proyectiles especiales (torretas, bots)
   let obj;
   if (kind === 'p') { obj = new THREE.Group(); const core = new THREE.Mesh(bolt, glow(0xffffff)); core.scale.set(0.35, 0.35, 1); obj.add(new THREE.Mesh(bolt, glow(o.col ?? WPN.p.color, 0.6)), core); }
   else obj = makeMissile();
-  scene.add(obj); projs.set(key, { o0: [...pos], owner, kind, fromSpace: o.spd === undefined && airK(pos) < 0.02, spd: o.spd, bot: o.bot, nl: !!o.nl, pos: [...pos], dir: [...dir], tgt, life: o.life ?? WPN[kind].life, dmg: dmg ?? WPN[kind].dmg, sp: obj, puff: 0 });
+  scene.add(obj); projs.set(key, { o0: [...pos], owner, kind, fromSpace: o.spd === undefined && airK(pos) < 0.02, spd: o.spd, hr: o.hr, bot: o.bot, nl: !!o.nl, pos: [...pos], dir: [...dir], tgt, life: o.life ?? WPN[kind].life, dmg: dmg ?? WPN[kind].dmg, sp: obj, puff: 0 });
 }
 function killProj(key) { const p = projs.get(key); if (p) { scene.remove(p.sp); projs.delete(key); } }
 function puff(pos, size, color, dur, min) { const sp = new THREE.Mesh(ball, glow(color)); scene.add(sp); fx.push({ pos: [...pos], size, t: 0, dur, min, sp }); }
@@ -1079,7 +1079,7 @@ function frame(now) {
     if ((p.owner === myId || (p.owner >= 2000 && p.owner < 3000)) && typeof BASE !== 'undefined' && BASE.hit(old, p.pos, p)) { killProj(key); continue; } // golpe al hangar de otro jugador (las neutrales no atacan bases)
     if (typeof WAR !== 'undefined' && (p.owner === myId || (p.owner >= 3000 && p.owner < 4000 && BASE.isHost())) && WAR.hit(old, p.pos, p, p.owner >= 3000, ak)) { killProj(key); continue; } // golpe a un buque de guerra o satélite ajeno (lo decide el servidor)
     const gi = planets.impact(old, p.pos); if (gi) { killProj(key); if (len(sub(gi, S.pos)) < 200) boom(gi, p.kind === 'm' ? 0.06 : 0.012); FOOT.splash(gi, p.kind); continue; } // el proyectil golpea el suelo: explosión y daño de área a los objetos
-    if (p.owner !== myId && p.owner !== -myId && !(p.owner >= 7000 && p.owner < 8000 && typeof WAR !== 'undefined' && WAR.fOwner(p.owner) === myId) && !p.vis && alive && segDist(old, p.pos, S.pos) < (p.spd !== undefined || ak > 0.02 ? 0.04 : HIT_R)) { // en el aire y los disparos de torreta: radio real de la nave (40 m); en el espacio, el radio grande de siempre // el impacto lo decide la víctima
+    if (p.owner !== myId && p.owner !== -myId && !(p.owner >= 7000 && p.owner < 8000 && typeof WAR !== 'undefined' && WAR.fOwner(p.owner) === myId) && !p.vis && alive && segDist(old, p.pos, S.pos) < (p.hr ?? (p.spd !== undefined || ak > 0.02 ? 0.04 : HIT_R))) { // en el aire y los disparos de torreta: radio real de la nave (40 m); en el espacio, el radio grande de siempre // el impacto lo decide la víctima
       if (p.nl && Math.random() >= NOLOCK_HIT) { killProj(key); puff(p.pos, 0.01, 0xffd070, 0.3, 0.006); continue; } // disparo sin bloqueo: roza (solo cuenta el 45 %)
       if (dodging() && Math.random() < dodgeP()) { killProj(key); P.dodgeT = now; tone('sine', 700, 1600, 0.12, 0.06); continue; } // esquiva con Q/E (lo decide la víctima: yo)
       killProj(key); if (p.owner < 0 && typeof BASE !== 'undefined') { const th = BASE.HG.get(-p.owner); attackAlert(p.sn ? 's' : 't', p.sn || (th ? th.nm : 'un enemigo'), th && !p.sn ? BASE.worldOf(th) : ATK.pos); } else if (p.owner !== myId) attackAlert('p', ownerName(p.owner), ownerPos(p.owner)); hurt(p.dmg, p.dir, now); send({ t: 'hit', by: p.owner, key, dmg: p.dmg, pos: S.pos, dead: P.hp <= 0, sh: P.sh });

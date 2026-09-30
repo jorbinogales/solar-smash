@@ -10,6 +10,11 @@ const TYPES = {
   halcon: { name: 'Halcón', role: 'Caza',        hp: 70,  sh: 56, plasma: 140, missiles: 1, slots: 4, size: 1.0, agil: 0.7, speed: 770, warp: 42, desc: 'Alas en delta y doble motor. Equilibrado en todo.' },
   coloso: { name: 'Coloso', role: 'Cañonera',    hp: 112, sh: 70, plasma: 182, missiles: 3, slots: 5, size: 1.3, agil: 0.46, speed: 525, warp: 63, desc: 'Casco grueso, torreta dorsal y triple motor.' },
   nomada: { name: 'Nómada', role: 'Explorador',  hp: 56,  sh: 84, plasma: 84,  missiles: 1, slots: 4, size: 1.1, agil: 0.6, speed: 665, warp: 84, desc: 'Plato sensor, cúpula panorámica y paneles solares.' },
+  // chasis nuevos (mismo orden que SHIPS en server.js; los cuatro de arriba siguen siendo los primeros: neutrales y cascos a la deriva usan solo esos) · dm: multiplicador del daño base de plasma · cam: distancia extra de la cámara del hangar para las naves grandes
+  centinela: { name: 'Centinela', role: 'Blindada',  hp: 154, sh: 112, plasma: 126, missiles: 2, slots: 5, size: 1.35, agil: 0.34, speed: 420, warp: 50, dm: 0.9, cam: 1.1, desc: 'Placas cerámicas y cuernos emisores de escudo. Lenta y casi indestructible.' },
+  fantasma:  { name: 'Fantasma',  role: 'Sigilo',    hp: 30,  sh: 28,  plasma: 70,  missiles: 1, slots: 3, size: 0.8,  agil: 0.98, speed: 1040, warp: 70, dm: 1, desc: 'Ala volante facetada de baja firma. La más veloz y la más frágil.' },
+  corsario:  { name: 'Corsario',  role: 'Asalto',    hp: 60,  sh: 46,  plasma: 154, missiles: 4, slots: 4, size: 1.05, agil: 0.62, speed: 830, warp: 46, dm: 1.3, desc: 'Alas en flecha adelantada y pilones cargados. Golpea fuerte y rápido.' },
+  titan:     { name: 'Titán',     role: 'Acorazado', hp: 132, sh: 66,  plasma: 300, missiles: 3, slots: 5, size: 1.4, agil: 0.3,  speed: 380, warp: 74, dm: 1.15, cam: 1.2, desc: 'Cañones dobles, cargadores de munición y motores gigantes.' },
 };
 const CH_DMG = 5.6, CH_REGEN = 2.0, LV_K = 0.02; // chasis −30 %: daño de plasma base 8 → 5,6 y recarga 1 unidad cada 1,4 s → cada 2 s · LV_K: cada punto de nivel = +2 % del valor base del chasis
 const ADDONS = [
@@ -40,7 +45,7 @@ function validSpec(s) {
 }
 function statsOf(spec, lvA) { // lvA: puntos de nivel asignados a cada característica de LV_STATS (cada punto = +2 % del valor BASE del chasis)
   const T = TYPES[spec.t], [ar, sh, pl, mi, en, am = 0] = spec.a, [bv = 0, bh = 0, bs = 0, bd = 0, ba = 0, br = 0, bp = 0, bw = 0] = lvA || [];
-  return { sk: skinOf(spec.sk), hp: T.hp + 30 * ar + Math.round(T.hp * LV_K * bh), sh: T.sh + 40 * sh + Math.round(T.sh * LV_K * bs), plasma: T.plasma + 60 * am + Math.round(T.plasma * LV_K * bp), pdmg: Math.round((CH_DMG * (1 + LV_K * bd) + 2 * pl) * 10) / 10, missiles: T.missiles + 2 * mi + am, flameMul: 1 + 0.3 * en, pitch: 1 - 0.1 * en, agil: Math.round(T.agil * (1 + LV_K * ba) * 100) / 100, vmax: Math.min(1500, Math.round(T.speed * (1 + 0.1 * en))) + Math.round(T.speed * LV_K * bv), warp: Math.round(T.warp * (1 + 0.5 * en)) + Math.round(T.warp * LV_K * bw), regen: CH_REGEN / (1 + LV_K * br) }; // regen: segundos por unidad de plasma recargada
+  return { sk: skinOf(spec.sk), hp: T.hp + 30 * ar + Math.round(T.hp * LV_K * bh), sh: T.sh + 40 * sh + Math.round(T.sh * LV_K * bs), plasma: T.plasma + 60 * am + Math.round(T.plasma * LV_K * bp), pdmg: Math.round((CH_DMG * (T.dm || 1) * (1 + LV_K * bd) + 2 * pl) * 10) / 10, missiles: T.missiles + 2 * mi + am, flameMul: 1 + 0.3 * en, pitch: 1 - 0.1 * en, agil: Math.round(T.agil * (1 + LV_K * ba) * 100) / 100, vmax: Math.min(1500, Math.round(T.speed * (1 + 0.1 * en))) + Math.round(T.speed * LV_K * bv), warp: Math.round(T.warp * (1 + 0.5 * en)) + Math.round(T.warp * LV_K * bw), regen: CH_REGEN / (1 + LV_K * br) }; // regen: segundos por unidad de plasma recargada
 }
 // ---------- niveles por nave: cada chasis tiene su propio nivel (0-20) y experiencia, independientes ----------
 // XP para pasar del nivel n-1 al n: need(n) = 10 + 15(n-1) + 5(n-1)(n-2)/2 → 10, 25, 45, 70, 100, 135… (la barra muestra la XP dentro del nivel actual)
@@ -57,7 +62,7 @@ function resetLv() { for (const k of Object.keys(LVL)) delete LVL[k]; saveLv(); 
 const hexSvg = (n, fill = '#ffd23f', s = 40) => `<svg width="${s}" height="${Math.round(s * 1.08)}" viewBox="0 0 43 46" aria-label="Nivel ${n}"><polygon points="20,5 36,14 36,32 20,41 4,32 4,14" transform="translate(3,3)" fill="#050f1c"/><polygon points="20,3 36,12 36,30 20,39 4,30 4,12" fill="${fill}" stroke="#050f1c" stroke-width="3.5" stroke-linejoin="round"/><text x="20" y="16" text-anchor="middle" font-family="ui-monospace,Consolas,monospace" font-weight="900" font-size="7" fill="#050f1c">NV</text><text x="20" y="30" text-anchor="middle" font-family="ui-monospace,Consolas,monospace" font-weight="900" font-size="${n > 9 ? 13 : 15}" fill="#050f1c">${n}</text></svg>`;
 // Mejoras de la nave básica: se compran con los recursos del planeta (agua, piedra, cobre, plata, oro, diamante). Coste del nivel lv+1 de la mejora i.
 const UPGRADE_COST = [n => ({ piedra: 6 * n, agua: 4 * n }), n => ({ cobre: 4 * n, piedra: 3 * n }), n => ({ plata: 3 * n, cobre: 3 * n }), n => ({ oro: 2 * n, plata: 2 * n }), n => ({ diamante: n, oro: 2 * n }), n => ({ plata: 2 * n, madera: 3 * n })];
-const SHIP_COST = { halcon: null, saeta: { piedra: 12, cobre: 6 }, coloso: { plata: 12, oro: 6 }, nomada: { oro: 8, diamante: 3 } }; // cambiar de nave: se desbloquea una vez con recursos
+const SHIP_COST = { halcon: null, saeta: { piedra: 12, cobre: 6 }, coloso: { plata: 12, oro: 6 }, nomada: { oro: 8, diamante: 3 }, centinela: { piedra: 30, cobre: 14, plata: 6 }, corsario: { cobre: 18, plata: 12, oro: 5 }, fantasma: { plata: 16, oro: 8, diamante: 4 }, titan: { plata: 24, oro: 14, diamante: 6, cobre: 20 } }; // cambiar de nave: se desbloquea una vez con recursos
 const upgradeCost = (i, lv) => UPGRADE_COST[i](lv + 1);
 const basicSpec = (c, sk) => ({ t: 'halcon', a: [0, 0, 0, 0, 0, 0], c: Number.isFinite(c) ? c : 0x4db8ff, sk: skinOf(sk) }); // todos empiezan con una nave básica
 function loadSpec() { try { return validSpec(JSON.parse(localStorage.getItem('spec'))); } catch { return validSpec(null); } }
@@ -280,34 +285,14 @@ const SHIPGFX = (() => {
     };
   }
 
-  // ---------- utilidades de modelado (mismas piezas de antes, ahora por rol de material) ----------
+  // ---------- utilidades de modelado: fuselajes, góndolas y cápsulas por secciones (loft), alas con perfil, calcomanías y detalle mecánico ----------
   const LR = 'LR', LG = 'LG', LW = 'LW', LY = 'LY', LT = 'LT', LC = 'LC', GL = 'GL', STW = 'STW', STR = 'STR';
   const X = { H: 'H', H2: 'H2', A: 'A', D: 'D', MT: 'MT', G: 'G', PV: 'PV' };
   const latheG = (pts, sx, sy, seg = 20, p0 = 0, pl = PI * 2) => new THREE.LatheGeometry(pts.map(([r, y]) => new THREE.Vector2(r, y)), seg, p0, pl).rotateX(PI / 2).scale(sx, sy, 1);
   const latheC = (pts, cols, seg = 18) => { const g = latheG(pts, 1, 1, seg), c = new Float32Array(g.attributes.position.count * 3), n = pts.length; for (let i = 0; i < c.length / 3; i++) { const k = CL(cols[i % n]); c[i * 3] = k.r; c[i * 3 + 1] = k.g; c[i * 3 + 2] = k.b; } g.setAttribute('color', new THREE.BufferAttribute(c, 3)); return g; }; // lathe con un color por punto del perfil (degradado de la tobera)
   const discC = (r, col, seg = 14) => { const g = new THREE.CircleGeometry(r, seg), k = CL(col), c = new Float32Array(g.attributes.position.count * 3); for (let i = 0; i < c.length; i += 3) { c[i] = k.r; c[i + 1] = k.g; c[i + 2] = k.b; } g.setAttribute('color', new THREE.BufferAttribute(c, 3)); return g; };
   const radAt = (P, z) => { for (let i = 1; i < P.length; i++) if (z <= P[i][1]) { const [r0, z0] = P[i - 1], [r1, z1] = P[i]; return r0 + (r1 - r0) * (z1 === z0 ? 0 : (z - z0) / (z1 - z0)); } return P[P.length - 1][0]; };
-  function hull(K, X, P, sx, sy, seams = []) { // fuselaje de revolución: lomo claro, vientre oscuro (mapeado cilíndrico) y juntas de paneles cada cierto tramo
-    const a = latheG(P, sx, sy, 22, PI / 2, PI), b = latheG(P, sx, sy, 22, -PI / 2, PI); a.userData.uvm = b.userData.uvm = 'cyl'; K.add(X.H, a); K.add(X.H2, b);
-    seams.forEach(z => K.add(X.D, new THREE.TorusGeometry(radAt(P, z) * 1.012, 0.00016, 4, 26).scale(sx, sy, 1), [0, 0, z]));
-  }
-  const extrude = (pts, th, bev = 0.00035) => { const sh = new THREE.Shape(); pts.forEach(([x, y], i) => i ? sh.lineTo(x, y) : sh.moveTo(x, y)); sh.closePath(); return new THREE.ExtrudeGeometry(sh, { depth: th, bevelEnabled: true, bevelThickness: bev, bevelSize: bev, bevelSegments: 1 }).rotateX(PI / 2).translate(0, th / 2, 0); };
-  const wing = (K, mat, pts, th, y = 0, bev) => K.mir(mat, extrude(pts, th, bev), [0, y, 0]); // ala en planta (x, z), espejada y con bordes biselados
-  const strip = (K, mat, [x0, z0], [x1, z1], w, y, h = 0.00018) => K.mir(mat, bx(Math.hypot(x1 - x0, z1 - z0), h, w), [(x0 + x1) / 2, y, (z0 + z1) / 2], [0, -Math.atan2(z1 - z0, x1 - x0), 0]); // banda fina entre dos puntos
-  const dots = (K, mat, [x0, y0, z0], [x1, y1, z1], n, s = 0.0003) => { const g = bx(s, s * 0.7, s); for (let i = 0; i < n; i++) { const t = n > 1 ? i / (n - 1) : 0; K.mir(mat, g, [x0 + (x1 - x0) * t, y0 + (y1 - y0) * t, z0 + (z1 - z0) * t]); } }; // hilera de remaches
-  const vents = (K, mat, x, y, z, n, dz, w, d, mir = true) => { const g = bx(w, 0.00014, d); for (let i = 0; i < n; i++) (mir ? K.mir : K.add)(mat, g, [x, y, z + i * dz]); }; // rejillas de ventilación
   const mast = (K, X, x, y, z, h, tilt = 0, tipMat = LR) => { K.add(X.MT, new THREE.CylinderGeometry(0.00009, 0.00014, h, 5), [x, y + h / 2, z], [0, 0, tilt]); K.add(tipMat === LW ? STW : tipMat === LR ? STR : tipMat, ball3(0.00028), [x - Math.sin(tilt) * h / 2, y + h / 2 + Math.cos(tilt) * h / 2 + 0.00005, z]); }; // antena con baliza intermitente en la punta
-  function canopy(K, X, x, y, z, r, len, hgt = 0.9) { // cabina: cristal con marco, viga trasera, asiento y panel de instrumentos visibles por dentro, y destello
-    K.add(X.G, new THREE.SphereGeometry(r, 16, 9, 0, PI * 2, 0, PI / 2), [x, y, z], [0, 0, 0], [1, hgt, len]);
-    for (const k of [-0.5, 0.05, 0.55]) K.add(X.D, new THREE.TorusGeometry(r * Math.sqrt(1 - k * k) * 1.01, 0.00017, 4, 12, PI).scale(1, hgt, 1), [x, y, z + k * len * r]);
-    K.add(X.D, bx(r * 1.9, 0.0003, r * 0.35), [x, y + 0.00005, z + len * r * 0.95]);
-    K.add(X.D, bx(r * 0.7, r * hgt * 0.5, r * len * 0.3), [x, y + r * hgt * 0.24, z + r * len * 0.22]); K.add(X.H2, bx(r * 0.5, r * hgt * 0.34, r * len * 0.06), [x, y + r * hgt * 0.5, z + r * len * 0.06]); // asiento y reposacabezas
-    K.add(LC, bx(r * 0.8, 0.00007, r * len * 0.2), [x, y + r * hgt * 0.16, z - r * len * 0.5], [0.35, 0, 0]); // pantalla del panel de instrumentos
-    K.add(LW, bx(r * 0.22, 0.00008, r * len * 0.8), [x + r * 0.3, y + r * hgt * 0.93, z - r * len * 0.12], [0, 0, -0.25]);
-  }
-  function intake(K, X, x, y, z, w, h, d) { // toma de aire lateral: cuerpo, boca oscura y labio de color
-    K.mir(X.H2, bx(w, h, d), [x, y, z + d / 2]); K.mir(X.D, bx(w * 0.7, h * 0.72, 0.0004), [x, y, z - 0.00005]); K.mir(X.A, bx(w * 1.06, h * 0.13, d * 0.35), [x, y + h * 0.5, z + d * 0.2]);
-  }
   const rcs = (K, X, x, y, z, s = 1) => { K.mir(X.A, bx(0.0009 * s, 0.0005 * s, 0.0009 * s), [x, y, z]); K.mir(X.D, bx(0.0005 * s, 0.0003 * s, 0.0005 * s), [x, y + 0.0003 * s, z]); }; // bloque de propulsores de actitud
   const hatch = (K, X, x, y, z, w, d, mir = true) => { const f = mir ? K.mir : K.add; f(X.D, bx(w, 0.00016, d), [x, y, z]); f(X.H2, bx(w * 0.8, 0.00024, d * 0.8), [x, y + 0.00003, z]); f(X.A, bx(w * 0.3, 0.00032, d * 0.1), [x, y + 0.00004, z]); }; // escotilla de mantenimiento con asa
   const radiator = (K, X, x, y, z, w, d, n) => { K.mir(X.MT, bx(w, 0.00018, d), [x, y, z]); for (let i = 0; i < n; i++) K.mir(X.D, bx(w * 0.92, 0.0003, 0.00012), [x, y + 0.00012, z - d / 2 + d * (i + 0.5) / n]); }; // panel radiador con tubos
@@ -320,119 +305,314 @@ const SHIPGFX = (() => {
     return K.parts()[0][1];
   })();
   let MSLM = null; const mslMat = () => MSLM || (MSLM = new THREE.MeshStandardMaterial({ vertexColors: true, metalness: 0.35, roughness: 0.45, emissive: 0x1a1a1a, envMap: tx('env'), envMapIntensity: 0.7, side: THREE.DoubleSide }));
-
-// ---------- chasis: cada uno rellena el kit K con sus piezas y devuelve sus puntos de anclaje (motores, cañones, pilones, escudo, blindaje) ----------
-const BUILD = {
-  saeta(K, X) { // interceptor: aguja larga, canards y cola en V
-    const P = [[0, -0.027], [0.0011, -0.023], [0.0028, -0.013], [0.0040, -0.002], [0.0043, 0.008], [0.0038, 0.016], [0.0028, 0.021], [0, 0.021]];
-    hull(K, X, P, 1, 0.75, [-0.0195, -0.0125, -0.0045, 0.0035, 0.011, 0.0185]);
-    K.add(X.D, latheG([[0, -0.0272], [0.00118, -0.0233], [0.00188, -0.0195]], 1, 0.75, 14)); K.add(X.A, new THREE.TorusGeometry(0.0019, 0.00019, 4, 16).scale(1, 0.75, 1), [0, 0, -0.0195]); // radomo oscuro y aro de color
-    K.add(X.MT, cylZ(0.00028, 0.00013, 0.0058, 6), [0, 0, -0.0300]); K.add(LR, ball3(0.00026), [0, 0, -0.0330]); // sonda pitot
-    canopy(K, X, 0, 0.0021, -0.0112, 0.0030, 2.7);
-    K.add(X.H, bx(0.0015, 0.0009, 0.0115), [0, 0.0033, 0.0088]); K.add(X.A, bx(0.0005, 0.00014, 0.0100), [0, 0.00385, 0.0088]); vents(K, X.D, 0.0012, 0.0031, 0.0075, 4, 0.0018, 0.0006, 0.0008); // lomo con franja y rejillas
-    wing(K, X.H, [[0.0035, -0.008], [0.021, 0.012], [0.021, 0.0155], [0.0035, 0.0125]], 0.0009, 0, 0.0003);
-    strip(K, X.A, [0.0055, -0.0044], [0.0200, 0.0122], 0.0008, 0.00075); strip(K, X.H2, [0.0120, 0.0131], [0.0205, 0.0146], 0.0017, 0.00065); strip(K, X.D, [0.0120, 0.0121], [0.0120, 0.0142], 0.00015, 0.0007); strip(K, X.D, [0.0045, 0.0075], [0.0205, 0.0112], 0.00013, 0.0007); // franja del borde de ataque, alerón y juntas
-    wing(K, X.A, [[0.002, -0.018], [0.009, -0.011], [0.009, -0.0095], [0.002, -0.0105]], 0.0007, 0, 0.0002); // canards
-    K.mir(X.A, bx(0.0010, 0.0013, 0.0070), [0.0212, 0, 0.0132]); K.mir(X.D, bx(0.0012, 0.0004, 0.0030), [0.0212, 0.0008, 0.0100]); // raíl de la punta del ala
-    for (const sx of [-1, 1]) K.add(sx < 0 ? LR : LG, ball3(0.0006), [sx * 0.0212, 0, 0.0074]);
-    K.mir(X.H, bx(0.0007, 0.0095, 0.008), [0.0045, 0.0055, 0.0145], [0, 0, -0.5]); K.mir(X.A, bx(0.0008, 0.0022, 0.0060), [0.0067, 0.0093, 0.0152], [0, 0, -0.5]); K.mir(X.D, bx(0.00016, 0.0075, 0.00016), [0.0043, 0.0050, 0.0170], [0, 0, -0.5]); K.add(STW, ball3(0.00028), [0.0071, 0.0100, 0.0172]); K.add(STW, ball3(0.00028), [-0.0071, 0.0100, 0.0172]); // cola en V con timón y luz
-    K.mir(X.D, bx(0.0005, 0.0030, 0.0060), [0.0030, -0.0034, 0.0120], [0, 0, 0.5]); // aletas ventrales
-    intake(K, X, 0.0046, -0.0006, -0.0068, 0.0014, 0.0020, 0.0070);
-    K.add(X.H2, cylZ(0.0036, 0.0042, 0.012), [0, 0, 0.015]); K.add(X.A, new THREE.TorusGeometry(0.0040, 0.00022, 4, 20), [0, 0, 0.0112]); K.add(X.D, new THREE.TorusGeometry(0.0038, 0.00016, 4, 20), [0, 0, 0.0155]); // caja del motor
-    dots(K, X.D, [0.0022, 0.0022, -0.0040], [0.0026, 0.0018, 0.0090], 6, 0.00028); mast(K, X, 0, 0.0038, 0.0140, 0.0032, 0.15, LW);
-    hatch(K, X, 0.0110, 0.00080, 0.0060, 0.0030, 0.0022); hatch(K, X, 0.0170, 0.00080, 0.0100, 0.0022, 0.0018); rcs(K, X, 0.0023, 0.0003, -0.0165); rcs(K, X, 0.0206, 0.0012, 0.0128, 0.8); mast(K, X, 0.0170, 0.0008, 0.0130, 0.0022, 0.3, LG); K.add(X.H2, new THREE.SphereGeometry(0.0009, 8, 5, 0, PI * 2, 0, PI / 2), [0, -0.0026, -0.0110], [PI, 0, 0]); dots(K, X.D, [0.0058, 0.0009, 0.0010], [0.0170, 0.0009, 0.0122], 6, 0.00022); // escotillas, propulsores de actitud, antena y sensor ventral
-    return { eng: [{ x: 0, y: 0, z: 0.0205, r: 0.0038 }], nose: [0, -0.0012, -0.0245], guns: [[-0.008, -0.0008, -0.001], [0.008, -0.0008, -0.001], [-0.014, -0.0008, 0.005], [0.014, -0.0008, 0.005]],
-      py: { x0: 0.005, dx: 0.003, y: -0.0026, z: 0.007 }, sh: { y: 0, z: -0.008, r: 0.030 }, ar: { w: 0.0043, y: 0.0033, z0: -0.012, z1: 0.016 },
-      dc: { wing: { pts: [[0.0035, -0.008], [0.021, 0.012], [0.021, 0.0155], [0.0035, 0.0125]], wy: 0.00075 }, ring: [0.0040, 0.0075], hp: { P, sx: 1, sy: 0.75 } } };
-  },
-  halcon(K, X) { // caza equilibrado: alas en delta con strakes y doble motor
-    const P = [[0, -0.020], [0.0016, -0.0165], [0.0042, -0.009], [0.0060, 0], [0.0064, 0.008], [0.0056, 0.015], [0.0040, 0.019], [0, 0.019]];
-    hull(K, X, P, 1, 0.72, [-0.0125, -0.0075, -0.002, 0.0035, 0.009, 0.0145]);
-    K.add(X.D, latheG([[0, -0.0203], [0.0017, -0.0166], [0.00335, -0.0120]], 1, 0.72, 14)); K.add(X.A, new THREE.TorusGeometry(0.00338, 0.0002, 4, 16).scale(1, 0.72, 1), [0, 0, -0.0120]); K.add(X.MT, cylZ(0.00012, 0.00024, 0.0035, 6), [0, 0, -0.0218]);
-    canopy(K, X, 0, 0.0029, -0.0055, 0.0038, 2.3);
-    K.add(X.H, bx(0.0020, 0.0009, 0.0125), [0, 0.0043, 0.0060]); K.add(X.A, bx(0.0006, 0.00014, 0.0110), [0, 0.00490, 0.0060]); vents(K, X.D, 0.0014, 0.0043, 0.0035, 4, 0.0022, 0.0007, 0.0009); // lomo dorsal
-    wing(K, X.H, [[0.004, -0.006], [0.028, 0.013], [0.028, 0.017], [0.004, 0.014]], 0.0012, 0, 0.0004);
-    wing(K, X.H, [[0.0035, -0.0125], [0.0100, -0.0013], [0.0035, -0.0010]], 0.0008, 0, 0.0003); // strakes
-    strip(K, X.A, [0.0100, 0.0003], [0.0265, 0.0134], 0.0010, 0.0009); strip(K, X.H2, [0.0085, 0.0135], [0.0165, 0.0146], 0.0022, 0.0008); strip(K, X.A, [0.0180, 0.0146], [0.0272, 0.0158], 0.0020, 0.0008);
-    strip(K, X.D, [0.0085, 0.0125], [0.0085, 0.0148], 0.00015, 0.0008); strip(K, X.D, [0.0172, 0.0140], [0.0172, 0.0160], 0.00015, 0.0008); strip(K, X.D, [0.0050, 0.0070], [0.0276, 0.0130], 0.00014, 0.0008); // flap, alerón y juntas
-    K.mir(X.A, bx(0.0022, 0.0018, 0.0090), [0.0280, 0, 0.0135]); K.mir(X.D, bx(0.0024, 0.0004, 0.0040), [0.0280, 0.0010, 0.0100]);
-    for (const sx of [-1, 1]) K.add(sx < 0 ? LR : LG, ball3(0.0007), [sx * 0.0281, 0, 0.0062]);
-    K.mir(X.H, bx(0.0008, 0.008, 0.009), [0.005, 0.005, 0.012], [0, 0, -0.35]); K.mir(X.A, bx(0.0009, 0.0024, 0.0060), [0.0068, 0.0086, 0.0135], [0, 0, -0.35]); K.mir(X.D, bx(0.00016, 0.0065, 0.00016), [0.0052, 0.0048, 0.0165], [0, 0, -0.35]); K.add(STW, ball3(0.0003), [0.0070, 0.0090, 0.0155]); K.add(STW, ball3(0.0003), [-0.0070, 0.0090, 0.0155]);
-    K.mir(X.H2, cylZ(0.0034, 0.0042, 0.014), [0.0085, -0.0005, 0.011]); K.mir(X.A, new THREE.TorusGeometry(0.0038, 0.00022, 4, 18), [0.0085, -0.0005, 0.0075]); K.mir(X.D, new THREE.TorusGeometry(0.0036, 0.00016, 4, 18), [0.0085, -0.0005, 0.0148]); // góndolas de los motores
-    intake(K, X, 0.0062, -0.0007, -0.0075, 0.0013, 0.0018, 0.0068); K.mir(X.MT, bx(0.0011, 0.0016, 0.0020), [0.0085, -0.0025, 0.0100]);
-    dots(K, X.D, [0.0026, 0.0038, -0.0090], [0.0034, 0.0034, 0.0080], 7, 0.0003); mast(K, X, 0.0018, 0.0048, 0.0130, 0.0030, 0.1, LW);
-    hatch(K, X, 0.0170, 0.00110, 0.0095, 0.0040, 0.0032); hatch(K, X, 0.0235, 0.00110, 0.0110, 0.0030, 0.0026); rcs(K, X, 0.0031, 0.0005, -0.0135); rcs(K, X, 0.0276, 0.0016, 0.0066, 0.9); mast(K, X, 0.0210, 0.0010, 0.0155, 0.0024, 0.3, LR); mast(K, X, -0.0060, 0.0044, 0.0120, 0.0028, -0.2, LG); dots(K, X.D, [0.0100, 0.0011, 0.0040], [0.0250, 0.0011, 0.0118], 7, 0.00024); // escotillas, RCS y antenas
-    return { eng: [-1, 1].map(s => ({ x: s * 0.0085, y: -0.0005, z: 0.0187, r: 0.0034 })), nose: [0, -0.0016, -0.0185], guns: [[-0.012, -0.0012, 0], [0.012, -0.0012, 0], [-0.019, -0.0012, 0.006], [0.019, -0.0012, 0.006]],
-      py: { x0: 0.008, dx: 0.0038, y: -0.0032, z: 0.006 }, sh: { y: 0, z: -0.004, r: 0.032 }, ar: { w: 0.0064, y: 0.0046, z0: -0.010, z1: 0.016 },
-      dc: { wing: { pts: [[0.004, -0.006], [0.028, 0.013], [0.028, 0.017], [0.004, 0.014]], wy: 0.0010 }, ring: [0.0040, 0.0068], hp: { P, sx: 1, sy: 0.72 } } };
-  },
-  coloso(K, X) { // cañonera pesada: casco grueso con placas, puente, torreta dorsal y triple motor
-    const P = [[0, -0.021], [0.0035, -0.0195], [0.0068, -0.013], [0.0080, -0.004], [0.0082, 0.008], [0.0072, 0.016], [0.0050, 0.021], [0, 0.021]];
-    hull(K, X, P, 1.35, 0.78, [-0.0165, -0.0100, -0.0030, 0.0045, 0.0110, 0.0175]);
-    K.add(X.MT, latheG([[0, -0.0214], [0.0036, -0.0197], [0.0056, -0.0172]], 1.35, 0.78, 16)); K.add(X.MT, bx(0.0090, 0.0006, 0.0006), [0, 0.0006, -0.0199]); // proa acorazada
-    K.add(X.H2, bx(0.0076, 0.0018, 0.0064), [0, 0.0058, -0.0098]); K.add(X.A, bx(0.0078, 0.0004, 0.0008), [0, 0.0069, -0.0072]); // puente
-    K.add(X.G, bx(0.0064, 0.0009, 0.0030), [0, 0.0064, -0.0129], [-0.55, 0, 0]); K.mir(X.G, bx(0.0026, 0.0009, 0.0026), [0.0040, 0.0060, -0.0106], [-0.40, 0.75, 0]); K.add(X.D, bx(0.0068, 0.0003, 0.0004), [0, 0.0063, -0.0136], [-0.55, 0, 0]); K.add(X.D, bx(0.0003, 0.0010, 0.0032), [0, 0.0066, -0.0128], [-0.55, 0, 0]); // parabrisas de tres paneles con marcos
-    K.add(X.H, bx(0.0100, 0.0006, 0.0075), [0, 0.0063, 0.0046]); K.add(X.H2, bx(0.0074, 0.0004, 0.0050), [0, 0.0067, 0.0062]); K.add(X.D, bx(0.0002, 0.0004, 0.0100), [0, 0.0065, 0.0100]); K.mir(X.D, bx(0.0002, 0.0005, 0.0076), [0.0050, 0.0064, 0.0046]); // placas dorsales solapadas
-    K.add(X.D, new THREE.CylinderGeometry(0.0036, 0.0040, 0.0016, 16), [0, 0.0072, 0.0016]); K.add(X.A, new THREE.TorusGeometry(0.0034, 0.00022, 4, 18).rotateX(PI / 2), [0, 0.0081, 0.0016]); K.add(X.H, new THREE.SphereGeometry(0.0030, 14, 8, 0, PI * 2, 0, PI / 2), [0, 0.0082, 0.0016], [0, 0, 0], [1, 0.75, 1.1]); // torreta dorsal
-    K.add(X.D, bx(0.0012, 0.0008, 0.0006), [0, 0.0094, -0.0012]);
-    for (const sx of [-1, 1]) { K.add(X.MT, cylZ(0.00045, 0.00045, 0.0090, 8), [sx * 0.0011, 0.0092, -0.0035]); K.add(X.D, cylZ(0.00075, 0.00075, 0.0012, 8), [sx * 0.0011, 0.0092, -0.0016]); K.add(X.D, cylZ(0.00068, 0.00068, 0.0009, 8), [sx * 0.0011, 0.0092, -0.0075]); }
-    K.add(X.MT, bx(0.0006, 0.0011, 0.0032), [0, 0.0085, -0.0006]); // manguito común de los cañones
-    wing(K, X.H, [[0.008, -0.004], [0.023, 0.003], [0.023, 0.011], [0.008, 0.013]], 0.0026, 0, 0.0005);
-    strip(K, X.A, [0.0090, -0.0032], [0.0225, 0.0034], 0.0012, 0.0019); strip(K, X.H2, [0.0090, 0.0102], [0.0225, 0.0098], 0.0030, 0.0019); strip(K, X.D, [0.0120, 0.0070], [0.0120, 0.0122], 0.00016, 0.0019); strip(K, X.D, [0.0175, 0.0070], [0.0175, 0.0114], 0.00016, 0.0019); // franja, flaps y juntas
-    dots(K, X.D, [0.0100, 0.0019, -0.0010], [0.0220, 0.0019, 0.0010], 5, 0.00034); dots(K, X.D, [0.0100, 0.0019, 0.0126], [0.0220, 0.0019, 0.0108], 5, 0.00034);
-    K.mir(X.H2, bx(0.0022, 0.0030, 0.0100), [0.0232, 0, 0.0070]); K.mir(X.A, bx(0.0023, 0.0016, 0.0030), [0.0232, 0.0006, 0.0000]); K.mir(X.D, bx(0.0024, 0.0005, 0.0060), [0.0232, 0.0018, 0.0075]); K.add(LR, ball3(0.0007), [-0.0232, 0.0018, 0.0035]); K.add(LG, ball3(0.0007), [0.0232, 0.0018, 0.0035]); // vainas de punta de ala
-    K.mir(X.H2, cylZ(0.0033, 0.0038, 0.016), [0.0125, -0.001, 0.0125]); K.mir(X.A, new THREE.TorusGeometry(0.0036, 0.00025, 4, 18), [0.0125, -0.001, 0.0070]); K.mir(X.D, new THREE.TorusGeometry(0.0035, 0.00018, 4, 18), [0.0125, -0.001, 0.0140]); K.mir(X.D, cylZ(0.0026, 0.0026, 0.0006, 12), [0.0125, -0.001, 0.0044]);
-    K.mir(X.MT, bx(0.0012, 0.0050, 0.0140), [0.0104, 0, 0.0030]); // puntales de las góndolas
-    for (let i = 0; i < 4; i++) K.mir(X.D, bx(0.0002, 0.0030, 0.0014), [0.0111, 0.0032, 0.0090 + i * 0.0018]); // radiadores laterales
-    dots(K, X.D, [0.0030, 0.0062, -0.0130], [0.0046, 0.0060, 0.0140], 8, 0.00034); mast(K, X, -0.0040, 0.0064, 0.0125, 0.0046, 0.1, LW); K.add(X.H2, new THREE.SphereGeometry(0.0010, 8, 5, 0, PI * 2, 0, PI / 2), [0.0045, 0.0064, 0.0110], [0.5, 0, 0]);
-    hatch(K, X, 0.0150, 0.00190, 0.0098, 0.0044, 0.0034); hatch(K, X, 0.0190, 0.00190, 0.0060, 0.0030, 0.0026); rcs(K, X, 0.0061, 0.0008, -0.0175, 1.2); radiator(K, X, 0.0060, 0.0072, 0.0100, 0.0022, 0.0060, 6); mast(K, X, 0.0130, 0.0018, 0.0128, 0.0030, 0.3, LR); mast(K, X, -0.0130, 0.0018, -0.0010, 0.0034, -0.2, LW); // escotillas, RCS, radiadores dorsales y balizas
-    return { eng: [{ x: 0, y: 0, z: 0.0215, r: 0.0046 }, { x: -0.0125, y: -0.001, z: 0.0198, r: 0.0033 }, { x: 0.0125, y: -0.001, z: 0.0198, r: 0.0033 }],
-      nose: [0, -0.0030, -0.0205], guns: [[-0.011, -0.0013, -0.001], [0.011, -0.0013, -0.001], [-0.018, -0.0013, 0.004], [0.018, -0.0013, 0.004]],
-      py: { x0: 0.009, dx: 0.0028, y: -0.0038, z: 0.006 }, sh: { y: 0, z: -0.004, r: 0.036 }, ar: { w: 0.0100, y: 0.0062, z0: -0.012, z1: 0.016 },
-      dc: { wing: { pts: [[0.008, -0.004], [0.023, 0.003], [0.023, 0.011], [0.008, 0.013]], wy: 0.0018 }, ring: [0.0088, 0.0112], hp: { P, sx: 1.35, sy: 0.78 } } };
-  },
-  nomada(K, X) { // explorador: plato sensor, cúpula panorámica, botes laterales y paneles solares plegables
-    const P = [[0, -0.024], [0.0018, -0.0215], [0.0034, -0.012], [0.0038, 0], [0.0036, 0.012], [0.0030, 0.020], [0, 0.022]];
-    hull(K, X, P, 1, 0.9, [-0.0160, -0.0080, -0.0010, 0.0050, 0.0110, 0.0170]);
-    K.add(X.H2, new THREE.SphereGeometry(0.0046, 20, 6, 0, PI * 2, 0, 0.95).rotateX(PI / 2), [0, 0, -0.0245]); K.add(X.H, new THREE.SphereGeometry(0.0044, 20, 6, 0, PI * 2, 0, 0.93).rotateX(PI / 2), [0, 0, -0.0246]); // plato sensor con aro, alimentador y trípode
-    K.add(X.A, new THREE.TorusGeometry(0.00372, 0.00022, 4, 24), [0, 0, -0.0245 + 0.0046 * Math.cos(0.95)]); K.add(X.MT, cylZ(0.00022, 0.00022, 0.0050, 6), [0, 0, -0.0265]); K.add(X.D, cylZ(0.0005, 0.00022, 0.0009, 8), [0, 0, -0.0291]); K.add(LY, ball3(0.0004), [0, 0, -0.0296]);
-    for (let i = 0; i < 3; i++) { const a = i * PI * 2 / 3 + PI / 2; K.add(X.MT, cylZ(0.00009, 0.00009, 0.0046, 4), [Math.cos(a) * 0.0019, Math.sin(a) * 0.0019, -0.0248], [Math.sin(a) * 0.42, -Math.cos(a) * 0.42, 0]); }
-    canopy(K, X, 0, 0.0024, -0.0105, 0.0043, 1.75, 1.0); K.add(X.MT, new THREE.TorusGeometry(0.0044, 0.0003, 4, 20).rotateX(PI / 2), [0, 0.0024, -0.0105]);
-    K.add(X.H2, bx(0.0030, 0.0018, 0.0050), [0, 0.0040, 0.0040]); K.add(X.D, new THREE.SphereGeometry(0.0013, 10, 6, 0, PI * 2, 0, PI / 2), [0, 0.0049, 0.0040]); K.add(X.G, new THREE.SphereGeometry(0.00055, 8, 5), [0, 0.0056, 0.0034]); // torreta de sensores dorsal
-    K.add(X.H2, cylZ(0.0011, 0.0011, 0.0090, 10), [0, 0.0040, 0.0140]); K.add(X.A, new THREE.TorusGeometry(0.0012, 0.0002, 4, 12), [0, 0.0040, 0.0110]); K.add(X.A, new THREE.TorusGeometry(0.0012, 0.0002, 4, 12), [0, 0.0040, 0.0170]); // bote de carga dorsal
-    const panel = 'PV';
-    K.mir(X.H, cylZ(0.0018, 0.0018, 0.030), [0.012, 0, 0.008]); K.mir(X.A, cylZ(0.00195, 0.00195, 0.0012), [0.012, 0, -0.0035]); K.mir(X.A, cylZ(0.00195, 0.00195, 0.0012), [0.012, 0, 0.0085]); K.mir(X.D, new THREE.TorusGeometry(0.0018, 0.00014, 4, 12), [0.012, 0, 0.0000]); K.mir(X.D, new THREE.TorusGeometry(0.0018, 0.00014, 4, 12), [0.012, 0, 0.0150]);
-    K.mir(X.H, bx(0.0085, 0.0012, 0.004), [0.0078, 0, 0.004]); K.mir(X.MT, bx(0.0085, 0.0006, 0.0010), [0.0078, 0.0007, 0.0058]);
-    K.mir(X.H2, new THREE.SphereGeometry(0.0016, 10, 8), [0.0128, 0.0021, 0.0130]); K.mir(X.A, new THREE.TorusGeometry(0.0016, 0.00016, 4, 12), [0.0128, 0.0021, 0.0130]); K.mir(X.MT, new THREE.CylinderGeometry(0.00012, 0.00012, 0.0020, 4), [0.0128, 0.0010, 0.0130]); // depósito esférico
-    for (let s = 0; s < 3; s++) { // paneles solares plegables: 3 tramos con marco y celdas
-      const cx = 0.0165 + s * 0.0048;
-      K.mir(panel, bx(0.0044, 0.00034, 0.0126), [cx, 0, 0.008]); K.mir(X.H, bx(0.0046, 0.0005, 0.0003), [cx, 0, 0.0143]); K.mir(X.H, bx(0.0046, 0.0005, 0.0003), [cx, 0, 0.0017]); K.mir(X.H, bx(0.0003, 0.0005, 0.0126), [cx + 0.0023, 0, 0.008]); K.mir(X.H, bx(0.0003, 0.0005, 0.0126), [cx - 0.0023, 0, 0.008]);
+  const sgnp = (t, n) => Math.sign(t) * Math.pow(Math.abs(t), 2 / n);
+  const n7 = s => (s.length > 6 ? s : [...s, 0]);
+  const secAt = (S, z) => { for (let i = 1; i < S.length; i++) if (z <= S[i][0] || i === S.length - 1) { const a = n7(S[i - 1]), b = n7(S[i]), k = Math.min(1, Math.max(0, (z - a[0]) / (b[0] - a[0] || 1))); return a.map((v, j) => v + (b[j] - v) * k); } };
+  const subS = (S, z0, z1) => [secAt(S, z0), ...S.map(n7).filter(s => s[0] > z0 && s[0] < z1), secAt(S, z1)];
+  const cross3 = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  const sub3 = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+  const geoOf = P => { const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(P, 3)); g.computeVertexNormals(); return g; }; // sin índice: caras planas
+  function loft(S, seg, half, flat) { // S: [z, semiancho, alto sup, alto inf, exponente (2 = elipse, mayor = más cuadrada), y del eje, x del eje] · half 0 = lomo, 1 = vientre · UVs por longitud de arco
+    S = S.map(n7);
+    const R = S.map(([z, w, tp, bt, n, yc, xc]) => { const pts = []; for (let i = 0; i <= seg; i++) { const a = half ? -PI + i * PI / seg : PI - i * PI / seg, c = Math.cos(a), s = Math.sin(a); pts.push([xc + w * sgnp(c, n), yc + (s >= 0 ? tp : bt) * sgnp(s, n), z]); } return pts; });
+    const arc = R.map(r => { let a = 0; return r.map((p, i) => (i ? (a += Math.hypot(p[0] - r[i - 1][0], p[1] - r[i - 1][1])) : 0)); });
+    const NA = R.map(r => r.map(() => [0, 0, 0])), T = [];
+    for (let k = 0; k < R.length - 1; k++) for (let i = 0; i < seg; i++) {
+      const v = [[k, i], [k, i + 1], [k + 1, i + 1], [k + 1, i]];
+      for (const t of half ? [[0, 1, 2], [0, 2, 3]] : [[0, 3, 2], [0, 2, 1]]) { const q = t.map(j => v[j]), [a, b, c] = q.map(([kk, ii]) => R[kk][ii]), f = cross3(sub3(b, a), sub3(c, a)); T.push({ q, f }); for (const [kk, ii] of q) { const w = NA[kk][ii]; w[0] += f[0]; w[1] += f[1]; w[2] += f[2]; } }
     }
-    K.mir(X.MT, bx(0.0034, 0.0004, 0.0006), [0.0150, 0, 0.008]); K.add(LR, ball3(0.0006), [-0.0286, 0, 0.0143]); K.add(LG, ball3(0.0006), [0.0286, 0, 0.0143]);
-    mast(K, X, 0.0016, 0.0050, 0.0010, 0.0060, 0.25, LW); mast(K, X, -0.0018, 0.0050, 0.0170, 0.0040, -0.2, LR); K.add(X.H2, new THREE.SphereGeometry(0.0010, 8, 5, 0, PI * 2, 0, PI / 2), [0.0032, 0.0036, -0.0020], [0.9, 0, 0.5]);
-    dots(K, X.D, [0.0018, 0.0031, -0.0060], [0.0020, 0.0032, 0.0090], 6, 0.0003);
-    radiator(K, X, 0.0070, 0.0, 0.0170, 0.0050, 0.0070, 7); radiator(K, X, 0.0072, 0.0, -0.0040, 0.0044, 0.0050, 5); dish(K, X, -0.0030, 0.0046, 0.0060, 0.0014, [0.5, 0, 0.3]); rcs(K, X, 0.0029, 0.0010, -0.0170, 1.0); rcs(K, X, 0.0290, 0.0004, 0.0128, 0.8); hatch(K, X, 0.0020, 0.0038, 0.0022, 0.0018, 0.0026, false); mast(K, X, 0.0140, 0.0020, 0.0230, 0.0030, 0.2, LR); // radiadores, antena parabólica y RCS
-    return { eng: [-1, 1].map(s => ({ x: s * 0.012, y: 0, z: 0.0234, r: 0.0026 })), nose: [0, -0.0015, -0.0215], guns: [[-0.012, -0.0015, -0.004], [0.012, -0.0015, -0.004], [-0.022, -0.0015, 0.002], [0.022, -0.0015, 0.002]],
-      py: { x0: 0.0075, dx: 0.0033, y: -0.0026, z: 0.008 }, sh: { y: 0, z: -0.010, r: 0.032 }, ar: { w: 0.0038, y: 0.0034, z0: -0.012, z1: 0.016 },
-      dc: { wing: null, ring: [0.0060, 0.0090], hp: { P, sx: 1, sy: 0.9 } } };
+    const P = [], N = [], U = [], nz = v => { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / l, v[1] / l, v[2] / l]; };
+    for (const { q, f } of T) for (const [kk, ii] of q) { P.push(...R[kk][ii]); N.push(...nz(flat ? f : NA[kk][ii])); U.push(arc[kk][ii] / TILE, R[kk][ii][2] / TILE); }
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(P, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(N, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(U, 2)); g.userData.uvm = 'keep'; return g;
+  }
+  const body = (K, X, S, o = {}) => { const f = o.mir ? K.mir : K.add, p = o.p || [0, 0, 0], r = o.r || [0, 0, 0], s = o.s || [1, 1, 1]; for (const h of [0, 1]) f(h ? (o.b || X.H2) : (o.t || X.H), loft(S, o.seg || 14, h, o.flat), p, r, s); }; // lomo claro y vientre oscuro
+  const bandK = (K, role, S, z0, z1, k = 1.02, seg = 12, p = [0, 0, 0]) => { const T = subS(S, z0, z1).map(s => [s[0], s[1] * k, s[2] * k, s[3] * k, s[4], s[5], s[6]]); for (const h of [0, 1]) K.add(role, loft(T, seg, h, false), p); }; // anillo ligeramente más grande que el fuselaje: juntas, radomo, franjas
+
+  // ---------- alas con perfil: secciones de raíz a punta ({x, y, zl: borde de ataque, c: cuerda, t: espesor}); ax 'x' = derivas (el espesor va en x) ----------
+  const WP = [[0, 0, 0], [0.22, 0.5, -0.36], [0.62, 0.34, -0.24], [1, 0.07, -0.07]]; // [fracción de cuerda, semiespesor superior, inferior] en unidades de espesor
+  const profH = (f, h) => { if (!h) return 0; const k = h > 0 ? 1 : 2; for (let i = 1; i < WP.length; i++) if (f <= WP[i][0] || i === WP.length - 1) { const a = WP[i - 1], b = WP[i], q = Math.min(1, Math.max(0, (f - a[0]) / (b[0] - a[0]))); return a[k] + (b[k] - a[k]) * q; } };
+  function mkWing(S, ax = 'y') {
+    const ai = ax === 'x' ? 0 : 1, last = S[S.length - 1], flip = ax === 'x' ? last.y - S[0].y > 0 : last.x - S[0].x < 0;
+    const at = (u, f, h = 0) => { const i = Math.min(S.length - 2, Math.max(0, Math.floor(u))), k = u - i, a = S[i], b = S[i + 1], L = q => a[q] + (b[q] - a[q]) * k, P = [L('x'), L('y'), L('zl') + f * L('c')]; P[ai] += profH(f, h) * L('t'); return P; }; // punto de la superficie: u = sección (fraccionaria), f = cuerda 0-1, h = +1 extradós / -1 intradós / 0 línea media
+    const ringAt = i => [[0, 0], [0.22, 1], [0.62, 1], [1, 1], [1, -1], [0.62, -1], [0.22, -1]].map(([f, h]) => at(i, f, h));
+    const tri = (P, a, b, c) => { if (flip) P.push(...a, ...c, ...b); else P.push(...a, ...b, ...c); };
+    const P = []; for (let i = 0; i < S.length - 1; i++) { const A = ringAt(i), B = ringAt(i + 1); for (let j = 0; j < 7; j++) { const j2 = (j + 1) % 7; tri(P, A[j], A[j2], B[j2]); tri(P, A[j], B[j2], B[j]); } }
+    const T = ringAt(S.length - 1); for (let j = 1; j < 6; j++) tri(P, T[0], T[j], T[j + 1]);
+    const patch = (u0, u1, f0, f1, h = 1, lift = 0.00005) => { // parche pegado a la superficie (flaps, alerones, franjas, juntas): u0-u1 en secciones, f0-f1 en cuerda
+      const us = [u0], fs = [f0]; for (let i = Math.floor(u0) + 1; i < u1; i++) us.push(i); us.push(u1); for (const [f] of WP) if (f > f0 && f < f1) fs.push(f); fs.push(f1);
+      const pt = (u, f) => { const p = at(u, f, h); p[ai] += h * lift; return p; }, fl = flip !== (h < 0), Q = [];
+      for (let a = 0; a < us.length - 1; a++) for (let b = 0; b < fs.length - 1; b++) { const p0 = pt(us[a], fs[b]), p1 = pt(us[a], fs[b + 1]), p2 = pt(us[a + 1], fs[b + 1]), p3 = pt(us[a + 1], fs[b]); if (fl) Q.push(...p0, ...p2, ...p1, ...p0, ...p3, ...p2); else Q.push(...p0, ...p1, ...p2, ...p0, ...p2, ...p3); }
+      return geoOf(Q);
+    };
+    return { geo: geoOf(P), at, patch, S };
+  }
+
+  // ---------- calcomanías planas (miran hacia arriba) y remaches ----------
+  const flatPoly = pts => { const sh = new THREE.Shape(); pts.forEach(([x, z], i) => (i ? sh.lineTo(x, -z) : sh.moveTo(x, -z))); return new THREE.ShapeGeometry(sh).rotateX(-PI / 2); };
+  const rect = (w, d) => flatPoly([[-w / 2, -d / 2], [w / 2, -d / 2], [w / 2, d / 2], [-w / 2, d / 2]]);
+  const rivets = (K, mat, a, b, n, s = 0.00024, mir = true) => { const g = rect(s, s), f = mir ? K.mir : K.add; for (let i = 0; i < n; i++) { const t = n > 1 ? i / (n - 1) : 0; f(mat, g, [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]); } }; // hilera de remaches (2 triángulos cada uno)
+  const wRiv = (K, W, mat, u0, u1, f, n, s = 0.00022) => { const g = rect(s, s); for (let i = 0; i < n; i++) { const p = W.at(u0 + (u1 - u0) * (n > 1 ? i / (n - 1) : 0), f, 1); p[1] += 0.00005; K.mir(mat, g, p); } }; // remaches siguiendo el extradós de un ala
+  const louvers = (K, mat, x, y, z, n, dz, w, d, mir = true) => { const g = rect(w, d), f = mir ? K.mir : K.add; for (let i = 0; i < n; i++) f(mat, g, [x, y, z + i * dz]); }; // rejillas de ventilación
+  const disc = (r, seg = 14) => new THREE.CircleGeometry(r, seg).rotateX(-PI / 2);
+  const insignia = (K, x, y, z, r) => { K.mir('D', disc(r, 16), [x, y, z]); K.mir('A', disc(r * 0.66, 16), [x, y + 0.00003, z]); K.mir('D', disc(r * 0.3, 10), [x, y + 0.00006, z]); }; // escarapela: borde oscuro, anillo del color de la nave y punto central
+  const wIns = (K, W, u, f, r) => { const p = W.at(u, f, 1); insignia(K, p[0], p[1] + 0.00007, p[2], r); };
+
+  function canopy(K, X, x, y, z, r, len, hgt = 0.9) { // cabina: cristal en gota con marco (aro de base, arcos y largueros), viga trasera, asiento, panel de instrumentos y destello
+    const L = r * len * 0.66, P = [[0, -0.5], [0.44, -0.44], [0.84, -0.22], [1, 0.06], [0.92, 0.34], [0.58, 0.64], [0.22, 0.9], [0, 1]].map(([a, b]) => [a * r, b * L]);
+    K.add(X.G, latheG(P, 1, hgt, 18, PI / 2, PI), [x, y, z]);
+    for (const k of [-0.3, 0.1, 0.5]) K.add(X.D, new THREE.TorusGeometry(radAt(P, k * L) * 1.012, 0.00017, 4, 14, PI).scale(1, hgt, 1), [x, y, z + k * L]);
+    K.mir(X.D, bx(0.00024, 0.00022, L * 1.36), [x + r * 0.99, y, z + L * 0.2]); K.add(X.D, bx(r * 1.9, 0.0003, r * 0.3), [x, y + 0.00005, z + L * 1.02]); // largueros de base y viga trasera
+    K.add(X.D, bx(r * 0.7, r * hgt * 0.5, r * len * 0.2), [x, y + r * hgt * 0.24, z + L * 0.3]); K.add(X.H2, bx(r * 0.5, r * hgt * 0.34, r * len * 0.05), [x, y + r * hgt * 0.5, z + L * 0.34]); // asiento y reposacabezas
+    K.add(LC, bx(r * 0.8, 0.00007, L * 0.3), [x, y + r * hgt * 0.16, z - L * 0.42], [0.35, 0, 0]); K.add(LW, bx(r * 0.22, 0.00008, L * 0.9), [x + r * 0.3, y + r * hgt * 0.93, z - L * 0.1], [0, 0, -0.25]);
+  }
+  function inlet(K, X, x, y, z, w, h, d) { // toma de aire lateral: cachete (mitad superior clara, inferior oscura), boca oscura elíptica y labio de color
+    body(K, X, [[z, w * 0.55, h * 0.55, h * 0.5, 2.4, 0], [z + d * 0.3, w, h * 0.55, h * 0.5, 2.4, 0], [z + d, w * 0.9, h * 0.5, h * 0.5, 2.2, 0]], { p: [x, y, 0], mir: true, seg: 10 });
+    K.mir(X.D, new THREE.CircleGeometry(1, 12), [x, y, z + 0.00004], [0, 0, 0], [w * 0.5, h * 0.5, 1]); K.mir(X.A, new THREE.TorusGeometry(1, 0.09, 4, 12), [x, y, z + 0.00008], [0, 0, 0], [w * 0.56, h * 0.56, w * 0.56]);
+  }
+const BUILD = {
+  saeta(K, X) { // interceptor: aguja con aristas, canards, alas en ojiva con flaps y alerones, cola en V y un solo motor con tobera de pétalos
+    const S = [[-0.029, 0.00015, 0.00015, 0.00015, 2, 0], [-0.025, 0.0009, 0.0009, 0.0007, 2.2, 0], [-0.02, 0.0019, 0.0019, 0.0013, 2.4, 0.0001], [-0.014, 0.0029, 0.0027, 0.0017, 2.8, 0.0003], [-0.008, 0.0037, 0.0031, 0.0019, 3, 0.0004], [-0.001, 0.0043, 0.0033, 0.0022, 3.2, 0.0004], [0.006, 0.0045, 0.0033, 0.0023, 3.2, 0.0003], [0.0125, 0.0042, 0.0032, 0.0025, 2.8, 0.0002], [0.017, 0.0039, 0.0034, 0.003, 2.3, 0], [0.0203, 0.0037, 0.0036, 0.0036, 2, 0]];
+    body(K, X, S, { seg: 16 });
+    bandK(K, X.D, S, -0.0292, -0.0224, 1.03); bandK(K, X.A, S, -0.0226, -0.0219, 1.04); // radomo oscuro con aro de color
+    for (const z of [-0.015, -0.0075, 0, 0.0075, 0.014]) bandK(K, X.D, S, z - 0.00012, z + 0.00012, 1.012, 10); // juntas de paneles
+    bandK(K, X.A, S, 0.011, 0.0114, 1.03); bandK(K, X.D, S, 0.0185, 0.019, 1.03); // aros de la caja del motor
+    K.add(X.MT, cylZ(0.00028, 0.0001, 0.006, 6), [0, 0, -0.0318]); K.add(LR, ball3(0.00026), [0, 0, -0.0348]); // sonda pitot
+    body(K, X, [[-0.0245, 0.0004, 0.0004, 0.0004, 2, -0.0013], [-0.0225, 0.0007, 0.0007, 0.0007, 2.2, -0.0013], [-0.012, 0.0011, 0.0009, 0.0009, 2.4, -0.0011], [-0.006, 0.0004, 0.0003, 0.0003, 2, -0.0007]], { seg: 8 }); // carena del cañón de proa
+    canopy(K, X, 0, 0.0027, -0.011, 0.0027, 3, 0.95);
+    body(K, X, [[-0.004, 0.0004, 0.0003, 0.0002, 2, 0.0036], [0, 0.0009, 0.0011, 0.0002, 2.2, 0.0034], [0.008, 0.0011, 0.0012, 0.0002, 2.4, 0.0033], [0.017, 0.0008, 0.0008, 0.0002, 2, 0.0031]], { seg: 10 }); // lomo dorsal con franja
+    K.add(X.A, rect(0.00045, 0.0095), [0, 0.00457, 0.005]); louvers(K, X.D, 0.0022, 0.00357, 0.009, 4, 0.0012, 0.0007, 0.0006);
+    const W = mkWing([{ x: 0.003, y: 0, zl: -0.005, c: 0.0175, t: 0.0012 }, { x: 0.013, y: 0.0003, zl: 0.003, c: 0.01, t: 0.0007 }, { x: 0.0205, y: 0.0006, zl: 0.0105, c: 0.0045, t: 0.00035 }]);
+    K.mir(X.H, W.geo); K.mir(X.A, W.patch(0.1, 1.9, 0, 0.1, 1, 0.00004)); // ala con franja del borde de ataque
+    for (const h of [1, -1]) { K.mir(X.H2, W.patch(0.15, 1, 0.7, 1, h, 0.00004)); K.mir(X.H2, W.patch(1.05, 1.95, 0.72, 1, h, 0.00004)); } // flaps y alerones
+    for (const [u0, u1, f] of [[0.15, 1, 0.7], [1.05, 1.95, 0.72], [0.15, 1.95, 0.35]]) K.mir(X.D, W.patch(u0, u1, f, f + 0.014, 1, 0.00005)); K.mir(X.D, W.patch(1, 1.04, 0.7, 1, 1, 0.00005)); // juntas
+    wRiv(K, W, X.D, 0.15, 1.9, 0.5, 9); wRiv(K, W, X.D, 0.2, 1.7, 0.2, 7);
+    const C = mkWing([{ x: 0.002, y: 0.0004, zl: -0.017, c: 0.0072, t: 0.0007 }, { x: 0.009, y: 0.0008, zl: -0.0128, c: 0.0034, t: 0.0003 }]); K.mir(X.A, C.geo); K.mir(X.D, C.patch(0.1, 0.95, 0.74, 1, 1, 0.00003)); // canards
+    const T = mkWing([{ x: 0.0036, y: 0.003, zl: 0.0108, c: 0.0085, t: 0.0008 }, { x: 0.0086, y: 0.0108, zl: 0.0152, c: 0.0034, t: 0.0003 }], 'x'); // cola en V
+    K.mir(X.H, T.geo); for (const h of [1, -1]) K.mir(X.H2, T.patch(0.1, 0.95, 0.66, 1, h, 0.00004)); K.mir(X.A, T.patch(0.55, 1, 0, 0.16, 1, 0.00004)); K.mir(STW, ball3(0.00028), T.at(1, 0.9, 0));
+    K.mir(X.H2, mkWing([{ x: 0.003, y: -0.003, zl: 0.012, c: 0.006, t: 0.0006 }, { x: 0.0048, y: -0.0062, zl: 0.0142, c: 0.0028, t: 0.0003 }], 'x').geo); // aletas ventrales
+    body(K, X, [[0.0088, 0.0003, 0.0003, 0.0003, 2, 0], [0.01, 0.0007, 0.0007, 0.0007, 2.2, 0], [0.015, 0.0007, 0.0007, 0.0007, 2.2, 0], [0.0166, 0.0003, 0.0003, 0.0003, 2, 0]], { p: [0.021, 0.0005, 0], mir: true, seg: 8 }); // vainas de punta de ala
+    K.add(LR, ball3(0.0005), [-0.021, 0.0005, 0.0086]); K.add(LG, ball3(0.0005), [0.021, 0.0005, 0.0086]);
+    inlet(K, X, 0.0043, -0.0006, -0.0088, 0.0013, 0.0022, 0.0075);
+    K.add(X.H2, new THREE.SphereGeometry(0.0009, 8, 5, 0, PI * 2, 0, PI / 2), [0, -0.0026, -0.011], [PI, 0, 0]); rcs(K, X, 0.0023, 0.0003, -0.0165); rcs(K, X, 0.0206, 0.0012, 0.0128, 0.8);
+    hatch(K, X, 0.011, 0.0008, 0.006, 0.003, 0.0022); hatch(K, X, 0.017, 0.0008, 0.01, 0.0022, 0.0018); mast(K, X, 0, 0.0043, 0.014, 0.0032, 0.15, LW); mast(K, X, 0.017, 0.0008, 0.013, 0.0022, 0.3, LG);
+    wIns(K, W, 1.3, 0.5, 0.0009);
+    return { eng: [{ x: 0, y: 0, z: 0.0205, r: 0.0038 }], nose: [0, -0.0016, -0.0242], guns: [[-0.008, -0.0008, -0.001], [0.008, -0.0008, -0.001], [-0.014, -0.0008, 0.005], [0.014, -0.0008, 0.005]],
+      py: { x0: 0.0055, dx: 0.0028, y: -0.0023, dy: 0.06, z: 0.006, dz: 0.38 }, sh: { y: 0, z: -0.008, r: 0.03 }, ar: { w: 0.0043, y: 0.0037, z0: -0.012, z1: 0.016 },
+      gear: { top: -0.0022, legs: [[-0.005, 0.008], [0.005, 0.008], [0, -0.011, 1]] }, dc: { wing: W, S, ring: [0.004, 0.0075] } };
+  },
+  halcon(K, X) { // caza de superioridad: fuselaje plano con aristas, alas en delta, góndolas gemelas con tomas, colas inclinadas y estabilizadores
+    const S = [[-0.0205, 0.0002, 0.0002, 0.0002, 2, 0], [-0.017, 0.0016, 0.0014, 0.0009, 2.4, 0.0002], [-0.011, 0.0036, 0.0024, 0.0015, 3, 0.0003], [-0.004, 0.0056, 0.0032, 0.002, 3.4, 0.0004], [0.004, 0.0064, 0.0034, 0.0022, 3.6, 0.0004], [0.011, 0.0062, 0.0034, 0.0022, 3.6, 0.0003], [0.017, 0.0058, 0.003, 0.0022, 3.6, 0.0002], [0.0192, 0.0056, 0.0026, 0.0022, 3.6, 0]];
+    body(K, X, S, { seg: 16 });
+    bandK(K, X.D, S, -0.0208, -0.0152, 1.03); bandK(K, X.A, S, -0.0154, -0.0149, 1.04); // radomo
+    for (const z of [-0.0105, -0.005, 0.0015, 0.0085, 0.0145]) bandK(K, X.D, S, z - 0.00012, z + 0.00012, 1.01, 10); // juntas
+    K.add(X.MT, cylZ(0.00012, 0.00024, 0.0035, 6), [0, 0, -0.0222]);
+    body(K, X, [[-0.0068, 0.0019, 0.0021, 0.0016, 2.6, 0], [-0.004, 0.0029, 0.0029, 0.0025, 2.4, 0], [0, 0.0034, 0.0032, 0.0031, 2.3, 0], [0.008, 0.0036, 0.0032, 0.0032, 2.2, 0], [0.0192, 0.0034, 0.0031, 0.0031, 2, 0]], { p: [0.0088, -0.0005, 0], mir: true, seg: 14 }); // góndolas de los motores
+    K.mir(X.D, new THREE.CircleGeometry(1, 14), [0.0088, -0.0005, -0.00685], [0, 0, 0], [0.0016, 0.0018, 1]); K.mir(X.A, new THREE.TorusGeometry(1, 0.11, 4, 14), [0.0088, -0.0005, -0.00675], [0, 0, 0], [0.002, 0.0022, 0.002]); // bocas de las tomas
+    K.mir(X.MT, bx(0.0003, 0.0022, 0.0034), [0.0058, -0.0005, -0.0058]); // divisor de capa límite
+    for (const z of [0.0035, 0.0105, 0.0165]) K.mir(X.D, new THREE.TorusGeometry(0.0035, 0.00016, 4, 16), [0.0088, -0.0005, z]);
+    canopy(K, X, 0, 0.003, -0.006, 0.0038, 2.3);
+    body(K, X, [[-0.0035, 0.0004, 0.0003, 0.0002, 2, 0.0041], [0, 0.0026, 0.0018, 0.0003, 2.2, 0.0037], [0.006, 0.0024, 0.0012, 0.0003, 2.3, 0.0036], [0.0192, 0.0018, 0.0008, 0.0002, 2, 0.0033]], { seg: 12 }); // lomo dorsal
+    K.add(X.D, rect(0.003, 0.0042), [0, 0.00482, 0.0105]); K.add(X.H2, rect(0.0024, 0.0034), [0, 0.00484, 0.0105]); K.add(X.A, rect(0.0005, 0.0086), [0, 0.00486, 0.0045]); // freno aerodinámico y franja
+    const W = mkWing([{ x: 0.0055, y: 0, zl: -0.007, c: 0.0205, t: 0.0016 }, { x: 0.018, y: 0.0003, zl: 0.004, c: 0.009, t: 0.0009 }, { x: 0.0285, y: 0.0008, zl: 0.0135, c: 0.0038, t: 0.0004 }]);
+    K.mir(X.H, W.geo); K.mir(X.A, W.patch(0.15, 1.95, 0, 0.08, 1, 0.00004));
+    for (const h of [1, -1]) { K.mir(X.H2, W.patch(0.1, 1, 0.68, 1, h, 0.00004)); K.mir(X.A, W.patch(1.05, 1.95, 0.7, 1, h, 0.00004)); K.mir(X.H2, W.patch(0.3, 1.9, 0, 0.13, h, 0.00003)); } // flaps, alerones y flaps del borde de ataque
+    for (const [u0, u1, f] of [[0.1, 1, 0.68], [1.05, 1.95, 0.7], [0.1, 1.95, 0.4], [0.3, 1.9, 0.13]]) K.mir(X.D, W.patch(u0, u1, f, f + 0.013, 1, 0.00005)); K.mir(X.D, W.patch(1, 1.04, 0.68, 1, 1, 0.00005));
+    wRiv(K, W, X.D, 0.1, 1.9, 0.55, 10); wRiv(K, W, X.D, 0.2, 1.7, 0.25, 8);
+    K.mir(X.H, mkWing([{ x: 0.003, y: 0.0003, zl: -0.0135, c: 0.0075, t: 0.0007 }, { x: 0.009, y: 0.0001, zl: -0.002, c: 0.0022, t: 0.0004 }]).geo); // strakes
+    const T = mkWing([{ x: 0.0078, y: 0.0026, zl: 0.009, c: 0.0088, t: 0.0009 }, { x: 0.0118, y: 0.011, zl: 0.014, c: 0.0038, t: 0.0004 }], 'x'); // colas inclinadas
+    K.mir(X.H, T.geo); for (const h of [1, -1]) K.mir(X.H2, T.patch(0.1, 0.95, 0.68, 1, h, 0.00004)); K.mir(X.A, T.patch(0.5, 1, 0, 0.14, 1, 0.00004)); K.mir(STW, ball3(0.0003), T.at(1, 0.95, 0));
+    K.mir(X.H, mkWing([{ x: 0.0095, y: -0.0003, zl: 0.011, c: 0.0068, t: 0.0008 }, { x: 0.0168, y: -0.0004, zl: 0.016, c: 0.0032, t: 0.0004 }]).geo); // estabilizadores
+    body(K, X, [[0.0088, 0.0004, 0.0004, 0.0004, 2, 0], [0.0105, 0.0011, 0.0011, 0.0011, 2.2, 0], [0.0175, 0.0011, 0.0011, 0.0011, 2.2, 0], [0.0198, 0.0004, 0.0004, 0.0004, 2, 0]], { p: [0.0285, 0.0008, 0], mir: true, seg: 8 }); // vainas de punta de ala
+    K.add(LR, ball3(0.0007), [-0.0285, 0.0008, 0.0092]); K.add(LG, ball3(0.0007), [0.0285, 0.0008, 0.0092]);
+    K.mir(X.MT, bx(0.0011, 0.0016, 0.002), [0.0088, -0.0034, 0.01]);
+    rivets(K, X.D, [0.0026, 0.0038, -0.009], [0.0034, 0.0034, 0.008], 7, 0.0003); mast(K, X, 0.0018, 0.0048, 0.013, 0.003, 0.1, LW); mast(K, X, -0.006, 0.0044, 0.012, 0.0028, -0.2, LG);
+    hatch(K, X, 0.017, 0.0011, 0.0095, 0.004, 0.0032); hatch(K, X, 0.0235, 0.0011, 0.011, 0.003, 0.0026); mast(K, X, 0.021, 0.001, 0.0155, 0.0024, 0.3, LR);
+    wIns(K, W, 1.3, 0.5, 0.0013);
+    return { eng: [-1, 1].map(s => ({ x: s * 0.0088, y: -0.0005, z: 0.0187, r: 0.0031 })), nose: [0, -0.0018, -0.0185], guns: [[-0.012, -0.0012, 0], [0.012, -0.0012, 0], [-0.019, -0.0012, 0.006], [0.019, -0.0012, 0.006]],
+      py: { x0: 0.0125, dx: 0.0032, y: -0.0022, dy: 0.06, z: 0.0062, dz: 0.55 }, sh: { y: 0, z: -0.004, r: 0.032 }, ar: { w: 0.0064, y: 0.0046, z0: -0.01, z1: 0.016 },
+      gear: { top: -0.0025, legs: [[-0.0088, 0.008], [0.0088, 0.008], [0, -0.011, 1]] }, dc: { wing: W, S, ring: [0.004, 0.0068] } };
+  },
+  coloso(K, X) { // cañonera pesada: casco acorazado con proa de ariete, puente, torreta dorsal de cañones gemelos, alas gruesas, góndolas de motor y triple propulsión
+    const S = [[-0.021, 0.0028, 0.002, 0.0018, 2.6, 0], [-0.019, 0.006, 0.004, 0.0026, 3.2, 0], [-0.014, 0.009, 0.0056, 0.0034, 3.8, 0.0004], [-0.008, 0.0108, 0.0064, 0.0038, 4, 0.0006], [0, 0.0112, 0.0066, 0.004, 4, 0.0008], [0.009, 0.011, 0.0064, 0.004, 4, 0.0008], [0.016, 0.01, 0.0058, 0.004, 3.6, 0.0006], [0.0205, 0.0084, 0.005, 0.004, 3.2, 0.0004]];
+    body(K, X, S, { seg: 12, flat: true });
+    K.mir('AR', bx(0.0026, 0.0032, 0.0088), [0.0099, 0.0004, -0.0128], [0, -0.3, 0]); K.mir('AR', bx(0.0007, 0.0034, 0.013), [0.0116, 0.0006, -0.0004]); // pómulos y faldones blindados
+    bandK(K, X.MT, S, -0.0214, -0.0166, 1.04); K.add(X.MT, bx(0.009, 0.0006, 0.0006), [0, 0.0006, -0.0199]); K.add(X.A, bx(0.0074, 0.0004, 0.0004), [0, 0.0016, -0.0187]); // proa acorazada de ariete
+    for (const z of [-0.01, -0.003, 0.0045, 0.011, 0.0175]) bandK(K, X.D, S, z - 0.00014, z + 0.00014, 1.012, 12);
+    body(K, X, [[-0.013, 0.003, 0.0008, 0.0004, 3, 0.0074], [-0.011, 0.0036, 0.0018, 0.0004, 3.4, 0.0074], [-0.007, 0.0038, 0.002, 0.0004, 3.4, 0.0074], [-0.004, 0.003, 0.0012, 0.0004, 3, 0.0074]], { seg: 10 }); // puente
+    K.add(X.G, bx(0.0064, 0.0009, 0.003), [0, 0.0079, -0.0129], [-0.55, 0, 0]); K.mir(X.G, bx(0.0026, 0.0009, 0.0026), [0.004, 0.0075, -0.0106], [-0.4, 0.75, 0]); K.add(X.D, bx(0.0068, 0.0003, 0.0004), [0, 0.0078, -0.0136], [-0.55, 0, 0]); K.add(X.D, bx(0.0003, 0.001, 0.0032), [0, 0.0081, -0.0128], [-0.55, 0, 0]); K.add(X.A, bx(0.0078, 0.0004, 0.0008), [0, 0.0093, -0.0074]); // parabrisas de tres paneles con marcos
+    K.add(X.H, bx(0.01, 0.0006, 0.0075), [0, 0.0077, 0.0046]); K.add(X.H2, bx(0.0074, 0.0004, 0.005), [0, 0.0081, 0.0062]); K.add(X.D, bx(0.0002, 0.0004, 0.01), [0, 0.0079, 0.01]); K.mir(X.D, bx(0.0002, 0.0005, 0.0076), [0.005, 0.0078, 0.0046]); // placas dorsales solapadas
+    K.add(X.D, new THREE.CylinderGeometry(0.0036, 0.004, 0.0016, 16), [0, 0.0085, 0.0016]); K.add(X.A, new THREE.TorusGeometry(0.0034, 0.00022, 4, 18).rotateX(PI / 2), [0, 0.0094, 0.0016]); K.add(X.H, new THREE.SphereGeometry(0.003, 14, 8, 0, PI * 2, 0, PI / 2), [0, 0.0095, 0.0016], [0, 0, 0], [1, 0.75, 1.1]); // torreta dorsal
+    K.add(X.D, bx(0.0012, 0.0008, 0.0006), [0, 0.0107, -0.0012]);
+    for (const sx of [-1, 1]) { K.add(X.MT, cylZ(0.00045, 0.00045, 0.009, 8), [sx * 0.0011, 0.0104, -0.0035]); K.add(X.H2, cylZ(0.0007, 0.0007, 0.0026, 8), [sx * 0.0011, 0.0104, -0.0016]); K.add(X.D, cylZ(0.00075, 0.00075, 0.0012, 8), [sx * 0.0011, 0.0104, -0.0016]); K.add(X.D, cylZ(0.00068, 0.00068, 0.0009, 8), [sx * 0.0011, 0.0104, -0.0075]); } // cañones gemelos con camisa y freno de boca
+    K.add(X.MT, bx(0.0006, 0.0011, 0.0032), [0, 0.0097, -0.0006]);
+    const W = mkWing([{ x: 0.009, y: 0, zl: -0.004, c: 0.017, t: 0.003 }, { x: 0.0158, y: 0.0002, zl: -0.0005, c: 0.013, t: 0.0022 }, { x: 0.023, y: 0.0004, zl: 0.003, c: 0.009, t: 0.0012 }]);
+    K.mir(X.H, W.geo); K.mir(X.A, W.patch(0.2, 1.95, 0, 0.1, 1, 0.00004));
+    for (const h of [1, -1]) { K.mir(X.H2, W.patch(0.15, 1, 0.66, 1, h, 0.00004)); K.mir(X.H2, W.patch(1.05, 1.95, 0.7, 1, h, 0.00004)); }
+    for (const [u0, u1, f] of [[0.15, 1, 0.66], [1.05, 1.95, 0.7], [0.15, 1.95, 0.3]]) K.mir(X.D, W.patch(u0, u1, f, f + 0.014, 1, 0.00005)); K.mir(X.D, W.patch(1, 1.04, 0.66, 1, 1, 0.00005));
+    wRiv(K, W, X.D, 0.15, 1.9, 0.5, 8, 0.00026); wRiv(K, W, X.D, 0.2, 1.7, 0.2, 6, 0.00026);
+    body(K, X, [[0.004, 0.0018, 0.0018, 0.0018, 2, -0.001], [0.0058, 0.0032, 0.0031, 0.003, 2.2, -0.001], [0.01, 0.0037, 0.0035, 0.0035, 2.2, -0.001], [0.0198, 0.0035, 0.0034, 0.0034, 2, -0.001]], { p: [0.0125, 0, 0], mir: true, seg: 14 }); // góndolas de los motores laterales
+    for (const z of [0.0068, 0.0122]) K.mir(X.D, new THREE.TorusGeometry(0.0036, 0.00018, 4, 16), [0.0125, -0.001, z]); K.mir(X.A, new THREE.TorusGeometry(0.0033, 0.00024, 4, 16), [0.0125, -0.001, 0.0048]); K.mir(X.D, new THREE.CircleGeometry(0.0022, 12), [0.0125, -0.001, 0.0041]);
+    K.mir(X.MT, bx(0.0012, 0.005, 0.014), [0.0104, 0, 0.003]); for (let i = 0; i < 4; i++) K.mir(X.D, bx(0.0002, 0.003, 0.0014), [0.0111, 0.0034, 0.009 + i * 0.0018]); // puntales y radiadores laterales
+    body(K, X, [[0.0148, 0.0044, 0.004, 0.004, 2.6, 0], [0.0175, 0.005, 0.0048, 0.0048, 2.3, 0], [0.0212, 0.0052, 0.005, 0.005, 2, 0]], { seg: 16 }); // caja del motor central
+    body(K, X, [[0.002, 0.0006, 0.0006, 0.0006, 2, 0], [0.0035, 0.0013, 0.0013, 0.0013, 2.4, 0], [0.0098, 0.0013, 0.0013, 0.0013, 2.4, 0], [0.0122, 0.0005, 0.0005, 0.0005, 2, 0]], { p: [0.0234, 0.0004, 0], mir: true, seg: 8 }); // vainas de punta de ala
+    K.add(LR, ball3(0.0007), [-0.0234, 0.0004, 0.0018]); K.add(LG, ball3(0.0007), [0.0234, 0.0004, 0.0018]);
+    rivets(K, X.D, [0.003, 0.0075, -0.013], [0.0046, 0.0073, 0.014], 8, 0.00034); mast(K, X, -0.004, 0.0078, 0.0125, 0.0046, 0.1, LW); K.add(X.H2, new THREE.SphereGeometry(0.001, 8, 5, 0, PI * 2, 0, PI / 2), [0.0045, 0.0078, 0.011], [0.5, 0, 0]);
+    hatch(K, X, 0.015, 0.0018, 0.0098, 0.0044, 0.0034); hatch(K, X, 0.019, 0.0018, 0.006, 0.003, 0.0026); radiator(K, X, 0.006, 0.0079, 0.01, 0.0022, 0.006, 6); mast(K, X, 0.013, 0.0018, 0.0128, 0.003, 0.3, LR); mast(K, X, -0.013, 0.0018, -0.001, 0.0034, -0.2, LW);
+    wIns(K, W, 1.3, 0.5, 0.0016);
+    return { eng: [{ x: 0, y: 0, z: 0.0215, r: 0.0046 }, { x: -0.0125, y: -0.001, z: 0.0198, r: 0.0033 }, { x: 0.0125, y: -0.001, z: 0.0198, r: 0.0033 }],
+      nose: [0, -0.003, -0.0205], guns: [[-0.014, -0.0014, -0.002], [0.014, -0.0014, -0.002], [-0.019, -0.0014, 0.002], [0.019, -0.0014, 0.002]],
+      py: { x0: 0.0165, dx: 0.0022, cols: 4, y: -0.0028, dy: 0.04, z: 0.005, rz: 0.0045 }, sh: { y: 0, z: -0.004, r: 0.036 }, ar: { w: 0.01, y: 0.0074, z0: -0.012, z1: 0.016 },
+      gear: { top: -0.0034, legs: [[-0.0085, 0.009], [0.0085, 0.009], [0, -0.012, 1]] }, dc: { wing: W, S, ring: [0.0088, 0.0112] } };
+  },
+  nomada(K, X) { // explorador: plato sensor con alimentador, cúpula panorámica, botes de carga, botes laterales con paneles solares plegables y motores gemelos
+    const S = [[-0.0225, 0.0012, 0.0011, 0.0011, 2, 0], [-0.0195, 0.0026, 0.0024, 0.0022, 2.2, 0], [-0.013, 0.0036, 0.0034, 0.0031, 2.4, 0], [-0.004, 0.004, 0.0036, 0.0034, 2.6, 0], [0.006, 0.0039, 0.0035, 0.0034, 2.6, 0], [0.014, 0.0036, 0.0032, 0.0031, 2.4, 0], [0.0205, 0.0032, 0.0028, 0.0028, 2.2, 0], [0.0222, 0.0026, 0.0024, 0.0024, 2, 0]];
+    body(K, X, S, { seg: 16 });
+    for (const z of [-0.016, -0.008, -0.001, 0.005, 0.011, 0.017]) bandK(K, X.D, S, z - 0.00013, z + 0.00013, 1.012, 12); bandK(K, X.A, S, 0.0195, 0.0201, 1.03);
+    K.add(X.H2, new THREE.SphereGeometry(0.0046, 20, 6, 0, PI * 2, 0, 0.95).rotateX(PI / 2), [0, 0, -0.0245]); K.add(X.H, new THREE.SphereGeometry(0.0044, 20, 6, 0, PI * 2, 0, 0.93).rotateX(PI / 2), [0, 0, -0.0246]); // plato sensor
+    K.add(X.A, new THREE.TorusGeometry(0.00372, 0.00022, 4, 24), [0, 0, -0.0245 + 0.0046 * Math.cos(0.95)]); K.add(X.MT, cylZ(0.00022, 0.00022, 0.005, 6), [0, 0, -0.0265]); K.add(X.D, cylZ(0.0005, 0.00022, 0.0009, 8), [0, 0, -0.0291]); K.add(LY, ball3(0.0004), [0, 0, -0.0296]);
+    for (let i = 0; i < 3; i++) { const a = i * PI * 2 / 3 + PI / 2; K.add(X.MT, cylZ(0.00009, 0.00009, 0.0046, 4), [Math.cos(a) * 0.0019, Math.sin(a) * 0.0019, -0.0248], [Math.sin(a) * 0.42, -Math.cos(a) * 0.42, 0]); } // trípode del alimentador
+    canopy(K, X, 0, 0.0024, -0.0105, 0.0043, 1.75, 1); K.add(X.MT, new THREE.TorusGeometry(0.0044, 0.0003, 4, 20).rotateX(PI / 2), [0, 0.0024, -0.0105]);
+    K.add(X.D, new THREE.CircleGeometry(0.0017, 16), [0, 0, 0.02235]); K.add(X.A, new THREE.TorusGeometry(0.0019, 0.0002, 4, 16), [0, 0, 0.0222]); K.add(X.MT, new THREE.TorusGeometry(0.0011, 0.00012, 4, 12), [0, 0, 0.0223]); // puerto de acoplamiento trasero
+    K.add(X.H2, bx(0.003, 0.0018, 0.005), [0, 0.004, 0.004]); K.add(X.D, new THREE.SphereGeometry(0.0013, 10, 6, 0, PI * 2, 0, PI / 2), [0, 0.0049, 0.004]); K.add(X.G, new THREE.SphereGeometry(0.00055, 8, 5), [0, 0.0056, 0.0034]); // torreta de sensores dorsal
+    body(K, X, [[0.0092, 0.0004, 0.0004, 0.0004, 2, 0.004], [0.0098, 0.0011, 0.0011, 0.0011, 2.2, 0.004], [0.018, 0.0011, 0.0011, 0.0011, 2.2, 0.004], [0.0188, 0.0004, 0.0004, 0.0004, 2, 0.004]], { seg: 12 }); K.add(X.A, new THREE.TorusGeometry(0.0012, 0.0002, 4, 12), [0, 0.004, 0.011]); K.add(X.A, new THREE.TorusGeometry(0.0012, 0.0002, 4, 12), [0, 0.004, 0.017]); // bote de carga dorsal
+    body(K, X, [[-0.0075, 0.0006, 0.0006, 0.0006, 2, 0], [-0.0062, 0.0016, 0.0016, 0.0016, 2.2, 0], [-0.004, 0.0019, 0.0019, 0.0019, 2.2, 0], [0.0225, 0.0019, 0.0019, 0.0019, 2.2, 0], [0.0236, 0.0012, 0.0012, 0.0012, 2, 0]], { p: [0.012, 0, 0], mir: true, seg: 12 }); // botes laterales
+    K.mir(X.A, new THREE.TorusGeometry(0.00195, 0.0002, 4, 12), [0.012, 0, -0.0035]); K.mir(X.A, new THREE.TorusGeometry(0.00195, 0.0002, 4, 12), [0.012, 0, 0.0155]); for (const z of [0.0, 0.0075, 0.0225]) K.mir(X.D, new THREE.TorusGeometry(0.0019, 0.00014, 4, 12), [0.012, 0, z]);
+    K.mir(X.H, bx(0.0085, 0.0012, 0.004), [0.0078, 0, 0.004]); K.mir(X.MT, bx(0.0085, 0.0006, 0.001), [0.0078, 0.0007, 0.0058]); K.mir(X.MT, bx(0.0085, 0.0006, 0.001), [0.0078, 0.0007, 0.0022]);
+    K.mir(X.H2, new THREE.SphereGeometry(0.0016, 10, 8), [0.0128, 0.0021, 0.013]); K.mir(X.A, new THREE.TorusGeometry(0.0016, 0.00016, 4, 12), [0.0128, 0.0021, 0.013]); K.mir(X.MT, new THREE.CylinderGeometry(0.00012, 0.00012, 0.002, 4), [0.0128, 0.001, 0.013]); // depósito esférico
+    K.mir(X.D, new THREE.CylinderGeometry(0.00045, 0.00045, 0.0166, 6).rotateZ(PI / 2), [0.0226, 0, 0.008]); // eje de giro de los paneles
+    for (let s = 0; s < 3; s++) { // paneles solares plegables: 3 tramos con marco, celdas y bisagras
+      const cx = 0.0165 + s * 0.0048;
+      K.mir('PV', bx(0.0044, 0.00034, 0.0126), [cx, 0, 0.008]); K.mir(X.H, bx(0.0046, 0.0005, 0.0003), [cx, 0, 0.0143]); K.mir(X.H, bx(0.0046, 0.0005, 0.0003), [cx, 0, 0.0017]); K.mir(X.H, bx(0.0003, 0.0005, 0.0126), [cx + 0.0023, 0, 0.008]); K.mir(X.H, bx(0.0003, 0.0005, 0.0126), [cx - 0.0023, 0, 0.008]);
+      K.mir(X.MT, bx(0.0004, 0.0004, 0.0126), [cx, -0.0004, 0.008]); if (s < 2) K.mir(X.D, cylZ(0.00018, 0.00018, 0.0126, 5), [cx + 0.0024, 0.0002, 0.008]);
+    }
+    K.mir(X.MT, bx(0.0034, 0.0004, 0.0006), [0.015, 0, 0.008]); K.add(LR, ball3(0.0006), [-0.0286, 0, 0.0143]); K.add(LG, ball3(0.0006), [0.0286, 0, 0.0143]);
+    mast(K, X, 0.0016, 0.005, 0.001, 0.006, 0.25, LW); mast(K, X, -0.0018, 0.005, 0.017, 0.004, -0.2, LR); K.add(X.H2, new THREE.SphereGeometry(0.001, 8, 5, 0, PI * 2, 0, PI / 2), [0.0032, 0.0036, -0.002], [0.9, 0, 0.5]);
+    rivets(K, X.D, [0.0018, 0.0033, -0.006], [0.002, 0.0034, 0.009], 7, 0.0003);
+    radiator(K, X, 0.007, 0, 0.017, 0.005, 0.007, 7); radiator(K, X, 0.0072, 0, -0.004, 0.0044, 0.005, 5); dish(K, X, -0.003, 0.0046, 0.006, 0.0014, [0.5, 0, 0.3]); rcs(K, X, 0.0029, 0.001, -0.017, 1); rcs(K, X, 0.029, 0.0004, 0.0128, 0.8); hatch(K, X, 0.002, 0.0038, 0.0022, 0.0018, 0.0026, false); mast(K, X, 0.014, 0.002, 0.023, 0.003, 0.2, LR);
+    return { eng: [-1, 1].map(s => ({ x: s * 0.012, y: 0, z: 0.0234, r: 0.0026 })), nose: [0, -0.0015, -0.0215], guns: [[-0.012, -0.0022, -0.004], [0.012, -0.0022, -0.004], [-0.022, -0.0004, 0.002], [0.022, -0.0004, 0.002]],
+      py: { x0: 0.0105, dx: 0.003, cols: 2, y: -0.0033, z: 0, rz: 0.0056 }, sh: { y: 0, z: -0.01, r: 0.032 }, ar: { w: 0.0038, y: 0.0035, z0: -0.012, z1: 0.016 },
+      gear: { top: -0.0032, legs: [[-0.0075, 0.009], [0.0075, 0.009], [0, -0.012, 1]] }, dc: { wing: null, S, ring: [0.006, 0.009] } };
+  },
+  centinela(K, X) { // blindada: casco ancho y bajo de placas cerámicas, visera frontal, dos «cuernos» emisores de escudo, alas cortas con cañones y doble motor
+    const S = [[-0.02, 0.003, 0.0018, 0.002, 3, 0], [-0.018, 0.0075, 0.003, 0.0028, 4, 0], [-0.013, 0.01, 0.0046, 0.0034, 4.5, 0.0002], [-0.005, 0.0108, 0.0056, 0.0038, 4.5, 0.0004], [0.006, 0.0108, 0.0058, 0.004, 4.5, 0.0005], [0.014, 0.01, 0.0056, 0.004, 4.2, 0.0004], [0.021, 0.009, 0.0052, 0.004, 3.6, 0.0002]];
+    body(K, X, S, { seg: 12, flat: true });
+    body(K, X, [[-0.0218, 0.0074, 0.003, 0.0028, 3, 0.0002], [-0.0208, 0.0088, 0.0034, 0.003, 3, 0.0002], [-0.0192, 0.0084, 0.0032, 0.0028, 3, 0.0002]], { seg: 10, flat: true, t: 'AR', b: 'AR' }); // visera frontal blindada
+    K.add(X.D, bx(0.0072, 0.0004, 0.0004), [0, 0.0016, -0.0219]); K.add(X.MT, bx(0.0058, 0.0006, 0.0005), [0, -0.0016, -0.0217]);
+    for (const z of [-0.0105, -0.0035, 0.0035, 0.0105, 0.017]) bandK(K, X.D, S, z - 0.00014, z + 0.00014, 1.012, 12);
+    for (let r = 0; r < 3; r++) for (let c = -2; c <= 2; c++) { K.add('AR', bx(0.0019, 0.0004, 0.0055), [c * 0.0021, 0.0064, -0.0138 + r * 0.006]); rivets(K, X.D, [c * 0.0021 - 0.0006, 0.00665, -0.0138 + r * 0.006 - 0.0018], [c * 0.0021 - 0.0006, 0.00665, -0.0138 + r * 0.006 + 0.0018], 2, 0.00022, false); } // baldosas cerámicas
+    body(K, X, [[-0.0128, 0.003, 0.001, 0.0004, 3, 0.0068], [-0.0108, 0.0036, 0.0018, 0.0004, 3.2, 0.0068], [-0.007, 0.0036, 0.0018, 0.0004, 3.2, 0.0068], [-0.0048, 0.0026, 0.0009, 0.0004, 3, 0.0068]], { seg: 10, flat: true, t: 'AR' }); // cúpula del puente
+    K.add(X.G, bx(0.004, 0.0004, 0.0012), [0, 0.0083, -0.0112], [-0.45, 0, 0]); K.add(X.D, bx(0.0044, 0.0003, 0.0004), [0, 0.0081, -0.0119], [-0.45, 0, 0]); K.add(X.A, bx(0.0006, 0.0005, 0.0052), [0, 0.0087, -0.0072]);
+    for (const sx of [-1, 1]) { // cuernos emisores de escudo: brazos que se curvan hacia dentro y acaban en un nodo brillante
+      const s = sx > 0 ? 1 : -1;
+      body(K, X, [[0.006, 0.0018, 0.0026, 0.0022, 2.6, 0.0002, s * 0.0128], [-0.003, 0.002, 0.003, 0.0026, 2.6, 0.0002, s * 0.0128], [-0.013, 0.0018, 0.0026, 0.0022, 2.6, 0.0002, s * 0.0122], [-0.02, 0.0013, 0.0018, 0.0016, 2.6, 0.0002, s * 0.0112], [-0.0235, 0.0004, 0.0004, 0.0004, 2, 0.0002, s * 0.01]], { seg: 12, flat: true });
+      K.add(LC, ball3(0.0006), [s * 0.0102, 0.0002, -0.0233]); for (const z of [-0.0176, -0.0106, -0.0036]) K.add(GL, new THREE.TorusGeometry(0.0022, 0.00016, 4, 14), [s * (0.0128 - (z < -0.0106 ? (-0.0106 - z) * 0.2 : 0)), 0.0002, z]);
+      K.add('AR', bx(0.0008, 0.0036, 0.011), [s * 0.0146, 0.0002, -0.008]); K.add(X.A, bx(0.0004, 0.0008, 0.0068), [s * 0.0134, 0.0027, -0.0105]); // placa exterior y franja
+    }
+    for (const z of [-0.0105, -0.0035, 0.0035, 0.0105]) K.mir('AR', bx(0.0006, 0.0032, 0.0056), [0.011, 0.0004, z]); // placas de flanco
+    const W = mkWing([{ x: 0.01, y: -0.0004, zl: 0, c: 0.015, t: 0.0026 }, { x: 0.0175, y: -0.0002, zl: 0.004, c: 0.01, t: 0.0016 }, { x: 0.023, y: 0, zl: 0.0075, c: 0.0055, t: 0.0008 }]);
+    K.mir(X.H, W.geo); K.mir(X.A, W.patch(0.15, 1.95, 0, 0.1, 1, 0.00004)); for (const h of [1, -1]) { K.mir(X.H2, W.patch(0.1, 1, 0.66, 1, h, 0.00004)); K.mir(X.H2, W.patch(1.05, 1.95, 0.7, 1, h, 0.00004)); }
+    for (const [u0, u1, f] of [[0.1, 1, 0.66], [1.05, 1.95, 0.7], [0.15, 1.95, 0.3]]) K.mir(X.D, W.patch(u0, u1, f, f + 0.014, 1, 0.00005)); wRiv(K, W, X.D, 0.15, 1.9, 0.5, 7, 0.00026);
+    for (const sx of [-1, 1]) body(K, X, [[0.0128, 0.0032, 0.0034, 0.0034, 2.6, 0, sx * 0.0058], [0.0165, 0.0044, 0.0042, 0.0042, 2.3, 0, sx * 0.0058], [0.0212, 0.0044, 0.0042, 0.0042, 2, 0, sx * 0.0058]], { seg: 14 }); // cajas de los motores
+    body(K, X, [[0.011, 0.0005, 0.0005, 0.0005, 2, 0], [0.0125, 0.0012, 0.0012, 0.0012, 2.4, 0], [0.019, 0.0012, 0.0012, 0.0012, 2.4, 0], [0.0205, 0.0005, 0.0005, 0.0005, 2, 0]], { p: [0.0232, 0, 0], mir: true, seg: 8 }); K.add(LR, ball3(0.0007), [-0.0232, 0, 0.0118]); K.add(LG, ball3(0.0007), [0.0232, 0, 0.0118]);
+    inlet(K, X, 0.006, 0.0056, 0.0128, 0.0018, 0.0006, 0.004); louvers(K, X.D, 0.0058, 0.0066, 0.0125, 4, 0.0011, 0.0022, 0.0006); rivets(K, X.D, [0.0088, 0.0061, -0.014], [0.0088, 0.0061, 0.016], 9, 0.0003);
+    mast(K, X, -0.0085, 0.0062, 0.012, 0.0036, 0.1, LW); mast(K, X, 0.0085, 0.0062, 0.0128, 0.003, -0.2, LR); hatch(K, X, 0.0125, 0.0016, 0.007, 0.004, 0.003); rcs(K, X, 0.0098, 0.0006, -0.0175, 1.2);
+    wIns(K, W, 1.3, 0.5, 0.0013);
+    return { eng: [-1, 1].map(s => ({ x: s * 0.0058, y: 0, z: 0.0213, r: 0.0038 })), nose: [0, -0.0022, -0.0212], guns: [[-0.0136, -0.0018, -0.0105], [0.0136, -0.0018, -0.0105], [-0.0165, -0.0012, -0.0005], [0.0165, -0.0012, -0.0005]],
+      py: { x0: 0.0112, dx: 0.0026, cols: 4, y: -0.0038, dy: 0.03, z: 0.0072, dz: 0.35, rz: 0.005 }, sh: { y: 0, z: -0.006, r: 0.04 }, shE: [0, 0, -0.0192], ar: { w: 0.0105, y: 0.0067, z0: -0.012, z1: 0.016 },
+      gear: { top: -0.0034, legs: [[-0.0075, 0.01], [0.0075, 0.01], [0, -0.013, 1]] }, dc: { wing: W, S, ring: [0.006, 0.0125] } };
+  },
+  fantasma(K, X) { // sigilo: ala volante facetada de aristas afiladas, cabina enrasada, colas en V, armas en bahías internas y toberas bajo una placa serrada
+    const S = [[-0.026, 0.0002, 0.0002, 0.0002, 2, 0], [-0.021, 0.002, 0.001, 0.0008, 2, 0], [-0.014, 0.0046, 0.0016, 0.0012, 2, 0], [-0.006, 0.0068, 0.0022, 0.0014, 2, 0.0002], [0.004, 0.0074, 0.0022, 0.0014, 2, 0.0002], [0.012, 0.0066, 0.002, 0.0014, 2, 0.0002], [0.018, 0.005, 0.0016, 0.0014, 2, 0]];
+    body(K, X, S, { seg: 6, flat: true });
+    bandK(K, X.D, S, -0.0262, -0.0212, 1.04, 6); for (const z of [-0.0105, -0.002, 0.006, 0.0135]) bandK(K, X.D, S, z - 0.00012, z + 0.00012, 1.012, 6);
+    K.add(X.MT, cylZ(0.00015, 0.00008, 0.0044, 5), [0, 0, -0.0282]); K.add(LR, ball3(0.0002), [0, 0, -0.0305]);
+    canopy(K, X, 0, 0.0018, -0.0105, 0.0021, 3.4, 0.55); body(K, X, [[-0.004, 0.0004, 0.0004, 0.0002, 2, 0.0021], [0, 0.0014, 0.0012, 0.0002, 2, 0.002], [0.007, 0.0016, 0.0012, 0.0002, 2, 0.002], [0.0125, 0.0008, 0.0006, 0.0002, 2, 0.0019]], { seg: 6, flat: true }); // lomo tras la cabina
+    const W = mkWing([{ x: 0.006, y: 0, zl: -0.01, c: 0.023, t: 0.0012 }, { x: 0.015, y: 0.0001, zl: -0.001, c: 0.016, t: 0.0008 }, { x: 0.0245, y: 0.0003, zl: 0.0085, c: 0.006, t: 0.0004 }]);
+    K.mir(X.H, W.geo); K.mir(X.A, W.patch(0.1, 1.95, 0, 0.06, 1, 0.00004)); for (const h of [1, -1]) { K.mir(X.H2, W.patch(0.12, 1, 0.74, 1, h, 0.00004)); K.mir(X.H2, W.patch(1.06, 1.94, 0.74, 1, h, 0.00004)); }
+    for (const [u0, u1, f] of [[0.12, 1, 0.74], [1.06, 1.94, 0.74], [0.15, 1.9, 0.4]]) K.mir(X.D, W.patch(u0, u1, f, f + 0.012, 1, 0.00005)); K.mir(X.D, W.patch(1, 1.05, 0.74, 1, 1, 0.00005)); wRiv(K, W, X.D, 0.15, 1.9, 0.55, 8, 0.00022); wRiv(K, W, X.D, 0.2, 1.7, 0.25, 6, 0.00022);
+    for (let i = 0; i < 5; i++) { const u = 0.15 + i * 0.36, p = W.at(u, 1, 1), q = W.at(u + 0.18, 1, 1); K.mir(X.D, flatPoly([[p[0], p[2] - 0.0012], [q[0], q[2] - 0.0012], [(p[0] + q[0]) / 2, p[2] + 0.0008]]), [0, 0.00006, 0]); } // borde de fuga serrado (baja detectabilidad)
+    const T = mkWing([{ x: 0.004, y: 0.0016, zl: 0.009, c: 0.008, t: 0.0006 }, { x: 0.009, y: 0.0072, zl: 0.013, c: 0.0035, t: 0.0003 }], 'x'); K.mir(X.H, T.geo); for (const h of [1, -1]) K.mir(X.H2, T.patch(0.1, 0.95, 0.66, 1, h, 0.00004)); K.mir(X.A, T.patch(0.55, 1, 0, 0.14, 1, 0.00004)); K.mir(STW, ball3(0.00024), T.at(1, 0.95, 0));
+    body(K, X, [[0.0135, 0.0034, 0.0016, 0.0016, 2, 0], [0.0165, 0.003, 0.0017, 0.0017, 2, 0], [0.0192, 0.0028, 0.0018, 0.0018, 2, 0]], { p: [0.0035, 0, 0], mir: true, seg: 8, flat: true }); // cajas de los motores
+    K.add(X.D, flatPoly([[-0.0064, 0.0172], [0.0064, 0.0172], [0.0064, 0.0234], [0.0032, 0.0214], [0, 0.0234], [-0.0032, 0.0214], [-0.0064, 0.0234]]), [0, 0.0021, 0]); // placa serrada sobre las toberas
+    K.add(X.D, bx(0.009, 0.00014, 0.012), [0, -0.0013, 0.005]); K.add(X.D, bx(0.00014, 0.00016, 0.0125), [0, -0.00135, 0.005]); for (const z of [-0.001, 0.011]) K.add(X.D, bx(0.0091, 0.00016, 0.00014), [0, -0.00135, z]); // bahía de armas ventral
+    for (const sx of [-1, 1]) body(K, X, [[-0.0052, 0.0002, 0.0002, 0.0002, 2, 0], [-0.0042, 0.0005, 0.0005, 0.0005, 2, 0], [0.0012, 0.0005, 0.0005, 0.0005, 2, 0]], { p: [sx * 0.0085, -0.0002, 0], seg: 6, flat: true }); // recintos de los cañones en el borde de ataque
+    K.add(LR, ball3(0.0004), [-0.0245, 0.0003, 0.0092]); K.add(LG, ball3(0.0004), [0.0245, 0.0003, 0.0092]); rivets(K, X.D, [0.0022, 0.0018, -0.012], [0.0024, 0.0022, 0.012], 8, 0.00024);
+    mast(K, X, 0, 0.0021, 0.013, 0.0018, 0.1, LW); hatch(K, X, 0.011, 0.0007, 0.004, 0.0034, 0.0026); hatch(K, X, 0.019, 0.0006, 0.006, 0.0024, 0.002); rcs(K, X, 0.0016, 0.0003, -0.0175, 0.8);
+    wIns(K, W, 1.3, 0.5, 0.0011);
+    return { eng: [-1, 1].map(s => ({ x: s * 0.0035, y: 0, z: 0.019, r: 0.0024 })), nose: [0, -0.001, -0.0262], gs: 0.55, guns: [[-0.0085, -0.0004, -0.006], [0.0085, -0.0004, -0.006], [-0.0135, -0.0004, -0.0003], [0.0135, -0.0004, -0.0003]],
+      py: { x0: 0.003, dx: 0.002, cols: 3, y: -0.0031, z: 0.004, rz: 0.005 }, sh: { y: 0, z: -0.01, r: 0.03 }, shE: [0, -0.0004, -0.0225], ar: { w: 0.0074, y: 0.0024, z0: -0.012, z1: 0.014 },
+      gear: { top: -0.0012, legs: [[-0.0055, 0.008], [0.0055, 0.008], [0, -0.014, 1]] }, dc: { wing: W, S, ring: [0.004, 0.011] } };
+  },
+  corsario(K, X) { // asalto rápido: alas en flecha adelantada, canards, gran toma ventral, cañones gemelos de proa, pilones cargados de misiles y colas gemelas
+    const S = [[-0.023, 0.0002, 0.0002, 0.0002, 2, 0], [-0.0195, 0.0018, 0.0016, 0.001, 2.6, 0.0002], [-0.013, 0.004, 0.0028, 0.0018, 3.2, 0.0003], [-0.006, 0.0056, 0.0034, 0.0022, 3.6, 0.0004], [0.003, 0.0062, 0.0034, 0.0024, 3.6, 0.0004], [0.011, 0.0058, 0.0032, 0.0024, 3.4, 0.0003], [0.017, 0.005, 0.003, 0.0026, 3, 0.0002], [0.0198, 0.0044, 0.0028, 0.0028, 2.4, 0]];
+    body(K, X, S, { seg: 16 });
+    bandK(K, X.D, S, -0.0232, -0.0176, 1.03); bandK(K, X.A, S, -0.0178, -0.0172, 1.04); for (const z of [-0.0115, -0.005, 0.0015, 0.0085, 0.0145]) bandK(K, X.D, S, z - 0.00012, z + 0.00012, 1.012, 10);
+    body(K, X, [[-0.015, 0.0014, 0.001, 0.001, 2.4, -0.002], [-0.012, 0.003, 0.0014, 0.0016, 2.4, -0.0022], [-0.004, 0.0032, 0.0014, 0.0016, 2.4, -0.0022], [0.002, 0.002, 0.001, 0.001, 2.2, -0.002]], { seg: 12 }); // gran toma de aire ventral
+    K.add(X.D, new THREE.CircleGeometry(1, 14), [0, -0.0022, -0.01505], [0, 0, 0], [0.0025, 0.0016, 1]); K.add(X.A, new THREE.TorusGeometry(1, 0.09, 4, 14), [0, -0.0022, -0.01498], [0, 0, 0], [0.0029, 0.0019, 0.0029]);
+    for (const sx of [-1, 1]) body(K, X, [[-0.0208, 0.0004, 0.0004, 0.0004, 2, -0.0017], [-0.0195, 0.0009, 0.0009, 0.0009, 2.2, -0.0018], [-0.0128, 0.0011, 0.0009, 0.0009, 2.4, -0.0016], [-0.0075, 0.0004, 0.0003, 0.0003, 2, -0.0012]], { p: [sx * 0.0022, 0, 0], seg: 8 }); // carenas de los cañones de proa
+    canopy(K, X, 0, 0.0031, -0.0112, 0.003, 2.6, 1);
+    body(K, X, [[-0.0035, 0.0004, 0.0003, 0.0002, 2, 0.004], [0, 0.0022, 0.0016, 0.0003, 2.2, 0.0037], [0.006, 0.0022, 0.0013, 0.0003, 2.3, 0.0036], [0.0198, 0.0016, 0.0008, 0.0002, 2, 0.0033]], { seg: 12 }); K.add(X.A, rect(0.0005, 0.0092), [0, 0.00515, 0.006]);
+    const W = mkWing([{ x: 0.005, y: 0, zl: 0.002, c: 0.0135, t: 0.0015 }, { x: 0.015, y: 0.0003, zl: -0.0022, c: 0.0108, t: 0.001 }, { x: 0.025, y: 0.0007, zl: -0.005, c: 0.008, t: 0.0005 }]); // flecha adelantada
+    K.mir(X.H, W.geo); K.mir(X.A, W.patch(0.15, 1.95, 0, 0.09, 1, 0.00004));
+    for (const h of [1, -1]) { K.mir(X.H2, W.patch(0.1, 1, 0.66, 1, h, 0.00004)); K.mir(X.A, W.patch(1.05, 1.95, 0.68, 1, h, 0.00004)); }
+    for (const [u0, u1, f] of [[0.1, 1, 0.66], [1.05, 1.95, 0.68], [0.15, 1.95, 0.33]]) K.mir(X.D, W.patch(u0, u1, f, f + 0.013, 1, 0.00005)); K.mir(X.D, W.patch(1, 1.04, 0.66, 1, 1, 0.00005)); wRiv(K, W, X.D, 0.12, 1.9, 0.5, 9); wRiv(K, W, X.D, 0.2, 1.7, 0.2, 7);
+    const C = mkWing([{ x: 0.003, y: 0.0006, zl: -0.0155, c: 0.006, t: 0.0006 }, { x: 0.0085, y: 0.001, zl: -0.014, c: 0.003, t: 0.0003 }]); K.mir(X.A, C.geo);
+    const T = mkWing([{ x: 0.0058, y: 0.003, zl: 0.01, c: 0.009, t: 0.0009 }, { x: 0.0078, y: 0.0118, zl: 0.0148, c: 0.004, t: 0.0004 }], 'x'); K.mir(X.H, T.geo); for (const h of [1, -1]) K.mir(X.H2, T.patch(0.1, 0.95, 0.66, 1, h, 0.00004)); K.mir(X.A, T.patch(0.5, 1, 0, 0.14, 1, 0.00004)); K.mir(STW, ball3(0.00028), T.at(1, 0.95, 0));
+    K.mir(X.H, mkWing([{ x: 0.006, y: -0.0002, zl: 0.0128, c: 0.006, t: 0.0007 }, { x: 0.0115, y: -0.0002, zl: 0.0158, c: 0.003, t: 0.0003 }]).geo);
+    body(K, X, [[0.004, 0.0026, 0.0024, 0.0024, 2.4, 0], [0.01, 0.0034, 0.003, 0.003, 2.3, 0], [0.019, 0.0032, 0.003, 0.003, 2, 0]], { p: [0.006, 0, 0], mir: true, seg: 14 }); // góndolas gemelas
+    for (const z of [0.008, 0.0145]) K.mir(X.D, new THREE.TorusGeometry(0.0031, 0.00016, 4, 16), [0.006, 0, z]); K.mir(X.A, new THREE.TorusGeometry(0.0029, 0.00022, 4, 16), [0.006, 0, 0.0042]);
+    body(K, X, [[0.0002, 0.0004, 0.0004, 0.0004, 2, 0], [0.0016, 0.0011, 0.0011, 0.0011, 2.2, 0], [0.0086, 0.0011, 0.0011, 0.0011, 2.2, 0], [0.0102, 0.0004, 0.0004, 0.0004, 2, 0]], { p: [0.0255, 0.0007, 0], mir: true, seg: 8 }); K.add(LR, ball3(0.0006), [-0.0255, 0.0007, 0.0006]); K.add(LG, ball3(0.0006), [0.0255, 0.0007, 0.0006]); // vainas de punta de ala
+    rivets(K, X.D, [0.0022, 0.0034, -0.01], [0.0028, 0.0032, 0.01], 8, 0.0003); mast(K, X, 0.0016, 0.0046, 0.014, 0.003, 0.1, LW); mast(K, X, -0.0058, 0.0044, 0.012, 0.0028, -0.2, LG); rcs(K, X, 0.0031, 0.0005, -0.0135); hatch(K, X, 0.0115, 0.001, 0.0065, 0.0036, 0.0028);
+    wIns(K, W, 1.3, 0.5, 0.0011);
+    return { eng: [-1, 1].map(s => ({ x: s * 0.006, y: 0, z: 0.019, r: 0.003 })), noses: [[-0.0022, -0.0017, -0.0206], [0.0022, -0.0017, -0.0206]], nose: [0, -0.0017, -0.0206], ns: 0.9,
+      guns: [[-0.011, -0.001, -0.003], [0.011, -0.001, -0.003], [-0.0175, -0.001, -0.0046], [0.0175, -0.001, -0.0046]],
+      py: { x0: 0.01, dx: 0.0026, cols: 4, y: -0.0025, dy: 0.05, z: 0.006, dz: -0.58, rz: 0.0038 }, sh: { y: 0, z: -0.006, r: 0.032 }, shE: [0, -0.0034, -0.0175], ar: { w: 0.0062, y: 0.0038, z0: -0.01, z1: 0.016 },
+      gear: { top: -0.0026, legs: [[-0.0075, 0.008], [0.0075, 0.008], [0, -0.008, 1]] }, dc: { wing: W, S, ring: [0.004, 0.0075] } };
+  },
+  titan(K, X) { // pesada de gran tamaño: casco largo de placas, isla de mando, torreta de cañones dobles, cañones gemelos de proa, cargadores laterales de munición y motores gemelos gigantes
+    const S = [[-0.027, 0.003, 0.0024, 0.002, 2.8, 0], [-0.0245, 0.0062, 0.0044, 0.0034, 3.6, 0], [-0.018, 0.0078, 0.0058, 0.0044, 4.4, 0.0004], [-0.009, 0.0082, 0.0064, 0.0048, 4.6, 0.0008], [0.002, 0.0084, 0.0066, 0.005, 4.6, 0.0009], [0.013, 0.0082, 0.0064, 0.005, 4.6, 0.0008], [0.02, 0.0078, 0.0058, 0.005, 4.2, 0.0006], [0.024, 0.007, 0.005, 0.005, 3.6, 0.0004]];
+    body(K, X, S, { seg: 12, flat: true });
+    bandK(K, X.MT, S, -0.0272, -0.0232, 1.04, 10); K.add(X.MT, bx(0.0082, 0.0006, 0.0006), [0, 0.0012, -0.0252]); K.add(X.A, bx(0.006, 0.0004, 0.0004), [0, 0.0022, -0.0244]);
+    for (const z of [-0.0135, -0.0055, 0.0025, 0.0105, 0.018]) bandK(K, X.D, S, z - 0.00014, z + 0.00014, 1.012, 12);
+    for (const [zc, zl] of [[-0.0185, 0.008], [-0.0085, 0.008], [0.0015, 0.008]]) { K.add('AR', bx(0.0122, 0.0005, zl), [0, 0.0078, zc]); rivets(K, X.D, [-0.0052, 0.00812, zc - zl * 0.4], [-0.0052, 0.00812, zc + zl * 0.4], 4, 0.00026); rivets(K, X.D, [0.0052, 0.00812, zc - zl * 0.4], [0.0052, 0.00812, zc + zl * 0.4], 4, 0.00026, false); } // placas dorsales solapadas
+    K.add(X.D, new THREE.CylinderGeometry(0.0034, 0.0038, 0.0016, 16), [0, 0.0088, -0.0075]); K.add(X.A, new THREE.TorusGeometry(0.0032, 0.00022, 4, 18).rotateX(PI / 2), [0, 0.0097, -0.0075]); K.add(X.H, new THREE.SphereGeometry(0.0029, 14, 8, 0, PI * 2, 0, PI / 2), [0, 0.0098, -0.0075], [0, 0, 0], [1, 0.75, 1.15]); // torreta dorsal de cañones dobles
+    for (const sx of [-1, 1]) { K.add(X.MT, cylZ(0.00048, 0.00048, 0.0105, 8), [sx * 0.00125, 0.0108, -0.0121]); K.add(X.H2, cylZ(0.00075, 0.00075, 0.003, 10), [sx * 0.00125, 0.0108, -0.0092]); K.add(X.D, cylZ(0.0008, 0.0008, 0.0012, 8), [sx * 0.00125, 0.0108, -0.0169]); for (const z of [-0.0104, -0.0116, -0.0128]) K.add(X.D, cylZ(0.0006, 0.0006, 0.0002, 8), [sx * 0.00125, 0.0108, z]); }
+    K.add(X.MT, bx(0.0007, 0.0012, 0.0036), [0, 0.0101, -0.0086]);
+    body(K, X, [[0.004, 0.0024, 0.0012, 0.0004, 2.6, 0.0074], [0.0065, 0.0034, 0.0044, 0.0004, 3.4, 0.0074], [0.0125, 0.0034, 0.0048, 0.0004, 3.4, 0.0074], [0.0155, 0.0022, 0.0028, 0.0004, 3, 0.0074]], { seg: 10, flat: true }); // isla de mando
+    K.add(X.G, bx(0.0046, 0.0009, 0.0008), [0, 0.0118, 0.0043], [-0.35, 0, 0]); K.add(X.D, bx(0.0048, 0.0003, 0.0004), [0, 0.0122, 0.0039]); for (const z of [0.0075, 0.0095, 0.0115]) K.mir(X.G, bx(0.0003, 0.0009, 0.0014), [0.0033, 0.0114, z]); K.add(X.A, bx(0.0068, 0.0004, 0.0006), [0, 0.0128, 0.0125]); mast(K, X, 0, 0.0131, 0.0105, 0.006, 0.1, LW); mast(K, X, -0.0015, 0.0131, 0.0135, 0.004, -0.3, LR); dish(K, X, 0.0016, 0.0128, 0.0125, 0.0013, [0.4, 0, 0.2]);
+    for (const sx of [-1, 1]) { // cargadores de munición: cápsulas con bandas, tubo de alimentación y remaches
+      body(K, X, [[-0.0112, 0.0016, 0.0016, 0.0016, 2, -0.0004, sx * 0.0112], [-0.01, 0.003, 0.003, 0.003, 2.2, -0.0004, sx * 0.0112], [0.0128, 0.003, 0.003, 0.003, 2.2, -0.0004, sx * 0.0112], [0.014, 0.0016, 0.0016, 0.0016, 2, -0.0004, sx * 0.0112]], { seg: 14 });
+      for (const z of [-0.0076, -0.001, 0.0056, 0.0102]) K.add(z < 0.001 ? X.A : X.D, new THREE.TorusGeometry(0.00305, 0.00022, 4, 16), [sx * 0.0112, -0.0004, z]);
+      K.add(X.MT, cylZ(0.0006, 0.0006, 0.008, 8).rotateY(PI / 2), [sx * 0.0086, 0.0034, -0.0035]); K.add(X.D, bx(0.0034, 0.0006, 0.0022), [sx * 0.0086, 0.0028, -0.0012]);
+    }
+    const W = mkWing([{ x: 0.0084, y: -0.0002, zl: -0.004, c: 0.021, t: 0.003 }, { x: 0.018, y: 0, zl: 0.0035, c: 0.014, t: 0.0018 }, { x: 0.025, y: 0.0002, zl: 0.0105, c: 0.0065, t: 0.0009 }]);
+    K.mir(X.H, W.geo); K.mir(X.A, W.patch(0.15, 1.95, 0, 0.09, 1, 0.00004)); for (const h of [1, -1]) { K.mir(X.H2, W.patch(0.1, 1, 0.68, 1, h, 0.00004)); K.mir(X.H2, W.patch(1.05, 1.95, 0.7, 1, h, 0.00004)); }
+    for (const [u0, u1, f] of [[0.1, 1, 0.68], [1.05, 1.95, 0.7], [0.15, 1.95, 0.3]]) K.mir(X.D, W.patch(u0, u1, f, f + 0.014, 1, 0.00005)); K.mir(X.D, W.patch(1, 1.04, 0.68, 1, 1, 0.00005)); wRiv(K, W, X.D, 0.12, 1.9, 0.5, 9, 0.00028); wRiv(K, W, X.D, 0.2, 1.7, 0.2, 7, 0.00028);
+    for (const sx of [-1, 1]) body(K, X, [[0.011, 0.0042, 0.004, 0.004, 2.6, 0, sx * 0.0062], [0.015, 0.0056, 0.0054, 0.0054, 2.3, 0, sx * 0.0062], [0.0242, 0.006, 0.0058, 0.0058, 2, 0, sx * 0.0062]], { seg: 16 }); // cajas de los motores gigantes
+    for (const z of [0.0165, 0.0205]) K.mir(X.D, new THREE.TorusGeometry(0.0059, 0.00022, 4, 20), [0.0062, 0, z]); K.mir(X.A, new THREE.TorusGeometry(0.0057, 0.0003, 4, 20), [0.0062, 0, 0.0128]);
+    body(K, X, [[0.0035, 0.0005, 0.0005, 0.0005, 2, 0], [0.005, 0.0013, 0.0013, 0.0013, 2.2, 0], [0.0118, 0.0013, 0.0013, 0.0013, 2.2, 0], [0.0135, 0.0005, 0.0005, 0.0005, 2, 0]], { p: [0.0258, 0.0003, 0], mir: true, seg: 8 }); K.add(LR, ball3(0.0007), [-0.0258, 0.0003, 0.0038]); K.add(LG, ball3(0.0007), [0.0258, 0.0003, 0.0038]);
+    rivets(K, X.D, [0.0045, 0.0069, -0.024], [0.0052, 0.0069, 0.022], 12, 0.00034); hatch(K, X, 0.0072, 0.0074, 0.0175, 0.0034, 0.0028); hatch(K, X, 0.0072, 0.0074, 0.0085, 0.0028, 0.0024); mast(K, X, -0.0075, 0.0076, 0.02, 0.0034, -0.2, LW); mast(K, X, 0.0075, 0.0076, -0.02, 0.003, 0.2, LG);
+    wIns(K, W, 1.3, 0.5, 0.0016);
+    return { eng: [-1, 1].map(s => ({ x: s * 0.0062, y: 0, z: 0.0246, r: 0.005 })), noses: [[-0.0028, -0.0026, -0.0266], [0.0028, -0.0026, -0.0266]], nose: [0, -0.0026, -0.0266], ns: 1.3,
+      guns: [[-0.0136, -0.0018, -0.0035], [0.0136, -0.0018, -0.0035], [-0.0195, -0.0016, 0.0025], [0.0195, -0.0016, 0.0025]],
+      py: { x0: 0.0152, dx: 0.0024, cols: 3, y: -0.0029, dy: 0.04, z: 0.0035, dz: 0.4, rz: 0.005 }, sh: { y: 0, z: -0.006, r: 0.04 }, shE: [0, -0.0004, -0.0232], ar: { w: 0.0084, y: 0.0078, z0: -0.016, z1: 0.018 },
+      gear: { top: -0.0042, legs: [[-0.007, 0.009], [0.007, 0.009], [0, -0.016, 1]] }, dc: { wing: W, S, ring: [-0.006, 0.0025] } };
   },
 };
 
-  // ---------- pintura de las skins: franjas (rol P) sobre las alas y anillos en el fuselaje según el patrón; cada chasis aporta sus anclajes en dc ----------
+  // ---------- pintura de las skins: franjas (rol P) sobre las alas y anillos en el fuselaje según el patrón; cada chasis aporta sus anclajes en dc ({wing: ala principal, S: secciones del fuselaje, ring: tramo libre}) ----------
   const PATS = { // w: [tramo de envergadura 0-1 (inicio, fin), tramo de cuerda 0-1 (borde de ataque → fuga)] · r: tramos (0-1) del segmento libre del fuselaje
     bands: { w: [[0.40, 0.56, 0, 1]], r: [[0, 0.45]] },
     tips: { w: [[0.78, 1, 0, 1]], r: [[0.55, 1]] },
     stripe: { w: [[0.06, 1, 0.10, 0.26]], r: [[0.35, 0.6]] },
     chevron: { w: [[0.30, 0.40, 0, 1], [0.55, 0.65, 0, 1]], r: [[0, 0.3], [0.6, 0.9]] },
   };
-  const PAINT = new Map(); // (chasis + patrón) → [['P', geometría]]: unos 40-100 triángulos por chasis; se comparte entre todas las naves con esa skin
+  const PAINT = new Map(); // (chasis + patrón) → [['P', geometría]]: se comparte entre todas las naves con esa skin
   function paintParts(t, pat, dc) {
     const key = t + '|' + pat, hit = PAINT.get(key); if (hit) return hit;
-    const K = skit(), Pt = PATS[pat], lerp = (a, b, k) => [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k];
-    if (dc.wing) { const [p0, p1, p2, p3] = dc.wing.pts, at = (k, c) => lerp(lerp(p0, p1, k), lerp(p3, p2, k), c); // borde de ataque p0→p1 y de fuga p3→p2
-      for (const [t0, t1, c0, c1] of Pt.w) wing(K, 'P', [at(t0, c0), at(t1, c0), at(t1, c1), at(t0, c1)], 0.0001, dc.wing.wy + 0.00006, 0.00003); }
-    const { P, sx, sy } = dc.hp, zr = f => dc.ring[0] + (dc.ring[1] - dc.ring[0]) * f;
-    for (const [f0, f1] of Pt.r) { const z0 = zr(f0), z1 = zr(f1), zm = (z0 + z1) / 2; K.add('P', latheG([[radAt(P, z0) * 1.014, z0], [radAt(P, zm) * 1.014, zm], [radAt(P, z1) * 1.014, z1]], sx, sy, 22)); }
+    const K = skit(), Pt = PATS[pat];
+    if (dc.wing) { const W = dc.wing, n = W.S.length - 1; for (const [t0, t1, c0, c1] of Pt.w) for (const h of [1, -1]) K.mir('P', W.patch(t0 * n, t1 * n, c0, c1, h, 0.00006)); }
+    if (dc.S) for (const [f0, f1] of Pt.r) { const z0 = dc.ring[0] + (dc.ring[1] - dc.ring[0]) * f0, z1 = dc.ring[0] + (dc.ring[1] - dc.ring[0]) * f1; bandK(K, 'P', dc.S, z0, z1, 1.014, 14); }
     const out = K.parts(); PAINT.set(key, out); return out;
   }
 
@@ -440,46 +620,69 @@ const BUILD = {
   const fade = (g, len, pw) => { const p = g.attributes.position, c = new Float32Array(p.count * 3); for (let i = 0; i < p.count; i++) { const k = Math.pow(Math.max(0, 1 - p.getZ(i) / len), pw); c[i * 3] = c[i * 3 + 1] = c[i * 3 + 2] = k; } g.setAttribute('color', new THREE.BufferAttribute(c, 3)); return g; }; // degradado de la llama: brillante en la tobera, se apaga en la punta
   const FL1 = fade(new THREE.ConeGeometry(1, 1, 12).rotateX(PI / 2).translate(0, 0, 0.5), 1, 1.1), FL2 = fade(new THREE.ConeGeometry(0.53, 0.62, 10).rotateX(PI / 2).translate(0, 0, 0.31), 0.62, 0.8); // llamas unitarias: se escalan por motor
   const glowMat = (c, op) => new THREE.MeshBasicMaterial({ vertexColors: true, color: c, transparent: true, opacity: op, blending: THREE.AdditiveBlending, depthWrite: false });
-  let GEARP = null; const gearParts = () => GEARP || (GEARP = (() => { // tren de aterrizaje: solo visible con la nave estacionada; igual para todos los chasis
-    const K = skit(); for (const [x, z] of [[-0.006, 0.008], [0.006, 0.008], [0, -0.011]]) { K.add('MT', new THREE.CylinderGeometry(0.0004, 0.0005, 0.0050, 6), [x, -0.0027, z]); K.add('D', new THREE.CylinderGeometry(0.0015, 0.0015, 0.0006, 10), [x, -0.0060, z], [0, 0, PI / 2]); K.add('H2', new THREE.CylinderGeometry(0.0008, 0.0008, 0.0007, 8), [x, -0.0060, z], [0, 0, PI / 2]); K.add('D', bx(0.0012, 0.0008, 0.0016), [x, -0.0004, z]); }
+  const GEARP = new Map(); // tren de aterrizaje por chasis (solo visible con la nave estacionada): patas con amortiguador, ruedas gemelas con cubo, puertas y riostras
+  const gearParts = (t, g) => GEARP.get(t) || (GEARP.set(t, (() => {
+    const K = skit(), top = g.top, L = top + 0.0058, cy = (top - 0.0058) / 2;
+    for (const [x, z, nose] of g.legs) {
+      const sg = x >= 0 ? 1 : -1;
+      K.add('MT', new THREE.CylinderGeometry(0.00042, 0.00052, L, 8), [x, cy, z]); K.add('D', new THREE.CylinderGeometry(0.00027, 0.00027, L * 0.5, 6), [x, top - L * 0.72, z]);
+      K.add('D', bx(0.0016, 0.00014, 0.0030), [x, top + 0.00008, z]); K.add('H2', bx(0.0009, 0.0006, 0.0014), [x, top - 0.0004, z]); K.add('MT', new THREE.CylinderGeometry(0.00016, 0.00016, 0.0034, 5), [x - sg * 0.0007, top - L * 0.36, z - 0.0009], [0.42, 0, sg * 0.3]);
+      K.add('MT', new THREE.CylinderGeometry(0.00011, 0.00011, nose ? 0.0011 : 0.0024, 6), [x, -0.0060, z], [0, 0, PI / 2]);
+      for (const wx of nose ? [x] : [x - 0.00072, x + 0.00072]) { K.add('D', new THREE.CylinderGeometry(0.0015, 0.0015, 0.0006, 12), [wx, -0.0060, z], [0, 0, PI / 2]); K.add('H2', new THREE.CylinderGeometry(0.00082, 0.00082, 0.00068, 8), [wx, -0.0060, z], [0, 0, PI / 2]); }
+      K.add('D', bx(0.0002, 0.0010, 0.0002), [x + sg * (nose ? 0.0005 : 0.0011), -0.0046, z + 0.0004]);
+    }
     return K.parts();
-  })());
+  })()), GEARP.get(t));
   const GEO = new Map();
-  function nozzle(K, e, r, en) { // tobera: collar, campana con nervios, interior emisivo en degradado (rojo oscuro → blanco caliente) y aro de color
+  function nozzle(K, e, r, en) { // tobera: collar oscuro, aro de garganta al rojo, campana de pétalos solapados con actuadores, interior emisivo en degradado (rojo oscuro → blanco caliente) y aro de color
     const { x, y, z } = e, at = [x, y, z];
-    K.add('H2', cylZ(r * 1.16, r * 1.06, 0.0009), [x, y, z - 0.0009]);
+    K.add('D', cylZ(r * 1.16, r * 1.06, 0.0009), [x, y, z - 0.0009]);
     K.add('MT', latheG([[r * 0.74, -0.0013], [r * 0.84, -0.0004], [r * 0.96, 0.0007], [r * 1.04, 0.0013]], 1, 1, 20), at);
     K.add('NZ', latheC([[r * 0.97, 0.0012], [r * 0.72, 0.0003], [r * 0.46, -0.0006], [r * 0.28, -0.0013]], [0x7a2a0a, 0xd45e18, 0xffb040, 0xfff2d0], 18), at);
     K.add('NZ', discC(r * 0.28, 0xffffff, 12), [x, y, z - 0.0013]);
-    K.add('D', new THREE.TorusGeometry(r * 0.86, r * 0.05, 4, 18), [x, y, z - 0.0003]); K.add('D', new THREE.TorusGeometry(r * 0.97, r * 0.05, 4, 18), [x, y, z + 0.0007]);
-    K.add('A', new THREE.TorusGeometry(r * 1.03, r * 0.07, 4, 18), [x, y, z + 0.0013]);
-    for (let i = 0; i < 8; i++) { const a = i * PI / 4; K.add('D', bx(r * 0.09, r * 0.16, 0.0016), [x + Math.cos(a) * r * 0.92, y + Math.sin(a) * r * 0.92, z - 0.0002], [0, 0, a - PI / 2]); } // aletas de refrigeración
+    K.addr('NZ', 0x8a5a30, new THREE.TorusGeometry(r * 0.86, r * 0.05, 4, 18), [x, y, z - 0.0003]); K.add('D', new THREE.TorusGeometry(r * 0.97, r * 0.05, 4, 18), [x, y, z + 0.0007]); K.add('A', new THREE.TorusGeometry(r * 1.03, r * 0.07, 4, 18), [x, y, z + 0.0013]);
+    const pg = bx(r * 0.32, 0.0001, 0.0018).rotateX(0.05);
+    for (let i = 0; i < 12; i++) { const a = i * PI / 6, rr = r * (i % 2 ? 1.0 : 1.05); K.add('MT', pg, [x + Math.cos(a) * rr, y + Math.sin(a) * rr, z + 0.0002], [0, 0, a - PI / 2]); } // pétalos de la campana
+    for (let i = 0; i < 4; i++) { const a = PI / 4 + i * PI / 2; K.add('D', cylZ(0.00011, 0.00011, 0.002, 4), [x + Math.cos(a) * r * 1.12, y + Math.sin(a) * r * 1.12, z - 0.0002]); } // actuadores
     if (en >= 1) K.add('EG', new THREE.TorusGeometry(r * 1.08, r * 0.09, 6, 14), [x, y, z + 0.0006]);
   }
+  function gun(K, x, y, z, s = 1) { // cañón de plasma bajo el ala: montura, recámara con caja de munición, camisa ventilada con aletas, bobinas brillantes, freno de boca y emisor · boca en z - 0,0093·s
+    const sg = x >= 0 ? 1 : -1;
+    K.add('D', bx(0.0006 * s, 0.001, 0.0022 * s), [x, y + 0.001, z + 0.0002]); K.add('A', bx(0.0016 * s, 0.0014 * s, 0.0038 * s), [x, y, z]); K.add('D', bx(0.0011 * s, 0.0004, 0.0026 * s), [x, y + 0.0009 * s, z + 0.0003]);
+    K.add('H2', bx(0.0007 * s, 0.0009 * s, 0.0016 * s), [x + sg * 0.0012 * s, y - 0.0002, z + 0.0006]); // caja de munición hacia fuera
+    K.add('MT', cylZ(0.00055 * s, 0.00055 * s, 0.0075 * s, 8), [x, y, z - 0.0055 * s]); K.add('H2', cylZ(0.0008 * s, 0.0008 * s, 0.0026 * s, 10), [x, y, z - 0.0032 * s]); K.add('D', cylZ(0.0008 * s, 0.0008 * s, 0.001 * s, 8), [x, y, z - 0.0086 * s]); K.add('LT', ball3(0.0007 * s), [x, y, z - 0.0093 * s]);
+    for (const k of [-0.003, -0.0045, -0.006]) K.add('GL', new THREE.TorusGeometry(0.00072 * s, 0.00012, 4, 10), [x, y, z + k * s]);
+    for (const k of [-0.0022, -0.0038, -0.0054, -0.007]) K.add('D', cylZ(0.00073 * s, 0.00073 * s, 0.00022, 8), [x, y, z + k * s]);
+    for (let i = 0; i < 4; i++) { const a = PI / 4 + i * PI / 2; K.add('MT', bx(0.00012 * s, 0.00032 * s, 0.0011 * s), [x + Math.cos(a) * 0.0006 * s, y + Math.sin(a) * 0.0006 * s, z - 0.0088 * s], [0, 0, a - PI / 2]); } // freno de boca
+  }
+  function noseGun(K, p, s = 1) { // cañón de proa: cañón con camisa, aletas y freno de boca · boca en p.z - 0,003
+    const [x, y, z] = p;
+    K.add('MT', cylZ(0.0005 * s, 0.0006 * s, 0.005 * s, 8), p); K.add('H2', cylZ(0.0007 * s, 0.0007 * s, 0.0019 * s, 10), [x, y, z + 0.0012 * s]); K.add('D', cylZ(0.00075 * s, 0.00075 * s, 0.0009 * s, 8), [x, y, z - 0.0026 * s]); K.add('D', cylZ(0.0007 * s, 0.0007 * s, 0.0004 * s, 8), [x, y, z - 0.0006 * s]);
+    for (let i = 0; i < 4; i++) { const a = PI / 4 + i * PI / 2; K.add('MT', bx(0.0001 * s, 0.0003 * s, 0.001 * s), [x + Math.cos(a) * 0.00058 * s, y + Math.sin(a) * 0.00058 * s, z - 0.0026 * s], [0, 0, a - PI / 2]); }
+  }
+  function pylon(K, x, y, z) { // pilón alar: plancha vertical, carril de lanzamiento, bloque de color, borde de ataque y patines de sujeción del misil
+    K.add('D', bx(0.0005, 0.0018, 0.005), [x, y + 0.0011, z]); K.add('MT', bx(0.0011, 0.0003, 0.006), [x, y + 0.0001, z - 0.0002]); K.add('A', bx(0.00055, 0.0004, 0.0012), [x, y + 0.0018, z - 0.0018]); K.add('D', bx(0.0002, 0.0006, 0.0012), [x, y + 0.0004, z + 0.0018]);
+    K.add('H2', new THREE.ConeGeometry(0.00026, 0.0012, 4).rotateX(-PI / 2), [x, y + 0.0011, z - 0.0032]);
+    for (const sx of [-1, 1]) K.add('MT', bx(0.00012, 0.0004, 0.0004), [x + sx * 0.0006, y + 0.0004, z - 0.0016]);
+  }
+  const ARZ = [[0.28, 0.68], [0.08, 0.48, 0.88]]; // posición (fracción del tramo d.ar) de los anillos de blindaje de cada nivel
   function build(spec) {
     const key = spec.t + spec.a.join(''), hit = GEO.get(key); if (hit) { GEO.delete(key); GEO.set(key, hit); return hit; }
     const [ar, sh, pl, , en] = spec.a, st = statsOf(spec), K = skit(), d = BUILD[spec.t](K, X), muz = [], pyl = [];
     const eng = d.eng.map(e => ({ x: e.x, y: e.y, z: e.z, r: e.r * (1 + 0.12 * en) })); eng.forEach(e => nozzle(K, e, e.r, en));
-    for (let l = 1; l <= ar; l++) { // placas de blindaje: capas con remaches
-      const w = d.ar.w * (0.7 + 0.15 * l), zc = (d.ar.z0 + d.ar.z1) / 2, zl = d.ar.z1 - d.ar.z0;
-      K.mir('AR', bx(w * 0.6, 0.0007, zl * (0.55 + 0.2 * l)), [w * 0.45, d.ar.y + 0.0006 * l, zc]); K.mir('AR', bx(0.0007, w * 0.9, zl * 0.5), [d.ar.w + 0.0004 * l, 0, zc + 0.002]);
-      K.mir('MT', bx(w * 0.4, 0.0004, zl * (0.4 + 0.2 * l)), [w * 0.45, d.ar.y + 0.0006 * l + 0.0005, zc]); dots(K, 'D', [w * 0.3, d.ar.y + 0.0006 * l + 0.0006, zc - zl * 0.2], [w * 0.6, d.ar.y + 0.0006 * l + 0.0006, zc + zl * 0.2], 4, 0.0003);
-      K.add('A', bx(w * 1.3, 0.0008, 0.005), [0, d.ar.y + 0.0007 * l, d.ar.z0 + 0.003]);
+    for (let l = 1; l <= ar; l++) { // placas de blindaje: anillos segmentados de placas con cantos metálicos que abrazan el fuselaje (cada nivel añade más)
+      const S = d.dc.S, z0 = d.ar.z0, z1 = d.ar.z1, lw = (z1 - z0) * 0.11, k = 1.05 + 0.012 * l;
+      for (const f of ARZ[l - 1]) { const zc = z0 + (z1 - z0) * f; bandK(K, 'AR', S, zc - lw / 2, zc + lw / 2, k, 12); bandK(K, 'MT', S, zc - lw / 2 - 0.00025, zc - lw / 2, k + 0.008, 12); bandK(K, 'MT', S, zc + lw / 2, zc + lw / 2 + 0.00025, k + 0.008, 12); if (l === 2) bandK(K, 'A', S, zc - 0.0001, zc + 0.0001, k + 0.014, 12); }
     }
-    K.add('MT', cylZ(0.0005, 0.0006, 0.005, 8), d.nose); K.add('D', cylZ(0.00075, 0.00075, 0.0009, 8), [d.nose[0], d.nose[1], d.nose[2] - 0.0026]); K.add('D', cylZ(0.0007, 0.0007, 0.0004, 8), [d.nose[0], d.nose[1], d.nose[2] - 0.0006]); muz.push([d.nose[0], d.nose[1], d.nose[2] - 0.003]); // cañón central siempre, con freno de boca
-    for (let i = 0; i < (pl >= 2 ? 4 : pl >= 1 ? 2 : 0); i++) { // cañones de plasma en las alas: caja de recámara, camisa con aletas disipadoras, bobinas y emisor
-      const [x, y, z] = d.guns[i];
-      K.add('A', bx(0.0016, 0.0016, 0.004), [x, y, z]); K.add('D', bx(0.0011, 0.0004, 0.0026), [x, y + 0.0009, z + 0.0003]); K.add('MT', cylZ(0.00055, 0.00055, 0.0075, 8), [x, y, z - 0.0055]); K.add('D', cylZ(0.0008, 0.0008, 0.0010, 8), [x, y, z - 0.0086]); K.add('LT', ball3(0.0007), [x, y, z - 0.0093]);
-      for (const k of [-0.0030, -0.0045, -0.0060]) K.add('GL', new THREE.TorusGeometry(0.00072, 0.00012, 4, 10), [x, y, z + k]);
-      for (const k of [-0.0022, -0.0038, -0.0054, -0.0070]) K.add('D', cylZ(0.00073, 0.00073, 0.00022, 8), [x, y, z + k]);
-      muz.push([x, y, z - 0.0093]);
-    }
+    for (const p of d.noses || [d.nose]) { noseGun(K, p, d.ns || 1); muz.push([p[0], p[1], p[2] - 0.003]); } // cañón(es) central(es) siempre
+    const gs = d.gs || 1;
+    for (let i = 0; i < (pl >= 2 ? 4 : pl >= 1 ? 2 : 0); i++) { const [x, y, z] = d.guns[i]; gun(K, x, y, z, gs); muz.push([x, y, z - 0.0093 * gs]); }
     for (let i = 0; i < st.missiles; i++) { // pilones (el misil de cada uno es una instancia del mesh de misiles)
-      const side = i % 2 ? 1 : -1, x = side * (d.py.x0 + (i >> 1) * d.py.dx), y = d.py.y, z = d.py.z;
-      K.add('D', bx(0.0005, 0.0018, 0.005), [x, y + 0.0011, z]); K.add('MT', bx(0.0011, 0.0003, 0.0060), [x, y + 0.0001, z - 0.0002]); K.add('A', bx(0.00055, 0.0004, 0.0012), [x, y + 0.0018, z - 0.0018]); K.add('D', bx(0.0002, 0.0006, 0.0012), [x, y + 0.0004, z + 0.0018]); pyl.push([x, y - 0.0006, z]);
+      const P = d.py, side = i % 2 ? 1 : -1, n = i >> 1, cols = P.cols || 99, ax = P.x0 + (n % cols) * P.dx, row = (n / cols) | 0, x = side * ax, y = P.y + (P.dy || 0) * (ax - P.x0), z = P.z + (P.dz || 0) * (ax - P.x0) + row * (P.rz || 0.0056);
+      pylon(K, x, y, z); pyl.push([x, y - 0.0006, z]);
     }
-    if (sh > 0) K.add('MT', new THREE.CylinderGeometry(0.0011, 0.0019, 0.0010, 10).rotateX(PI / 2), [d.nose[0], d.nose[1] - 0.0012, d.nose[2] + 0.0040]); // emisor del escudo (el resplandor solo aparece al recibir daño)
-    const out = { parts: K.parts(), muz, pyl, eng, dc: d.dc }; GEO.set(key, out);
+    if (sh > 0) { const q = d.shE || [d.nose[0], d.nose[1] - 0.0012, d.nose[2] + 0.004]; K.add('MT', new THREE.CylinderGeometry(0.0011, 0.0019, 0.001, 10).rotateX(PI / 2), q); } // emisor del escudo (el resplandor solo aparece al recibir daño)
+    const out = { parts: K.parts(), muz, pyl, eng, dc: d.dc, gear: d.gear }; GEO.set(key, out);
     if (GEO.size > 36) { const [k0, v0] = GEO.entries().next().value; GEO.delete(k0); v0.parts.forEach(([, g]) => g.dispose()); } // caché limitada: al expulsar una entrada se libera su geometría en GPU (si vuelve a usarse se re-sube sola)
     return out;
   }
@@ -491,7 +694,7 @@ const BUILD = {
     Object.assign(root, { muzzles: B.muz.map(at), pylons: B.pyl.map(at), missiles: [], flames: [], shieldFx: [], flameMul: st.flameMul });
     const fx = { stw: new THREE.MeshBasicMaterial({ color: 0xffffff }), str: new THREE.MeshBasicMaterial({ color: 0xff3030 }), nz: new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide }), ph: Math.random() * 1500, msl: null, idle: hullOverride === undefined ? 0.3 : 0.08 }; // idle: brillo del interior de la tobera con el motor parado (casco a la deriva: apagado)
     const PM = { STW: fx.stw, STR: fx.str, NZ: fx.nz }, hullMs = [];
-    for (const [role, geo] of B.parts) { const ms = new THREE.Mesh(geo, PM[role] || MX[role]); m.add(ms); hullMs.push(ms); } // ~10 meshes por casco
+    for (const [role, geo] of B.parts) { const ms = new THREE.Mesh(geo, PM[role] || MX[role]); m.add(ms); hullMs.push(ms); } // ~12 meshes por casco
     if (SKN && SKN.pat && B.dc) for (const [, geo] of paintParts(spec.t, SKN.pat, B.dc)) m.add(new THREE.Mesh(geo, MX.P)); // pintura de la skin: 1 mesh más (no entra en la malla del escudo)
     const f1 = glowMat(0x4fb4ff, 0.55), f2 = glowMat(0xffffff, 0.95);
     B.eng.forEach(e => { const L = e.r * 7.6, fl = new THREE.Group(), a = new THREE.Mesh(FL1, f1), b = new THREE.Mesh(FL2, f2); a.scale.set(e.r, e.r, L); b.scale.set(e.r, e.r, L); fl.position.set(e.x, e.y, e.z + 0.0011); fl.add(a, b); m.add(fl); root.flames.push(fl); }); // motores: llama doble
@@ -500,9 +703,10 @@ const BUILD = {
       const sm1 = new THREE.MeshBasicMaterial({ color: 0x55c8ff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false }), sm2 = new THREE.MeshBasicMaterial({ color: 0xbff4ff, wireframe: true, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false });
       hullMs.forEach(ms => { root.shell.add(new THREE.Mesh(ms.geometry, sm1), new THREE.Mesh(ms.geometry, sm2)); }); root.shellMats = [sm1, sm2]; }
     root.shell.visible = false; m.add(root.shell); root.shieldLv = sh;
-    root.gear = new THREE.Group(); root.gearH = 0.0064 * T.size; for (const [role, geo] of gearParts()) root.gear.add(new THREE.Mesh(geo, MX[role])); root.gear.visible = false; m.add(root.gear);
+    root.gear = new THREE.Group(); root.gearH = 0.0064 * T.size; for (const [role, geo] of gearParts(spec.t, B.gear)) root.gear.add(new THREE.Mesh(geo, MX[role])); root.gear.visible = false; m.add(root.gear);
     root.fx = fx; return root;
   }
+
   const FL_BLUE = new THREE.Color(0x4fb4ff), FL_YEL = new THREE.Color(0xffa41a), IN_W = new THREE.Color(0xffffff), IN_Y = new THREE.Color(0xffe58a);
   return {
     make, tex: tx, skit, LIGHTS, // tex/skit/LIGHTS: texturas procedurales y utilidades compartidas con models.js y base.js

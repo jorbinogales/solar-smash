@@ -120,7 +120,11 @@
     sectors: [4, 4, 5, 5, 6, 6, 6, 6], outerSectors: 6,
     starKill: { k: 3, tMax: 8, tMin: 1.5, reset: 1 }, // ZONA LETAL de la estrella: radio = máx(R★·(1+k), radio del Núcleo estelar); cuenta atrás clamp(tMax·d_superficie/(R_letal−R★), tMin, tMax) s; fuera se cancela tras `reset` s
     gain: { n: 1, every: 10 }, // recursos pasivos: cada zona reclamada da a su dueño n unidades de su recurso cada `every` s (no salen de los cúmulos) // sectores de cada anillo de planeta (de dentro afuera) y de los Confines
-    ws: { max: 2, hp: 3000, sh: 1000, scale: 4, near: 32, range: 400, dmg: 6, cd: 1.1, spd: 30, cost: { oro: 40, diamante: 8, plata: 60, cobre: 100, piedra: 150 } }, // buque de guerra (modelo de 3,46 km × scale = ~14 km); near: km junto a él que cuentan como «en base»
+    // buque de guerra (modelo de 3,46 km × scale = ~14 km); near: km junto a él que cuentan como «en base». Es la unidad de MÁS alcance del juego (cubre grandes espacios):
+    // range 6000 km de detección y disparo (satélite 1200, cazas 3000, torres de base mucho menos) · spd 300 km/s (el servidor admite hasta 500) → a 6000 km tarda 20 s y el
+    // proyectil vive l/spd·1,5 + 3 s (≤ 60) · hr 0,25 km: radio de espoleta de proximidad del proyectil (las demás torretas, 0,04-0,05) · cd 1,1 s entre disparos del buque,
+    // que alternan entre las 3 torretas gemelas del costado que mira al blanco (cada torreta dispara cada 3,3 s, cañón izquierdo y derecho por turnos)
+    ws: { max: 2, hp: 3000, sh: 1000, scale: 4, near: 32, range: 6000, dmg: 6, cd: 1.1, spd: 300, hr: 0.25, cost: { oro: 40, diamante: 8, plata: 60, cobre: 100, piedra: 150 } },
     ftr: { max: 2, n: 3, hp: 60, dmg: 4, cd: 0.8, range: 3000, engage: 8000, patrol: 6000, vmax: 400, cost: { plata: 15, cobre: 30, piedra: 30 } }, // escuadrón de CAZAS: n cazas de hp cada uno, plasma ligero; patrullan patrol km en torno a su punto y atacan hasta engage km de él
     sat: { maxZone: 3, hp: 800, range: 1200, dmg: 20, cd: 4, spd: 50, radar: 1500000, cost: { oro: 8, plata: 20, cobre: 40, piedra: 60 } }, // satélite defensivo (~1 km): misiles guiados de largo alcance
   };

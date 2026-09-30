@@ -93,13 +93,25 @@ const WAR = (() => {
     for (const bd of bodies) { const oc = sub(a, bd.pos), R = bd.R * 0.999, Bq = oc[0] * u[0] + oc[1] * u[1] + oc[2] * u[2], Cq = oc[0] * oc[0] + oc[1] * oc[1] + oc[2] * oc[2] - R * R; if (Cq <= 0) continue; const disc = Bq * Bq - Cq; if (disc <= 0) continue; const te = -Bq - Math.sqrt(disc); if (te > 0 && te < L) return true; }
     return false;
   }
-  function fire(s, t, tg) { // buque: plasma con puntería adelantada (precisión moderada) · satélite: misil guiado de largo alcance
-    const homing = s.k === 'S', c = [s.w[0], s.w[1] + (homing ? 0 : 0.5 * SCW), s.w[2]], d0 = nrm(sub(tg.pos, c)), mp = c.map((x, i) => x + d0[i] * (homing ? 0.5 : 0.3 * SCW)); // bocas: sobre la cubierta del buque (escalado)
-    let ap = tg.pos; if (!homing) { const fw = new THREE.Vector3(0, 0, -1).applyQuaternion(tg.q); for (let k = 0; k < 2; k++) { const tt = len(sub(ap, mp)) / t.spd; ap = tg.pos.map((x, i) => x + fw.getComponent(i) * tg.v * tt); } }
+  // Bocas de los cañones en coordenadas del modelo (km, proa hacia -z; models.js). Las piezas están fusionadas por material, así que las torretas no giran: el disparo sale de la
+  // boca real y el destello se estira en la dirección del tiro. Buque (× SCW): 6 torretas gemelas en x = ±0,39, z = −0,2 · 0,35 · 0,8; cañones a y = 0,128, separados ±0,02,
+  // con la boca 0,26 por delante del centro de la torreta. Satélite (escala 1): boca del cañón de riel en (0, −0,01, −0,79). Caza (escala 1): vainas de las puntas de ala.
+  const TZ = [-0.2, 0.35, 0.8], _v = new THREE.Vector3(), _qi = new THREE.Quaternion();
+  const toWorld = (w, q, x, y, z) => { _v.set(x, y, z).applyQuaternion(q); return [w[0] + _v.x, w[1] + _v.y, w[2] + _v.z]; };
+  function muzzle(s, tp) { // buque: torretas del costado que mira al blanco, por turnos (cada una dispara 1 de cada 3 veces, alternando sus dos cañones)
+    if (s.k !== 'W') return toWorld(s.w, s.q, 0, -0.01, -0.79);
+    _v.set(tp[0] - s.w[0], tp[1] - s.w[1], tp[2] - s.w[2]).applyQuaternion(_qi.copy(s.q).invert()); const sx = _v.x >= 0 ? 1 : -1, n = s.tn = (s.tn || 0) + 1;
+    return toWorld(s.w, s.q, (sx * 0.39 + (Math.floor(n / 3) % 2 ? 0.02 : -0.02)) * SCW, 0.128 * SCW, (TZ[n % 3] - 0.26) * SCW);
+  }
+  const flash = (p, d, r, col) => { puff(p, r, col, 0.22, 0.006); puff(p.map((c, i) => c + d[i] * r * 1.6), r * 0.55, 0xffffff, 0.14, 0.004); }; // destello en la boca, adelantado en la dirección del disparo
+  function fire(s, t, tg) { // buque: plasma rápido con puntería adelantada (precisión moderada) · satélite: misil guiado de largo alcance · ambos salen de la boca real del cañón
+    const homing = s.k === 'S', mp = muzzle(s, tg.pos);
+    let ap = tg.pos; if (!homing) { const fw = new THREE.Vector3(0, 0, -1).applyQuaternion(tg.q); for (let k = 0; k < 3; k++) { const tt = len(sub(ap, mp)) / t.spd; ap = tg.pos.map((x, i) => x + fw.getComponent(i) * tg.v * tt); } }
     const l = len(sub(ap, mp)); if (l < 0.01) return; const dir = sub(ap, mp).map(x => x / l), kind = homing ? 'm' : 'p', tgt = homing ? { k: tg.id >= 3000 && tg.id < 4000 ? 'n' : 'p', id: tg.id } : null, key = `${myId ?? 0}:x${++seq}`, sn = (s.k === 'W' ? 'Buque de ' : 'Satélite de ') + nmOf(s.o);
-    spawnProj(-s.o, key, kind, mp, dir, tgt, t.dmg, { spd: t.spd, col: homing ? 0x9fe8ff : 0xff8a3c, life: Math.min(60, l / t.spd * 1.5 + 3) }); const q = projs.get(key); if (q) q.sn = sn; // sn: nombre para el aviso de ataque
+    spawnProj(-s.o, key, kind, mp, dir, tgt, t.dmg, { spd: t.spd, col: homing ? 0x9fe8ff : 0xff8a3c, life: Math.min(60, l / t.spd * 1.5 + 3), hr: t.hr }); const q = projs.get(key); if (q) q.sn = sn; // sn: nombre para el aviso de ataque
     send({ t: 'fire', key, kind, pos: mp, dir, tgt, dmg: t.dmg, tw: 1, spd: t.spd, rb: S.refB, rp: S.refB >= 0 ? sub(mp, bodies[S.refB].pos) : null });
-    sfx(kind, l); s.cd = t.cd * (0.8 + 0.4 * Math.random());
+    flash(mp, dir, homing ? 0.05 : 0.04 * SCW, homing ? 0x9fe8ff : 0xffa050);
+    sfx(kind, len(sub(mp, S.pos))); s.cd = t.cd * (0.8 + 0.4 * Math.random());
     if (tg.id === myId) attackAlert('s', sn, s.w);
   }
   const hostT = (w, range) => (typeof BOT !== 'undefined' && BOT.nearestTo(w, range)) || (typeof NEU !== 'undefined' && NEU.nearest(w, range)) || null; // anfitrión: bots (enemigos de todos los humanos) y naves neutrales al alcance
@@ -116,8 +128,9 @@ const WAR = (() => {
       c.q.rotateTowards(lookQ(nrm(d)), 2.4 * dt); c.v += (vDes - c.v) * (1 - Math.exp(-dt * 1.5)); const fw = new THREE.Vector3(0, 0, -1).applyQuaternion(c.q);
       c.pos = [c.pos[0] + fw.x * c.v * dt, c.pos[1] + fw.y * c.v * dt, c.pos[2] + fw.z * c.v * dt]; c.cd -= dt;
       if (tg && c.cd <= 0 && dl < F.range && (fw.x * d[0] + fw.y * d[1] + fw.z * d[2]) / dl > Math.cos(0.3) && !blocked(c.pos, tg.pos)) { // plasma ligero (lo decide la víctima: el disparo se retransmite con ow = escuadrón)
-        c.cd = F.cd * (0.8 + 0.4 * Math.random()); const key = `${myId ?? 0}:f${++seq}`, dir = nrm(d.map(x => x + (Math.random() - 0.5) * 0.02 * dl)); spawnProj(-f.o, key, 'p', c.pos, dir, null, F.dmg); sfx('p', len(sub(c.pos, S.pos)));
-        send({ t: 'fire', key, kind: 'p', pos: c.pos, dir, tgt: null, dmg: F.dmg, rb: -1, rp: null, ow: f.id }); if (tg.id === myId) attackAlert('p', 'Cazas de ' + nmOf(f.o), c.pos);
+        c.cd = F.cd * (0.8 + 0.4 * Math.random()); c.mz = c.mz === 1 ? -1 : 1; const key = `${myId ?? 0}:f${++seq}`, mz = toWorld(c.pos, c.q, c.mz * 0.0197, -0.002, -0.011), dir = nrm(sub(tg.pos, mz).map(x => x + (Math.random() - 0.5) * 0.02 * dl)); // vaina de punta de ala, una y otra por turnos
+        spawnProj(-f.o, key, 'p', mz, dir, null, F.dmg); sfx('p', len(sub(mz, S.pos))); flash(mz, dir, 0.006, 0xffb070);
+        send({ t: 'fire', key, kind: 'p', pos: mz, dir, tgt: null, dmg: F.dmg, rb: -1, rp: null, ow: f.id }); if (tg.id === myId) attackAlert('p', 'Cazas de ' + nmOf(f.o), c.pos);
       }
       rows.push([f.id, j, Math.round(c.pos[0] * 10) / 10, Math.round(c.pos[1] * 10) / 10, Math.round(c.pos[2] * 10) / 10, +c.q.x.toFixed(3), +c.q.y.toFixed(3), +c.q.z.toFixed(3), +c.q.w.toFixed(3), Math.round(c.v)]);
     });
@@ -231,10 +244,10 @@ const WAR = (() => {
     F: `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">${DEF}<g stroke="#050f1c" stroke-width="2.5" stroke-linejoin="round"><path d="M28 32 6 17V25L28 44Z" fill="url(#gm)"/><path d="M36 32 58 17V25L36 44Z" fill="url(#gm)"/><path d="M28 46 20 58H27Z" fill="url(#gm)"/><path d="M36 46 44 58H37Z" fill="url(#gm)"/><path d="M32 3 36.5 14V46L35 53H29L27.5 46V14Z" fill="url(#gm)"/></g><path d="M9 20 27 33M55 20 37 33" stroke="#4db8ff" stroke-width="2.2"/><ellipse cx="32" cy="18" rx="2.6" ry="5.5" fill="url(#gb)" stroke="#050f1c" stroke-width="1.6"/><g fill="#050f1c"><rect x="14" y="27" width="2.4" height="8" rx="1"/><rect x="47.6" y="27" width="2.4" height="8" rx="1"/></g><circle cx="5.5" cy="21" r="2" fill="#ff3b30" stroke="#050f1c" stroke-width="1.2"/><circle cx="58.5" cy="21" r="2" fill="#5dff8a" stroke="#050f1c" stroke-width="1.2"/><ellipse cx="30" cy="55" rx="2.4" ry="3" fill="url(#gf)" stroke="#050f1c" stroke-width="1.2"/><ellipse cx="34" cy="55" rx="2.4" ry="3" fill="url(#gf)" stroke="#050f1c" stroke-width="1.2"/></svg>`,
   };
   const COST = { W: C.ws.cost, S: C.sat.cost, F: F.cost }, DEPL = { W: 'DESPLEGAR', S: 'CONSTRUIR', F: 'DESPLEGAR' };
-  const DESC = { W: 'Nave capital de ~14 km: reapareces en su cubierta y junto a ella compras como en la base.', S: 'Base flotante estática con misiles guiados de largo alcance. Se desactiva si pierdes su zona.', F: `${F.n} cazas ligeros que patrullan la zona y atacan enemigos y neutrales. Si caen los ${F.n}, se pierde.` };
-  const STATS = k => k === 'W' ? [['Casco', C.ws.hp, 3000, '#5dff8a'], ['Escudo', C.ws.sh, 1000, '#4db8ff'], ['Alcance (km)', C.ws.range, 3000, '#ffd23f'], ['Daño/disparo', C.ws.dmg, 40, '#ff8a3c'], ['Disparos/s', +(6 / C.ws.cd).toFixed(1), 6, '#c8ff5d'], ['Velocidad (km/s)', 0, 400, '#f5a8ff'], ['Unidades', 1, 3, '#9fd4ee'], ['Máximo', C.ws.max, 3, '#9fd4ee']]
-    : k === 'S' ? [['Vida', C.sat.hp, 3000, '#5dff8a'], ['Escudo', 0, 1000, '#4db8ff'], ['Alcance (km)', C.sat.range, 3000, '#ffd23f'], ['Daño/disparo', C.sat.dmg, 40, '#ff8a3c'], ['Disparos/s', +(1 / C.sat.cd).toFixed(2), 6, '#c8ff5d'], ['Velocidad (km/s)', 0, 400, '#f5a8ff'], ['Unidades', 1, 3, '#9fd4ee'], ['Por zona', C.sat.maxZone, 3, '#9fd4ee']]
-    : [['Vida (cada caza)', F.hp, 3000, '#5dff8a'], ['Escudo', 0, 1000, '#4db8ff'], ['Alcance (km)', F.range, 3000, '#ffd23f'], ['Daño/disparo', F.dmg, 40, '#ff8a3c'], ['Disparos/s', +(F.n / F.cd).toFixed(1), 6, '#c8ff5d'], ['Velocidad (km/s)', F.vmax, 400, '#f5a8ff'], ['Unidades', F.n, 3, '#9fd4ee'], ['Máximo', F.max, 3, '#9fd4ee']];
+  const DESC = { W: `Nave capital de ~14 km con el mayor alcance del juego (${C.ws.range} km): reapareces en su cubierta y junto a ella compras como en la base.`, S: 'Base flotante estática con misiles guiados de largo alcance. Se desactiva si pierdes su zona.', F: `${F.n} cazas ligeros que patrullan la zona y atacan enemigos y neutrales. Si caen los ${F.n}, se pierde.` };
+  const STATS = k => k === 'W' ? [['Casco', C.ws.hp, 3000, '#5dff8a'], ['Escudo', C.ws.sh, 1000, '#4db8ff'], ['Alcance (km)', C.ws.range, 6000, '#ffd23f'], ['Daño/disparo', C.ws.dmg, 40, '#ff8a3c'], ['Disparos/s', +(1 / C.ws.cd).toFixed(1), 6, '#c8ff5d'], ['Velocidad (km/s)', 0, 400, '#f5a8ff'], ['Unidades', 1, 3, '#9fd4ee'], ['Máximo', C.ws.max, 3, '#9fd4ee']]
+    : k === 'S' ? [['Vida', C.sat.hp, 3000, '#5dff8a'], ['Escudo', 0, 1000, '#4db8ff'], ['Alcance (km)', C.sat.range, 6000, '#ffd23f'], ['Daño/disparo', C.sat.dmg, 40, '#ff8a3c'], ['Disparos/s', +(1 / C.sat.cd).toFixed(2), 6, '#c8ff5d'], ['Velocidad (km/s)', 0, 400, '#f5a8ff'], ['Unidades', 1, 3, '#9fd4ee'], ['Por zona', C.sat.maxZone, 3, '#9fd4ee']]
+    : [['Vida (cada caza)', F.hp, 3000, '#5dff8a'], ['Escudo', 0, 1000, '#4db8ff'], ['Alcance (km)', F.range, 6000, '#ffd23f'], ['Daño/disparo', F.dmg, 40, '#ff8a3c'], ['Disparos/s', +(F.n / F.cd).toFixed(1), 6, '#c8ff5d'], ['Velocidad (km/s)', F.vmax, 400, '#f5a8ff'], ['Unidades', F.n, 3, '#9fd4ee'], ['Máximo', F.max, 3, '#9fd4ee']];
   const full = k => k === 'W' ? mineW().length + stock.W >= C.ws.max : k === 'F' ? mineF().length + stock.F >= F.max : false;
   function preview(k) { // FLOTA: modelo de la unidad elegida en el visor 3D (FV, hangar.js), normalizado a ~2 unidades
     if (typeof FV === 'undefined' || FV.key === k) return; FV.key = k; if (FV.obj) FV.pivot.remove(FV.obj);

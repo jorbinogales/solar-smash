@@ -3,7 +3,7 @@
 // Las simula el cliente del anfitrión (como bot.js) y las envía al servidor ('ns'); todos las reciben en el tick ('nv'). Los impactos y la recompensa los decide el anfitrión ('nhit').
 // Nivel 1-10 (mayor lejos de la estrella): más vida, daño y velocidad, y más XP y botín. Recompensa (para quien más daño hizo): XP, munición llena y unos pocos recursos (no salen de las zonas).
 const NEU = (() => {
-  const TT = ['saeta', 'halcon', 'coloso', 'nomada'], HULL = 0x6f7b6c, ACC = 0x9dff6a, FWD = new THREE.Vector3(0, 0, -1); // TT: mismo orden que SHIPS en server.js
+  const TT = ['saeta', 'halcon', 'coloso', 'nomada'], HULL = 0x6f7b6c, ACC = 0x9dff6a, FWD = new THREE.Vector3(0, 0, -1); // TT: las 4 primeras de SHIPS (server.js), en el mismo orden: el índice viaja por la red
   const MAINS = bodies.filter(b => b.k !== 'sun' && !b.parent), MAXG = Math.min(9, 4 + MAINS.length); // grupos vivos a la vez: 4 + planetas principales (tope 9 → ≤ 36 naves, 'ns' ≈ 3 KB)
   const CALM = 60000, FIRE_R = 3500, SPREAD = 0.012, SEND_MS = 100, VIS = 300000, NEAR_MIN = 15000, RESPAWN = [12000, 30000]; // VIS: más lejos no se dibujan (ni son objetivo) · NEAR_MIN: nunca aparecen a menos de esto de un jugador · RESPAWN: ms tras aniquilar un grupo
   const E = new Map(), G = new Map(), pend = []; // E: id -> nave (simulada si soy el anfitrión, o recibida del servidor) · G: grupo -> { g, s (punto de encuentro), wp, host: agresor } · pend: reapariciones programadas
@@ -119,7 +119,7 @@ const NEU = (() => {
   }
   function hit(old, pos, p, key, ak) { // proyectil contra una nave neutral: lo decide el anfitrión (los demás solo hacen desaparecer su propio disparo)
     if (p.owner >= 3000 || p.owner <= -1000) return false; // ni otras neutrales ni torretas de bases bot (las de bases humanas, dueño -id, sí)
-    const R = p.spd !== undefined || ak > 0.02 ? 0.05 : HIT_R, who = p.owner < 0 ? -p.owner : p.owner; // who: el jugador (o bot) responsable
+    const R = p.hr ?? (p.spd !== undefined || ak > 0.02 ? 0.05 : HIT_R), who = p.owner < 0 ? -p.owner : p.owner; // who: el jugador (o bot) responsable
     for (const n of E.values()) {
       const w = n.w || world(n); if (segDist(old, pos, w) >= R) continue; // sin mirar si se dibuja aquí: el anfitrión decide aunque esa nave quede lejos de su cámara
       if (!wasHost) { if (p.owner !== myId) return false; puff(pos, 0.02, 0xffd070, 0.4, 0.012); return true; }

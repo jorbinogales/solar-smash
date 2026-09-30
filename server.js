@@ -54,7 +54,7 @@ const WRECKS = 32, WRECK_RESPAWN_MS = 90000;
 const wss = new WebSocketServer({ server, maxPayload: 8192 }); let nextId = 0; // 8 KB: el estado de hasta 36 naves neutrales ('ns') cabe con margen
 const idInUse = id => [...wss.clients].some(c => c.pid === id) || [...rooms.values()].some(R => R.lobby.has(id) || R.hangars.has(id) || R.players.has(id));
 const newPid = () => { for (let k = 0; k < 999; k++) { nextId = nextId % 999 + 1; if (!idInUse(nextId)) return nextId; } return nextId; }; // ids de jugador SIEMPRE 1-999 (reutilizando los libres): 1000+ = hangares de bots, 2000+ = bots, 3000+ = neutrales. Antes crecían sin fin y tras ~1000 conexiones un jugador pasaba por bot
-const SHIPS = ['saeta', 'halcon', 'coloso', 'nomada'];
+const SHIPS = ['saeta', 'halcon', 'coloso', 'nomada', 'centinela', 'fantasma', 'corsario', 'titan']; // mismo orden que TYPES en ships.js (las 4 primeras las usan las naves neutrales por índice)
 const spec = sp => ({ t: SHIPS.includes(sp && sp.t) ? sp.t : 'halcon', a: Array.from({ length: 6 }, (_, i) => Math.max(0, Math.min(3, Math.round(Number(sp && sp.a && sp.a[i]) || 0)))), c: Number.isFinite(sp && sp.c) ? (sp.c >>> 0) & 0xffffff : 0x4db8ff, sk: Math.max(0, Math.min(5, Math.round(Number(sp && sp.sk)) || 0)) });
 const num = (a, n) => Array.isArray(a) && a.length === n && a.every(Number.isFinite);
 const send = (ws, o) => { if (ws.readyState === 1) ws.send(JSON.stringify(o)); };
@@ -131,7 +131,7 @@ wss.on('connection', ws => {
       else if (m.t === 'fire' && (m.kind === 'p' || m.kind === 'm') && num(m.pos, 3) && num(m.dir, 3) && typeof m.key === 'string') {
         const t = m.tgt && (m.tgt.k === 'p' || m.tgt.k === 'w' || m.tgt.k === 'h' || m.tgt.k === 'n' || m.tgt.k === 'W' || m.tgt.k === 'S' || m.tgt.k === 'F') && Number.isInteger(m.tgt.id) ? { k: m.tgt.k, id: m.tgt.id } : null;
         const ow = id === admin(R) && Number.isInteger(m.ow) && ((m.ow >= 2000 && m.ow < 4000) || (m.ow >= 7000 && m.ow < 8000)) ? m.ow : undefined; // 7000+: disparo de un escuadrón de cazas // disparo de un bot (2000+) o de una nave neutral (3000+): solo el anfitrión puede atribuirlo
-        relay(R, id, { t: 'fire', key: m.key.slice(0, 24), kind: m.kind, pos: m.pos, dir: m.dir, tgt: t, dmg: Number.isFinite(m.dmg) ? Math.max(1, Math.min(30, m.dmg)) : 8, tw: m.tw ? 1 : 0, spd: Number.isFinite(m.spd) ? Math.max(0.1, Math.min(50, m.spd)) : 0, nl: m.nl ? 1 : 0, rb: Number.isInteger(m.rb) ? m.rb : -1, rp: num(m.rp, 3) ? m.rp : null, ow });
+        relay(R, id, { t: 'fire', key: m.key.slice(0, 24), kind: m.kind, pos: m.pos, dir: m.dir, tgt: t, dmg: Number.isFinite(m.dmg) ? Math.max(1, Math.min(30, m.dmg)) : 8, tw: m.tw ? 1 : 0, spd: Number.isFinite(m.spd) ? Math.max(0.1, Math.min(500, m.spd)) : 0, nl: m.nl ? 1 : 0, rb: Number.isInteger(m.rb) ? m.rb : -1, rp: num(m.rp, 3) ? m.rp : null, ow });
       } else if (m.t === 'hit' && Number.isInteger(m.by) && num(m.pos, 3) && Number.isFinite(m.dmg) && typeof m.key === 'string')
         relay(R, id, { t: 'hit', by: m.by, key: m.key.slice(0, 24), dmg: m.dmg, pos: m.pos, dead: !!m.dead, sh: Number.isFinite(m.sh) ? m.sh : 0, v: Number.isInteger(m.v) ? m.v : undefined }); // v: víctima si no es quien envía (bots del anfitrión)
       else if (m.t === 'ns' && id === admin(R) && Array.isArray(m.l) && m.l.length <= 48) R.nv = m.l.map(e => neuRow(R, e)).filter(Boolean); // estado de las naves neutrales
