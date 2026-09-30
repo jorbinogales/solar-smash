@@ -289,7 +289,7 @@ const BASE = (() => {
   function frame(dt, now) {
     clk.style.display = started && !loading && !document.pointerLockElement && ov.style.display === 'none' && !window.MAPOPEN && !chooserShown && P.hp > 0 ? 'block' : 'none';
     if (claimT > 0 && (claimT -= dt) <= 0) { pendingSpawn = false; if (LB.phase === 'playing') document.exitPointerLock(); show('El servidor no respondió. Inténtalo otra vez.'); }
-    if (defeated && P.hp <= 0 && now >= P.deadUntil && !chooserShown) { document.exitPointerLock(); show('DERROTA: tu hangar fue destruido. Elige un planeta para reconstruirlo.'); }
+    if (defeated && P.hp <= 0 && now >= P.deadUntil && !chooserShown && !(typeof WAR !== 'undefined' && WAR.mine().length)) { document.exitPointerLock(); show('DERROTA: tu hangar fue destruido. Elige un planeta para reconstruirlo.'); }
     if (loading) loadTick(now);
     const alive = P.hp > 0 && !S.warp.on && !loading;
     for (const h of HG.values()) {
@@ -388,7 +388,7 @@ const BASE = (() => {
       g2.fillStyle = mine ? '#4db8ff' : '#ff8a6a'; g2.font = `bold 12px ${MONO}`; g2.fillText(`${mine ? 'TU HANGAR' : 'HANGAR · ' + h.nm}`, x, y - 11); g2.font = `11px ${MONO}`; g2.fillStyle = '#bfe8ff'; g2.fillText(fD(h.d), x, y + 2);
       g2.fillStyle = 'rgba(255,255,255,0.18)'; g2.fillRect(x - 60, y + 6, 120, 4); g2.fillStyle = f > 0.3 ? '#5dff8a' : '#ff4b3b'; g2.fillRect(x - 60, y + 6, 120 * f, 4);
     }
-    if (P.hp <= 0) { const mine = HG.get(myId); g2.font = `bold 15px ${MONO}`; g2.fillStyle = mine ? '#9fe' : '#ff8a6a'; g2.fillText(mine ? `HANGAR ${Math.round(mine.hp / mine.st.hpMax * 100)} % — reapareces en él en ${Math.max(0, Math.ceil((P.deadUntil - now) / 1000))} s` : (defeated ? 'HANGAR DESTRUIDO — DERROTA' : ''), W / 2, H / 2 - 20); }
+    if (P.hp <= 0) { const mine = HG.get(myId); g2.font = `bold 15px ${MONO}`; g2.fillStyle = mine ? '#9fe' : '#ff8a6a'; g2.fillText(mine ? `HANGAR ${Math.round(mine.hp / mine.st.hpMax * 100)} % — reapareces en él en ${Math.max(0, Math.ceil((P.deadUntil - now) / 1000))} s` : (defeated ? (typeof WAR !== 'undefined' && WAR.mine().length ? `HANGAR DESTRUIDO — reapareces en tu buque en ${Math.max(0, Math.ceil((P.deadUntil - now) / 1000))} s` : 'HANGAR DESTRUIDO — DERROTA') : ''), W / 2, H / 2 - 20); }
     g2.restore();
   }
   function targets() { // hangares enemigos como objetivos del radar (los que están por encima del horizonte y a tiro del radar)
@@ -402,10 +402,11 @@ const BASE = (() => {
     return out;
   }
   function atBase() { // compras, mejoras y cambios de nave solo aquí: tengo hangar y estoy a menos de 1,5 km de él (la plataforma mide 3 veces el modelo, BK) o estacionado en ella
+    if (typeof WAR !== 'undefined' && WAR.near()) return true; // junto a uno de mis buques de guerra también se compra y mejora
     const h = HG.get(myId); if (!h || !h.info) return false; const w = worldOf(h), p = S.foot.on ? S.shipPos : S.pos;
     return Math.hypot(w[0] - p[0], w[1] - p[1], w[2] - p[2]) < AT_BASE_KM || (S.park.on && S.park.b && S.park.b.n === h.b && Math.hypot(S.park.dir[0] - h.dir[0], S.park.dir[1] - h.dir[1], S.park.dir[2] - h.dir[2]) * bodyBy(h.b).R < AT_BASE_KM);
   }
   const AT_BASE_KM = 1.5;
   const targetPos = id => { const h = HG.get(id); if (!h || h.hp <= 0) return null; const w = worldOf(h); return [w[0] + h.dir[0] * 0.012, w[1] + h.dir[1] * 0.012, w[2] + h.dir[2] * 0.012]; };
-  return { model, targets, targetPos, atBase, mine: () => HG.get(myId) || null, canRespawn: () => !!HG.get(myId), sync, onEvent, onClaim, onLobby, LB, started: () => started, choose: show, spawnAt, frame, hit, hud, HG, worldOf, isHost: () => LB.adm === myId, booted: () => MM.booted, onWelcome, onRoomMsg, loading: () => loading };
+  return { model, targets, targetPos, atBase, mine: () => HG.get(myId) || null, canRespawn: () => !!HG.get(myId) || (typeof WAR !== 'undefined' && WAR.mine().length > 0), sync, onEvent, onClaim, onLobby, LB, started: () => started, choose: show, spawnAt, frame, hit, hud, HG, worldOf, isHost: () => LB.adm === myId, booted: () => MM.booted, onWelcome, onRoomMsg, loading: () => loading };
 })();

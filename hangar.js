@@ -52,6 +52,7 @@ function baseModel(ts, tw, shield) { // maqueta del hangar: EL MISMO modelo que 
   return g;
 }
 function renderBase() {
+  if (typeof WAR !== 'undefined') WAR.menu(); // secciones BUQUES y SATÉLITES (también sin hangar)
   const h = typeof BASE !== 'undefined' ? BASE.mine() : null;
   if (!h) { for (const id of ['towerStyles', 'baseUp', 'bStats', 'slotsRow']) $(id).innerHTML = ''; $('baseUp').innerHTML = '<div class="empty">Aún no tienes base: elige un planeta de origen al iniciar la partida.</div>'; return; }
   const pk = pvs && pvs.startsWith('up:') ? pvs.slice(3) : null, s = pk ? baseStats({ ...h.up, [pk]: ((h.up && h.up[pk]) || 0) + 1 }) : h.st, pvStyle = pvs && pvs.startsWith('style:') ? pvs.slice(6) : null, avg = h.tw ? h.tw.reduce((x, y) => x + y, 0) / 4 : s.twMax; // s = estadísticas mostradas (con la mejora en vista previa)
@@ -97,14 +98,15 @@ document.addEventListener('dblclick', e => { // comprar: doble clic en la tarjet
   else if (b.dataset.base) { const k = b.dataset.base, h = BASE.mine(); if (!h) return; const cost = BASE_UP[k].cost(((h.up && h.up[k]) || 0) + 1); if (!canPay(cost)) return say('Faltan recursos'); if (FOOT.spend(cost)) send({ t: 'bup', k }); }
   else if (b.dataset.buytw) { const k = b.dataset.buytw; if (!canPay(TOWER_STYLES[k].cost)) return say('Faltan recursos'); if (FOOT.spend(TOWER_STYLES[k].cost)) { towersUnlocked.add(k); saveSets(); refresh(); } }
   else if (b.dataset.tool) { if (FOOT.upTool(b.dataset.tool)) refresh(); }
+  else if (b.dataset.war && typeof WAR !== 'undefined') WAR.buy(b.dataset.war); // buque de guerra o satélite defensivo
 });
 $('go').onclick = () => {
-  if (typeof BASE !== 'undefined' && !BASE.mine()) return BASE.choose(); // sin hangar: primero elige planeta
+  if (typeof BASE !== 'undefined' && !BASE.mine() && !(typeof WAR !== 'undefined' && WAR.mine().length)) return BASE.choose(); // sin hangar: primero elige planeta
   renderer.domElement.requestPointerLock();
 };
 let sig = '', fitLast = '';
 function hangarFrame(now) { // llamado desde el bucle principal mientras el menú está abierto
-  const h = typeof BASE !== 'undefined' ? BASE.mine() : null, sg = JSON.stringify([typeof INV !== 'undefined' && INV, typeof TOOLS !== 'undefined' && TOOLS, h && [h.up, Math.round(h.hp), Math.round(h.sh), h.tw, h.ts], [...unlocked], [...towersUnlocked], mySpec.a, mySpec.t, lvlOf(mySpec.t), atBase(), tab]);
+  const h = typeof BASE !== 'undefined' ? BASE.mine() : null, sg = JSON.stringify([typeof INV !== 'undefined' && INV, typeof TOOLS !== 'undefined' && TOOLS, h && [h.up, Math.round(h.hp), Math.round(h.sh), h.tw, h.ts], [...unlocked], [...towersUnlocked], mySpec.a, mySpec.t, lvlOf(mySpec.t), atBase(), tab, typeof WAR !== 'undefined' && WAR.sig()]);
   if (fitLast !== ov.style.display + innerWidth + 'x' + innerHeight) { fitLast = ov.style.display + innerWidth + 'x' + innerHeight; fitMenu(); }
   if (sg !== sig) { sig = sg; sel.a = mySpec.a.slice(); sel.t = mySpec.t; refresh(); } // los recursos y la base cambian mientras juegas
   const P_ = tab === 'ship' ? PV : tab === 'base' ? BV : null;

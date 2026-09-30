@@ -128,6 +128,51 @@
     missile: { name: 'Misil guiado', dmg: 14, cd: 3.2,  spd: 6, col: 0xff8a3c, homing: true,  cost: { oro: 6, plata: 6 } },
     rail:    { name: 'Cañón de riel', dmg: 22, cd: 4.2, spd: 30, col: 0x9fe8ff, homing: false, cost: { diamante: 3, oro: 8 } },
   };
+  // ---------- ZONAS DE CONTROL (estilo mapa galáctico de Helldivers): se reclaman permaneciendo dentro; permiten desplegar buques de guerra y construir satélites ----------
+  // Una por planeta principal (esfera de CZ_PLANET_R km centrada en él, se mueve con su órbita) + zonas de espacio abierto fijas respecto a la estrella:
+  // 1 en el hueco entre cada par de órbitas y 3 en el hueco del cinturón. Separación garantizada: los huecos entre órbitas miden ≥ 1,3 M km, así que el centro
+  // de una zona abierta queda a ≥ 650 000 km de las órbitas vecinas > CZ_PLANET_R + CZ_OPEN_R: nunca se solapan. Determinista (sin Math.random).
+  const WARCFG = {
+    czPlanetR: 400000, czOpenR: 200000, // radios de las zonas (km)
+    capS: 50, // s para reclamar una zona en solitario (más rápido con tu buque dentro; baja si hay enemigos dentro o nadie)
+    exclHg: 150000, exclWs: 100000, // ZONA ROJA (no se puede desplegar): a menos de esto de un planeta con hangar enemigo o de un buque de guerra enemigo
+    ws: { max: 2, hp: 3000, sh: 1000, near: 8, range: 400, dmg: 6, cd: 1.1, spd: 30, cost: { oro: 40, diamante: 8, plata: 60, cobre: 100, piedra: 150 } }, // buque de guerra (~3,2 km); near: km que cuentan como «en base»
+    sat: { maxZone: 3, hp: 800, range: 1200, dmg: 20, cd: 4, spd: 50, radar: 1500000, cost: { oro: 8, plata: 20, cobre: 40, piedra: 60 } }, // satélite defensivo (~0,9 km): misiles guiados de largo alcance
+  };
+  const GREEK = ['Alfa', 'Beta', 'Gamma', 'Delta', 'Épsilon', 'Zeta', 'Eta', 'Theta', 'Iota', 'Kappa', 'Lambda', 'Mu'];
+  function genControlZones(sys) {
+    const r = mulberry((((sys.seed >>> 0) || 1) ^ 0x51c3a7) >>> 0 || 11), zs = [], mains = sys.bodies.map((b, i) => ({ b, i })).filter(x => x.b.k !== 'sun' && !x.b.parent), bl = sys.belt;
+    for (const { b, i } of mains) zs.push({ id: zs.length, name: 'Sector ' + b.n, anchor: i, off: [0, 0, 0], radius: WARCFG.czPlanetR, planet: b.n });
+    let g = 0; const orb = mains.map(x => x.b.a * DS); // radios de órbita, de dentro afuera
+    for (let k = 0; k + 1 < orb.length; k++) {
+      const mid = (orb[k] + orb[k + 1]) / 2, th0 = r() * 6.2832, belt = bl.i > orb[k] && bl.o < orb[k + 1];
+      for (let j = 0; j < (belt ? 3 : 1); j++) { const th = th0 + j * 2.0944; zs.push({ id: zs.length, name: (belt ? 'Cinturón ' : 'Vacío ') + GREEK[g++ % GREEK.length], anchor: 0, off: [Math.round(mid * Math.cos(th)), 0, Math.round(mid * Math.sin(th))], radius: WARCFG.czOpenR }); }
+    }
+    return zs;
+  }
+  function bodyPosAt(sys, i, t) { // posición de un cuerpo en el instante t (s de reloj real: igual que simT en game.js); la usa el servidor, que no simula las órbitas
+    const b = sys.bodies[i]; if (!b || !b.a) return [0, 0, 0];
+    const th = b.ph + 2 * Math.PI * t / (b.T * 86400);
+    if (b.parent) { const o = bodyPosAt(sys, sys.bodies.findIndex(x => x.n === b.parent), t); return [o[0] + b.a * Math.cos(th), 0, o[2] + b.a * Math.sin(th)]; }
+    return [b.a * DS * Math.cos(th), 0, b.a * DS * Math.sin(th)];
+  }
+  const add3 = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]], d3 = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+  function czAt(sys, zs, pos, t) { // índice de la zona de control que contiene ese punto (-1: ninguna)
+    for (const z of zs) if (d3(pos, add3(bodyPosAt(sys, z.anchor, t), z.off)) < z.radius) return z.id;
+    return -1;
+  }
+  // ¿Se puede desplegar en la zona zi con desplazamiento off (km, relativo a su cuerpo ancla)? '' = sí; si no, el motivo. hangars: [{ o, b (nombre del planeta) }] · ships: [{ o, a, off }]
+  function czCheck(sys, zs, zi, off, me, owner, hangars, ships, t) {
+    const z = zs[zi]; if (!z || !Array.isArray(off) || off.length !== 3 || !off.every(Number.isFinite)) return 'Zona no válida';
+    if (owner !== me) return 'Zona no reclamada por ti: reclámala primero (permanece dentro)';
+    if (d3(off, z.off) > z.radius) return 'Fuera de la zona';
+    const A = bodyPosAt(sys, z.anchor, t), P = add3(A, off), ab = sys.bodies[z.anchor];
+    if (z.anchor && Math.hypot(off[0], off[1], off[2]) < ab.R + 6 * (sys.atmo[ab.n] ? sys.atmo[ab.n].H : 0) + 3000) return 'Demasiado cerca del planeta';
+    for (const h of hangars) if (h.o !== me) { const bi = sys.bodies.findIndex(x => x.n === h.b); if (bi >= 0 && d3(P, bodyPosAt(sys, bi, t)) < WARCFG.exclHg) return 'ZONA ROJA: planeta con hangar enemigo cerca'; }
+    for (const s of ships) if (s.o !== me && d3(P, add3(bodyPosAt(sys, s.a, t), s.off)) < WARCFG.exclWs) return 'ZONA ROJA: buque de guerra enemigo cerca';
+    return '';
+  }
   root.genSystem = genSystem; root.genZones = genZones; root.wreckLoot = wreckLoot; root.BASE_UP = BASE_UP; root.baseStats = baseStats; root.TOWER_STYLES = TOWER_STYLES;
-  if (typeof module !== 'undefined') module.exports = { genSystem, genZones, wreckLoot, BASE_UP, baseStats, TOWER_STYLES };
+  root.WARCFG = WARCFG; root.genControlZones = genControlZones; root.bodyPosAt = bodyPosAt; root.czAt = czAt; root.czCheck = czCheck;
+  if (typeof module !== 'undefined') module.exports = { genSystem, genZones, wreckLoot, BASE_UP, baseStats, TOWER_STYLES, WARCFG, genControlZones, bodyPosAt, czAt, czCheck };
 })(typeof window !== 'undefined' ? window : globalThis);

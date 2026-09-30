@@ -27,7 +27,7 @@ const MAP = (() => {
     st.open = true; window.MAPOPEN = true; root.style.display = 'block'; document.exitPointerLock(); ensureRenderer(); initSys(); resize();
     st.dist = RTS_DIST; focusMe(true); st.t = performance.now(); requestAnimationFrame(loop); // al abrir: vista RTS cercana, centrada y siguiendo a tu nave
   }
-  function close() { st.open = false; window.MAPOPEN = false; root.style.display = 'none'; st.keys = {}; st.drag = null; st.sel = null; card.hidden = true; releaseRenderer(); renderer.domElement.requestPointerLock(); }
+  function close() { st.place = null; st.ghost = null; st.open = false; window.MAPOPEN = false; root.style.display = 'none'; st.keys = {}; st.drag = null; st.sel = null; card.hidden = true; releaseRenderer(); renderer.domElement.requestPointerLock(); }
   function resize() { c2.width = innerWidth; c2.height = innerHeight; if (pmr) { pmr.setSize(innerWidth, innerHeight, false); if (sys) { sys.cam.aspect = innerWidth / innerHeight; sys.cam.updateProjectionMatrix(); } } }
   addEventListener('resize', () => st.open && resize());
 
@@ -114,8 +114,11 @@ const MAP = (() => {
   }
   function renderCard() {
     const s = st.sel; if (!s) { card.hidden = true; return; }
-    const sig = JSON.stringify([s.kind, s.i, ZR, S.tgt]); if (sig === st.cardSig && !card.hidden) return; st.cardSig = sig; card.hidden = false;
+    const sig = JSON.stringify([s.kind, s.i, ZR, S.tgt, s.kind === 'cz' ? [WAR.CZS[s.i], WAR.look(s.i).txt] : 0]); if (sig === st.cardSig && !card.hidden) return; st.cardSig = sig; card.hidden = false;
     if (s.kind === 'zone') { card.innerHTML = zoneBlock(s.i); return; }
+    if (s.kind === 'cz') { const z = WAR.CZ[s.i], Z = WAR.CZS[s.i], L = WAR.look(s.i), c = WAR.czPos(s.i), d = Math.hypot(c[0] - S.pos[0], c[1] - S.pos[1], c[2] - S.pos[2]) - z.radius;
+      card.innerHTML = `<h3 style="color:${L.col}">${z.name}</h3><small>Zona de control · radio ${fD(z.radius)} · ${d > 0 ? fD(d) + ' hasta su borde' : 'estás dentro'}</small><div class="zb"><b style="color:${L.col}">${L.txt}</b><small>${Z.o ? 'Dueño: ' + WAR.nmOf(Z.o) : 'Sin dueño'}${Z.c ? ` · reclamando: ${WAR.nmOf(Z.c)} ${Z.p} %` : ''}</small>`
+        + `<small>Se reclama permaneciendo dentro ~${WARCFG.capS} s (con tu buque dentro, 1,5× más rápido; con enemigos dentro baja). Reclamada: puedes desplegar buques de guerra y construir satélites. ZONA ROJA (no se despliega): a menos de ${fD(WARCFG.exclHg)} de un planeta con hangar enemigo o de ${fD(WARCFG.exclWs)} de un buque enemigo.</small></div>`; return; }
     const b = bodies[s.i], d = Math.hypot(b.pos[0] - S.pos[0], b.pos[1] - S.pos[1], b.pos[2] - S.pos[2]) - b.R, zs = b.k === 'sun' ? [] : ZT.filter(t => t.zone.anchor === b.i), occ = BASES.find(x => x.body === b.n);
     card.innerHTML = `<h3>${b.n}</h3><small>${b.k === 'sun' ? 'estrella' : b.parent ? 'luna de ' + b.parent.n : (b.label || 'planeta')} · ${fD(Math.max(0, d))}${d > 1 ? ' · a 5 c: ' + fT(d / (5 * C)) : ''}${occ ? ' · hangar de ' + occ.owner : ''}</small>`
       + (zs.length ? zs.map(t => zoneBlock(t.zi)).join('') : '<div class="zb"><small>Sin zona de recursos cercana.</small></div>');
@@ -123,6 +126,7 @@ const MAP = (() => {
   function select(p) { // p: punto del mapa bajo el cursor
     if (!p) { st.sel = null; renderCard(); return; }
     if (p.kind !== 'tú') st.follow = false;
+    if (p.cz !== undefined) { const c = new THREE.Vector3(), rd = czDisp(p.cz, c); flyTo(c, Math.max(1.2, rd * 3)); st.sel = { kind: 'cz', i: p.cz }; renderCard(); return; } // zona de control: su ficha
     if (p.kind === 'zona') { const o = sys.zones[p.ref]; flyTo(o.p.clone(), Math.max(0.8, zoneR(o.t.zone) * 8)); st.sel = { kind: 'zone', i: p.ref }; }
     else if (p.body) { const o = sys.objs[p.ref]; flyTo(o.p.clone(), Math.max(1.4, dispR(o.b) * 5.5)); st.sel = { kind: 'body', i: p.ref }; }
     else if (p.kind === 'tú') { focusMe(false); st.sel = null; }
@@ -155,6 +159,7 @@ const MAP = (() => {
     pmr.render(sys.sc, cam); g.clearRect(0, 0, W, H);
     const pts = []; let hover = null, hd = 22; g.textAlign = 'left';
     const proj = v => { vTmp.copy(v).project(cam); if (vTmp.z > 1 || Math.abs(vTmp.x) > 1.05 || Math.abs(vTmp.y) > 1.05) return null; return [(vTmp.x * 0.5 + 0.5) * W, (-vTmp.y * 0.5 + 0.5) * H]; };
+    if (typeof WAR !== 'undefined') czDraw(pts, now); // zonas de control, buques, satélites y modo colocación (debajo de las etiquetas)
     const lab = (v, text, col, kind, pos, bold, extra) => { const s = proj(v); if (!s) return null; const [x, y] = s; g.font = `${bold ? 'bold ' : ''}12px ${MONO}`; g.fillStyle = col; g.strokeStyle = '#000'; g.lineWidth = 3; g.strokeText(text, x + 10, y + 4); g.fillText(text, x + 10, y + 4); const p = { x, y, n: text, kind, pos, ...extra }; pts.push(p); return p; };
     sys.objs.forEach((o, i) => { const b = o.b, top = o.p.clone(); top.y += dispR(b) * 1.15; const occ = BASES.find(x => x.body === b.n); lab(top, b.n + (occ ? '  ⌂ ' + occ.owner : ''), b.k === 'sun' ? '#ffd166' : '#dff4ff', b.k === 'sun' ? 'estrella' : b.parent ? 'luna' : (b.label || 'planeta').toLowerCase(), b.pos, false, { body: true, ref: i }); });
     sys.zones.forEach((o, i) => { // zonas: nombre + iconos con lo que queda
@@ -175,6 +180,52 @@ const MAP = (() => {
     g.textAlign = 'center'; g.fillText(`${st.follow ? 'SIGUIENDO TU NAVE · Rueda: acercar/alejar · ' : 'Rueda: acercar al cursor · '}Arrastrar: desplazarse · Clic der. + arrastrar: mirar · WASD/flechas: mover · E/Q: subir/bajar · Shift: rápido · Clic: ficha · C: centrar y seguir tu nave · M / Esc: cerrar`, W / 2, H - 18);
     st.hover = pts; if (st.sel) renderCard();
   }
+  // ---------- zonas de control (estilo mapa galáctico de Helldivers): hexágonos traslúcidos con borde grueso, etiqueta técnica y % de captura · modo colocación de buques y satélites ----------
+  const czC = new THREE.Vector3(), czV = new THREE.Vector3(), czRay = new THREE.Raycaster();
+  function czDisp(zi, out) { const z = WAR.CZ[zi]; if (z.anchor) { const b = bodies[z.anchor]; dpos(b, out); return dispR(b) * 2.6; } out.set(z.off[0] * K, 0, z.off[2] * K); return Math.max(0.3, z.radius * K * 1.6); } // centro y radio dibujados (el planeta va exagerado: su zona también)
+  function projU(v) { vTmp.copy(v).project(sys.cam); return vTmp.z > 1 ? null : [(vTmp.x * 0.5 + 0.5) * c2.width, (-vTmp.y * 0.5 + 0.5) * c2.height]; }
+  function czMap(zi, off, out) { const z = WAR.CZ[zi], rd = czDisp(zi, out); return out.set(out.x + (off[0] - z.off[0]) / z.radius * rd, out.y, out.z + (off[2] - z.off[2]) / z.radius * rd); } // punto real de la zona -> mapa (misma relación que el fantasma de colocación)
+  function czDraw(pts, now) {
+    const pl = st.place; let hov = null; g.save();
+    WAR.CZ.forEach((z, zi) => {
+      const rd = czDisp(zi, czC), L = WAR.look(zi), hp = [];
+      for (let k = 0; k < 6; k++) { const a = k * Math.PI / 3, q = projU(czV.set(czC.x + Math.cos(a) * rd, czC.y, czC.z + Math.sin(a) * rd)); if (!q) return; hp.push(q); }
+      g.beginPath(); hp.forEach(([x, y], k) => { if (k) g.lineTo(x, y); else g.moveTo(x, y); }); g.closePath();
+      const inside = g.isPointInPath(st.mx, st.my); if (inside && (!hov || rd < hov.rd)) hov = { zi, rd, c: czC.clone() };
+      g.globalAlpha = pl && inside ? 0.32 : L.cap ? 0.2 + 0.08 * Math.sin(now / 250) : 0.13; g.fillStyle = L.col; g.fill(); g.globalAlpha = 1;
+      g.lineWidth = 6; g.strokeStyle = '#050f1c'; g.stroke(); g.lineWidth = 2.5; g.strokeStyle = L.col; if (L.cap) { g.setLineDash([12, 8]); g.lineDashOffset = -now / 30; } g.stroke(); g.setLineDash([]);
+      const cx = hp.reduce((a, q) => a + q[0], 0) / 6, ty = Math.min(...hp.map(q => q[1])) - 24;
+      g.textAlign = 'center'; g.lineWidth = 3; g.strokeStyle = '#000'; g.fillStyle = L.col; g.font = `bold 11px ${MONO}`; const t1 = z.name.toUpperCase(); g.strokeText(t1, cx, ty); g.fillText(t1, cx, ty);
+      g.font = `10px ${MONO}`; g.strokeText(L.txt, cx, ty + 13); g.fillText(L.txt, cx, ty + 13);
+      if (L.cap) { g.fillStyle = '#050f1c'; g.fillRect(cx - 40, ty + 17, 80, 7); g.fillStyle = L.col; g.fillRect(cx - 39, ty + 18, 78 * L.p / 100, 5); }
+      pts.push({ x: cx, y: ty, n: z.name, kind: 'zona de control', pos: WAR.czPos(zi), cz: zi });
+    });
+    for (const s of WAR.all()) { // buques (rombo grande) y satélites (pequeño): azul míos, rojo ajenos
+      if (!s.w) continue; const q = projU(czMap(s.zi, s.off, czV)); if (!q) continue; const col = s.o === myId ? '#4db8ff' : '#ff3b30', r = s.k === 'W' ? 8 : 5;
+      g.beginPath(); g.moveTo(q[0], q[1] - r); g.lineTo(q[0] + r, q[1]); g.lineTo(q[0], q[1] + r); g.lineTo(q[0] - r, q[1]); g.closePath(); g.fillStyle = col; g.fill(); g.lineWidth = 3; g.strokeStyle = '#050f1c'; g.stroke();
+      pts.push({ x: q[0], y: q[1], n: `${s.k === 'W' ? 'Buque' : 'Satélite'} de ${WAR.nmOf(s.o)}`, kind: s.k === 'W' ? 'buque de guerra' : 'satélite defensivo', pos: s.w });
+    }
+    st.ghost = null;
+    if (pl) { // fantasma: sigue al cursor dentro de la zona; verde = válido, rojo = inválido (con el motivo)
+      if (hov) {
+        const z = WAR.CZ[hov.zi]; czRay.setFromCamera({ x: st.mx / c2.width * 2 - 1, y: -(st.my / c2.height) * 2 + 1 }, sys.cam); const o = czRay.ray.origin, d = czRay.ray.direction, t = Math.abs(d.y) > 1e-6 ? (hov.c.y - o.y) / d.y : -1;
+        if (t > 0) {
+          let ux = (o.x + d.x * t - hov.c.x) / hov.rd, uz = (o.z + d.z * t - hov.c.z) / hov.rd; const ul = Math.hypot(ux, uz); if (ul > 0.92) { ux *= 0.92 / ul; uz *= 0.92 / ul; }
+          const off = [Math.round(z.off[0] + ux * z.radius), 0, Math.round(z.off[2] + uz * z.radius)], why = WAR.check(pl.k, hov.zi, off), q = projU(czV.set(hov.c.x + ux * hov.rd, hov.c.y, hov.c.z + uz * hov.rd)), col = why ? '#ff3b30' : '#5dff8a';
+          st.ghost = { zi: hov.zi, off, why };
+          if (q) {
+            g.beginPath(); g.arc(q[0], q[1], 11 + 2 * Math.sin(now / 150), 0, 7); g.globalAlpha = 0.35; g.fillStyle = col; g.fill(); g.globalAlpha = 1; g.lineWidth = 5; g.strokeStyle = '#050f1c'; g.stroke(); g.lineWidth = 2; g.strokeStyle = col; g.stroke();
+            g.beginPath(); g.moveTo(q[0], q[1] - 6); g.lineTo(q[0] + 4, q[1] + 5); g.lineTo(q[0] - 4, q[1] + 5); g.closePath(); g.fillStyle = col; g.fill();
+            g.textAlign = 'center'; g.font = `bold 12px ${MONO}`; g.lineWidth = 4; g.strokeStyle = '#000'; g.fillStyle = col; const tx = why || `CLIC: ${pl.k === 'W' ? 'DESPLEGAR EL BUQUE' : 'CONSTRUIR EL SATÉLITE'} AQUÍ`; g.strokeText(tx, q[0], q[1] + 30); g.fillText(tx, q[0], q[1] + 30);
+          }
+        }
+      }
+      const W = c2.width, tx = `${pl.k === 'W' ? 'DESPLIEGUE · BUQUE DE GUERRA' : 'CONSTRUCCIÓN · SATÉLITE DEFENSIVO'} — clic en un punto de una zona AZUL (tuya) y segura · Esc: cancelar`; g.font = `bold 13px ${MONO}`; const w = g.measureText(tx).width + 36;
+      g.fillStyle = '#050f1c'; g.fillRect(W / 2 - w / 2 + 4, 52, w, 34); g.fillStyle = '#0b2233'; g.fillRect(W / 2 - w / 2, 48, w, 34); g.lineWidth = 3; g.strokeStyle = '#050f1c'; g.strokeRect(W / 2 - w / 2, 48, w, 34); g.textAlign = 'center'; g.fillStyle = '#ffd23f'; g.fillText(tx, W / 2, 70);
+    }
+    g.restore();
+  }
+  function placeClick() { const gh = st.ghost; if (!gh) return say('Elige un punto dentro de una zona de control tuya (azul)'); if (gh.why) return say(gh.why); send({ t: 'wdep', k: st.place.k, zi: gh.zi, off: gh.off }); close(); }
   function loop() { if (!st.open) return; requestAnimationFrame(loop); const now = performance.now(), dt = Math.min(0.1, (now - st.t) / 1000); st.t = now; drawSys(dt); }
 
   // ---------- entrada ----------
@@ -186,6 +237,7 @@ const MAP = (() => {
   }, true);
   addEventListener('keyup', e => { st.keys[e.code] = false; }, true);
   root.addEventListener('click', e => {
+    if (st.place) { if (!e.target.closest('.mc, .mh') && st.moved < 5) placeClick(); return; } // modo colocación: el clic confirma la posición
     const zb = e.target.closest('[data-z]'); if (zb) { const zi = +zb.dataset.z; S.tgt = bodies.length + zi; S.lockB = null; say(`Destino fijado: ${ZONES[zi].name} · Shift: salto luz`); st.cardSig = ''; renderCard(); return; } // fijar la zona como destino del salto luz
     if (e.target.closest('.mc, .mh') || st.moved >= 5 || !sys) return;
     let best = null, bd = 26; for (const p of st.hover) { const d = Math.hypot(p.x - e.clientX, p.y - e.clientY); if (d < bd) { bd = d; best = p; } }
@@ -207,5 +259,6 @@ const MAP = (() => {
     const k = (Math.abs(st.pos.y) + 0.5) * 0.0022, fx = -Math.sin(st.yaw), fz = -Math.cos(st.yaw); // desplazarse: se arrastra el plano del sistema
     st.pos.x += (-dx * -fz + dy * fx) * k; st.pos.z += (-dx * fx + dy * fz) * k;
   });
-  return { open, close, BASES, warm: b => bodyTex(b), st }; // warm: genera la textura base del cuerpo (pantalla de carga); la comparten la esfera del espacio, el radar y este mapa
+  const place = k => { st.place = { k }; st.sel = null; card.hidden = true; if (!st.open) open(); st.dist = 14; }; // abre el mapa en modo colocación de un buque (W) o de un satélite (S)
+  return { open, close, place, BASES, warm: b => bodyTex(b), st }; // warm: genera la textura base del cuerpo (pantalla de carga); la comparten la esfera del espacio, el radar y este mapa
 })();

@@ -125,6 +125,11 @@
       <div class="panel"><canvas id="bv" width="460" height="320"></canvas><div id="slotsRow"></div><div id="bStats"></div></div>
       <div class="panel sc"><div class="in"><b class="ph">BASE · doble clic = comprar</b><div id="baseUp" class="lst"></div></div></div>
     </div>
+    <div class="cols" style="grid-template-columns:1fr 1fr 300px;min-height:200px">
+      <div class="panel sc"><div class="in"><b class="ph">BUQUES DE GUERRA · doble clic = comprar</b><div id="warShips" style="flex:1;min-height:0;overflow-y:auto"></div></div></div>
+      <div class="panel sc"><div class="in"><b class="ph">SATÉLITES DEFENSIVOS · doble clic = comprar</b><div id="warSats" style="flex:1;min-height:0;overflow-y:auto"></div></div></div>
+      <div class="panel"><b class="ph">PUNTO DE REAPARICIÓN</b><div id="warSpawn"></div><div style="color:#7fb6d4;font-size:11px;margin-top:6px">Al morir: teclas 1-3 para elegir. Las zonas de control se reclaman permaneciendo dentro (mapa: M).</div></div>
+    </div>
   </div>
   
   <div id="tab-help" class="tab" style="display:none">
@@ -167,7 +172,7 @@
 <script>
 // Carga por etapas: la pantalla de arranque se pinta primero y avanza con cada módulo; al terminar se generan las texturas de los planetas (BOOT_DONE, en base.js)
 (function () {
-  const L = [['ships.js', 'Naves'], ['space.js', 'Asteroides'], ['planets.js', 'Terreno'], ['seed.js?token=' + encodeURIComponent((() => { try { return sessionStorage.getItem('token') || ''; } catch { return ''; } })()), 'Semilla del sistema'], ['sysgen.js', 'Generador de sistemas'], ['game.js', 'Generando el sistema solar'], ['base.js', 'Bases y salas'], ['bot.js', 'Bots'], ['neutral.js', 'Naves neutrales'],['icons.js', 'Iconos'], ['hangar.js', 'Menú'], ['tview.js', 'Radar'], ['foot.js', 'Personaje'], ['map.js', 'Mapas']];
+  const L = [['ships.js', 'Naves'], ['space.js', 'Asteroides'], ['planets.js', 'Terreno'], ['seed.js?token=' + encodeURIComponent((() => { try { return sessionStorage.getItem('token') || ''; } catch { return ''; } })()), 'Semilla del sistema'], ['sysgen.js', 'Generador de sistemas'], ['game.js', 'Generando el sistema solar'], ['base.js', 'Bases y salas'], ['bot.js', 'Bots'], ['neutral.js', 'Naves neutrales'],['icons.js', 'Iconos'], ['hangar.js', 'Menú'], ['tview.js', 'Radar'], ['foot.js', 'Personaje'], ['map.js', 'Mapas'], ['war.js', 'Flota y zonas de control']];
   const bar = document.querySelector('#boot .bb i'), st = document.querySelector('#boot .bs'); let i = 0;
   function next() {
     if (i >= L.length) { if (window.BOOT_DONE) window.BOOT_DONE(); return; }

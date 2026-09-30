@@ -3,12 +3,26 @@
 const http = require('http'), fs = require('fs'), path = require('path'), os = require('os');
 const { WebSocketServer } = require('ws');
 
-const FILES = { '/': 'index.html', '/index.html': 'index.html', '/menu.js': 'menu.js', '/blobatar.js': 'blobatar.js', '/three.min.js': 'three.min.js', '/sw.js': 'sw.js', '/manifest.webmanifest': 'manifest.webmanifest', '/icons/icon-192.png': 'icons/icon-192.png', '/icons/icon-512.png': 'icons/icon-512.png', '/icons/icon.svg': 'icons/icon.svg', '/game': 'game.html', '/game.html': 'game.html', '/game.js': 'game.js', '/ships.js': 'ships.js', '/space.js': 'space.js', '/planets.js': 'planets.js', '/tview.js': 'tview.js', '/foot.js': 'foot.js', '/map.js': 'map.js', '/hangar.js': 'hangar.js', '/sysgen.js': 'sysgen.js', '/base.js': 'base.js', '/bot.js': 'bot.js', '/neutral.js': 'neutral.js', '/icons.js': 'icons.js' };
-const { genSystem, genZones, wreckLoot, BASE_UP, baseStats, TOWER_STYLES } = require('./sysgen');
+const FILES = { '/': 'index.html', '/index.html': 'index.html', '/menu.js': 'menu.js', '/blobatar.js': 'blobatar.js', '/three.min.js': 'three.min.js', '/sw.js': 'sw.js', '/manifest.webmanifest': 'manifest.webmanifest', '/icons/icon-192.png': 'icons/icon-192.png', '/icons/icon-512.png': 'icons/icon-512.png', '/icons/icon.svg': 'icons/icon.svg', '/game': 'game.html', '/game.html': 'game.html', '/game.js': 'game.js', '/ships.js': 'ships.js', '/space.js': 'space.js', '/planets.js': 'planets.js', '/tview.js': 'tview.js', '/foot.js': 'foot.js', '/map.js': 'map.js', '/hangar.js': 'hangar.js', '/sysgen.js': 'sysgen.js', '/base.js': 'base.js', '/bot.js': 'bot.js', '/neutral.js': 'neutral.js', '/icons.js': 'icons.js', '/war.js': 'war.js' };
+const { genSystem, genZones, wreckLoot, BASE_UP, baseStats, TOWER_STYLES, WARCFG, genControlZones, czAt, czCheck } = require('./sysgen');
 const HG_HP = 600, TW_HP = 150; // hangar: dueño -> { o, nm, b (planeta), la, lo (rad), hp, tw[4], bot }: un planeta = un hangar
 const rooms = new Map(); // código -> sala: { code, name, seed, np, fillBots, phase, host (token), launchAt, SYS, SOLID, zones, zr, looted, members (token -> jugador), lobby (id de conexión -> jugador ya en la página del juego), hangars, botPlanets, players, bots, deadWrecks, nextBot }
 // zones: zonas de recursos de la semilla (sysgen.genZones); zr[z][k]: lo que queda del recurso dominante k de la zona z (el servidor es quien lo descuenta)
-const setSystem = (R, seed, np) => { R.seed = seed; R.np = np; R.SYS = genSystem(seed, np); R.SOLID = new Set(R.SYS.bodies.filter(b => b.k !== 'sun').map(b => b.n)); R.zones = genZones(R.SYS); R.zr = R.zones.map(z => z.dominant.map(d => d.budget)); };
+const setSystem = (R, seed, np) => { R.seed = seed; R.np = np; R.SYS = genSystem(seed, np); R.SOLID = new Set(R.SYS.bodies.filter(b => b.k !== 'sun').map(b => b.n)); R.zones = genZones(R.SYS); R.zr = R.zones.map(z => z.dominant.map(d => d.budget)); R.czs = genControlZones(R.SYS); R.cz = R.czs.map(() => ({ o: 0, c: 0, p: 0 })); R.wships = new Map(); R.sats = new Map(); R.wn = 0; };
+// zonas de control: cz[i] = { o: dueño (id de jugador, 0 = nadie), c: quien la está reclamando, p: progreso 0-100 } · wships/sats: id -> { id, o, zi, a (cuerpo ancla), off, hp, sh, shT, on }
+const dropWar = (R, id) => { for (const M of [R.wships, R.sats]) for (const [k, s] of [...M]) if (s.o === id) M.delete(k); for (const Z of R.cz) { if (Z.o === id) Z.o = 0; if (Z.c === id) { Z.c = 0; Z.p = 0; } } }; // el jugador se fue: sus zonas quedan libres
+function czTick(R, now) { // captura: un único jugador (vivo) dentro de una zona que no es suya la reclama; con su buque dentro va 1,5× más rápido. Con otro jugador dentro baja a la mitad; sin nadie, a un tercio
+  const dt = Math.min(0.5, (now - (R.czT || now)) / 1000), t = now / 1000, base = 100 / WARCFG.capS, inZ = R.czs.map(() => new Map()); R.czT = now;
+  for (const p of R.players.values()) if (p.hp > 0 && R.lobby.has(p.id)) { const zi = czAt(R.SYS, R.czs, p.pos, t); if (zi >= 0) inZ[zi].set(p.id, 1); }
+  for (const s of R.wships.values()) { const m = inZ[s.zi]; if (m.has(s.o)) m.set(s.o, m.get(s.o) + 1); }
+  R.cz.forEach((Z, zi) => {
+    const ids = [...inZ[zi].keys()];
+    if (ids.length === 1 && ids[0] !== Z.o) { if (Z.c !== ids[0]) { Z.c = ids[0]; Z.p = 0; } Z.p += base * (1 + 0.5 * (inZ[zi].get(ids[0]) - 1)) * dt; if (Z.p >= 100) { Z.o = Z.c; Z.c = 0; Z.p = 0; } }
+    else if (Z.c) { Z.p -= base * (ids.length > 1 ? 0.5 : ids.length ? 1 : 1 / 3) * dt; if (Z.p <= 0) { Z.c = 0; Z.p = 0; } }
+  });
+  for (const s of R.sats.values()) s.on = R.cz[s.zi].o === s.o ? 1 : 0; // si la zona cambia de dueño, sus satélites se desactivan (y vuelven si la recupera)
+  for (const s of R.wships.values()) if (now - s.shT > 6000 && s.sh < WARCFG.ws.sh) s.sh = Math.min(WARCFG.ws.sh, s.sh + 25 * dt); // escudo del buque: se regenera sin recibir golpes
+}
 const MINE_MAX = 60, MINE_GAP_MS = 100; // anti-trampas básico: unidades máximas de un recurso por asteroide y separación mínima entre extracciones de un mismo cliente
 const COLORS = [0x4db8ff, 0xff6a3c, 0x5dff8a, 0xffd23f, 0xd06bff, 0xf2f2f2, 0xff5fa2, 0x3ff0e0];
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.webmanifest': 'application/manifest+json', '.png': 'image/png', '.svg': 'image/svg+xml' };
@@ -101,7 +115,7 @@ wss.on('connection', ws => {
       if (m.t === 's' && num(m.pos, 3) && num(m.q, 4) && Number.isFinite(m.v) && Number.isFinite(m.hp)) R.players.set(id, stateOf(id, m, m.name));
       else if (m.t === 'bs' && id === admin(R) && Number.isInteger(m.i) && R.hangars.has(1000 + m.i) && num(m.pos, 3) && num(m.q, 4) && Number.isFinite(m.v) && Number.isFinite(m.hp)) R.bots.set(m.i, { ...stateOf(2000 + m.i, m, m.name), bot: 1 }); // estado de un bot IA (lo simula el cliente del anfitrión)
       else if (m.t === 'fire' && (m.kind === 'p' || m.kind === 'm') && num(m.pos, 3) && num(m.dir, 3) && typeof m.key === 'string') {
-        const t = m.tgt && (m.tgt.k === 'p' || m.tgt.k === 'w' || m.tgt.k === 'h' || m.tgt.k === 'n') && Number.isInteger(m.tgt.id) ? { k: m.tgt.k, id: m.tgt.id } : null;
+        const t = m.tgt && (m.tgt.k === 'p' || m.tgt.k === 'w' || m.tgt.k === 'h' || m.tgt.k === 'n' || m.tgt.k === 'W' || m.tgt.k === 'S') && Number.isInteger(m.tgt.id) ? { k: m.tgt.k, id: m.tgt.id } : null;
         const ow = id === admin(R) && Number.isInteger(m.ow) && m.ow >= 2000 && m.ow < 4000 ? m.ow : undefined; // disparo de un bot (2000+) o de una nave neutral (3000+): solo el anfitrión puede atribuirlo
         relay(R, id, { t: 'fire', key: m.key.slice(0, 24), kind: m.kind, pos: m.pos, dir: m.dir, tgt: t, dmg: Number.isFinite(m.dmg) ? Math.max(1, Math.min(30, m.dmg)) : 8, tw: m.tw ? 1 : 0, spd: Number.isFinite(m.spd) ? Math.max(0.1, Math.min(50, m.spd)) : 0, rb: Number.isInteger(m.rb) ? m.rb : -1, rp: num(m.rp, 3) ? m.rp : null, ow });
       } else if (m.t === 'hit' && Number.isInteger(m.by) && num(m.pos, 3) && Number.isFinite(m.dmg) && typeof m.key === 'string')
@@ -127,6 +141,16 @@ wss.on('connection', ws => {
         if (h.sh > 0) { const a = Math.min(h.sh, dm); h.sh -= a; dm -= a; } // el escudo de la base absorbe las balas
         if (dm <= 0) { /* todo absorbido */ } else if (Number.isInteger(m.tw) && m.tw >= 0 && m.tw < 4) h.tw[m.tw] = Math.max(0, h.tw[m.tw] - dm); else h.hp -= dm; // golpe a una torreta o al hangar
         if (h.hp <= 0) { R.hangars.delete(m.o); const x = R.lobby.get(m.o); if (x) { x.b = null; x.siteOk = false; } R.bots.delete(m.o - 1000); bcast(R, { ev: { t: 'hdead', o: m.o, by: id, id } }); }
+      } else if (m.t === 'wdep' && e && R.phase === 'playing' && (m.k === 'W' || m.k === 'S') && Number.isInteger(m.zi) && m.zi >= 0 && m.zi < R.czs.length && num(m.off, 3)) { // desplegar un buque de guerra (W) o construir un satélite (S) en una zona propia y segura (los recursos ya los gastó el cliente, como 'bup')
+        const W = m.k === 'W', M = W ? R.wships : R.sats, mine = [...M.values()].filter(s => s.o === id);
+        const why = (W ? (mine.length >= WARCFG.ws.max ? `Máximo ${WARCFG.ws.max} buques desplegados` : '') : (mine.filter(s => s.zi === m.zi).length >= WARCFG.sat.maxZone ? `Máximo ${WARCFG.sat.maxZone} satélites por zona` : ''))
+          || czCheck(R.SYS, R.czs, m.zi, m.off, id, R.cz[m.zi].o, [...R.hangars.values()], [...R.wships.values()], Date.now() / 1000);
+        if (!why) { const sid = (W ? 5000 : 6000) + (R.wn++ % 1000); M.set(sid, { id: sid, o: id, zi: m.zi, a: R.czs[m.zi].anchor, off: m.off.map(Math.round), hp: W ? WARCFG.ws.hp : WARCFG.sat.hp, sh: W ? WARCFG.ws.sh : 0, shT: 0, on: 1 }); }
+        send(ws, { wok: why ? 0 : 1, k: m.k, why });
+      } else if (m.t === 'wh' && e && (m.k === 'W' || m.k === 'S') && Number.isInteger(m.i) && Number.isFinite(m.dmg)) { // daño a un buque de guerra o a un satélite de otro jugador (lo decide el servidor, como 'hh')
+        const M = m.k === 'W' ? R.wships : R.sats, s = M.get(m.i);
+        if (s && s.o !== id) { let dm = clampN(m.dmg, 1, 60); s.shT = Date.now(); if (s.sh > 0) { const a = Math.min(s.sh, dm); s.sh -= a; dm -= a; } s.hp -= dm;
+          if (s.hp <= 0) { M.delete(m.i); bcast(R, { ev: { t: 'wdead', k: m.k, i: m.i, o: s.o, by: id, id } }); } }
       } else if (m.t === 'wreck' && Number.isInteger(m.id) && m.id >= 0 && m.id < WRECKS && !R.deadWrecks.has(m.id)) {
         R.deadWrecks.set(m.id, Date.now() + WRECK_RESPAWN_MS);
         relay(R, id, { t: 'wreck', w: m.id, by: id });
@@ -149,7 +173,7 @@ wss.on('connection', ws => {
     const R = ws.R, mem = R && ws.token && R.members.get(ws.token); if (!R) return; R.players.delete(id); // (R.bots va por índice de bot, no por id de jugador)
     if (mem) {
       if (R.phase === 'lobby') { if (mem.id === id) dropMember(R, ws.token); } // salir de la sala de espera
-      else if (R.phase !== 'launching' && mem.id === id) { R.lobby.delete(id); R.members.delete(ws.token); if (R.hangars.delete(id)) bcast(R, { ev: { t: 'hgone', o: id, id } }); } // desconexión durante la partida
+      else if (R.phase !== 'launching' && mem.id === id) { R.lobby.delete(id); R.members.delete(ws.token); dropWar(R, id); if (R.hangars.delete(id)) bcast(R, { ev: { t: 'hgone', o: id, id } }); } // desconexión durante la partida
     } else R.lobby.delete(id);
   });
 });
@@ -165,8 +189,9 @@ setInterval(() => {
       if (R.hangars.size && need.every(x => x.ld >= 100)) R.phase = 'playing'; // todos cargados al 100 %: empieza
     }
     for (const [w, t] of R.deadWrecks) if (t < now) R.deadWrecks.delete(w);
+    if (R.phase === 'playing') czTick(R, now);
     for (const h of R.hangars.values()) { const st = baseStats(h.up || {}); if (h.up && h.up.sh && now - h.shT > 5000 && h.sh < st.shMax) h.sh = Math.min(st.shMax, h.sh + 20 * 0.066); } // el escudo de la base se regenera sin recibir golpes
-    const msg = JSON.stringify({ players: [...R.players.values(), ...R.bots.values()].filter(Boolean), wd: [...R.deadWrecks.keys()], wl: [...R.looted], zr: R.zr, hg: [...R.hangars.values()].map(h => ({ o: h.o, nm: h.nm, b: h.b, la: h.la, lo: h.lo, hp: Math.round(h.hp), sh: Math.round(h.sh), up: h.up, ts: h.ts, tw: h.tw, bot: h.bot })), bl: [...R.botPlanets.values()], nv: R.phase === 'playing' ? R.nv || [] : [], ph: R.phase, adm: admin(R), rm: publicRoom(R), seed: R.seed, lb: [...R.lobby].map(([i, e]) => ({ id: i, nm: e.nm, b: e.b, ready: true, ld: e.ld ?? 0 })) });
+    const msg = JSON.stringify({ players: [...R.players.values(), ...R.bots.values()].filter(Boolean), wd: [...R.deadWrecks.keys()], wl: [...R.looted], zr: R.zr, hg: [...R.hangars.values()].map(h => ({ o: h.o, nm: h.nm, b: h.b, la: h.la, lo: h.lo, hp: Math.round(h.hp), sh: Math.round(h.sh), up: h.up, ts: h.ts, tw: h.tw, bot: h.bot })), bl: [...R.botPlanets.values()], nv: R.phase === 'playing' ? R.nv || [] : [], ph: R.phase, adm: admin(R), rm: publicRoom(R), seed: R.seed, cz: R.cz.map(z => [z.o, z.c, Math.round(z.p)]), wb: [...R.wships.values()].map(s => [s.id, s.o, s.zi, s.a, ...s.off, Math.round(s.hp), Math.round(s.sh)]), sa: [...R.sats.values()].map(s => [s.id, s.o, s.zi, s.a, ...s.off, Math.round(s.hp), s.on]), lb: [...R.lobby].map(([i, e]) => ({ id: i, nm: e.nm, b: e.b, ready: true, ld: e.ld ?? 0 })) });
     for (const c of wss.clients) if (c.R === R && c.readyState === 1) c.send(msg);
   }
 }, 66);

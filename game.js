@@ -98,7 +98,7 @@ const nrm = a => { const l = len(a) || 1; return [a[0] / l, a[1] / l, a[2] / l];
 
 updateBodies();
 function spawn() { // en la plataforma de tu hangar; sin hangar (menú inicial), junto al primer planeta mirándolo
-  const hg = typeof BASE !== 'undefined' && BASE.mine(); if (hg && BASE.spawnAt(hg)) return;
+  const hg = typeof BASE !== 'undefined' && BASE.mine(); if (typeof WAR !== 'undefined' && WAR.spawn(!hg)) return; if (hg && BASE.spawnAt(hg)) return; // en un buque de guerra si lo elegiste (o si no tienes base)
   const e = bodies[1], sd = nrm([-e.pos[0], 0, -e.pos[2]]), r = e.R * 3.5;
   S.pos = [e.pos[0] + sd[0] * r, e.pos[1] + e.R * 0.6, e.pos[2] + sd[2] * r];
   S.pos = S.pos.map(c => c + (Math.random() - 0.5) * 2000);
@@ -410,7 +410,7 @@ function fireMissile() {
 }
 applyLoadout(mySpec, false);
 const targetSpeed = t => t.k === 'p' ? (t.id === myId ? S.ve : remotes.get(t.id)?.v || (typeof BOT !== 'undefined' ? BOT.speed(t.id) : 0)) : t.k === 'n' && typeof NEU !== 'undefined' ? NEU.speed(t.id) : 0;
-function targetPos(t) { if (t.k === 'h') return typeof BASE !== 'undefined' ? BASE.targetPos(t.id) : null; if (t.k === 'p') return t.id === myId ? S.pos : remotes.get(t.id)?.apos || (typeof BOT !== 'undefined' ? BOT.pos(t.id) : null); if (t.k === 'n') return typeof NEU !== 'undefined' ? NEU.pos(t.id) : null; const w = wrecks[t.id]; return w && !dead.has(w.i) ? w.pos : null; }
+function targetPos(t) { if (t.k === 'h') return typeof BASE !== 'undefined' ? BASE.targetPos(t.id) : null; if (t.k === 'p') return t.id === myId ? S.pos : remotes.get(t.id)?.apos || (typeof BOT !== 'undefined' ? BOT.pos(t.id) : null); if (t.k === 'n') return typeof NEU !== 'undefined' ? NEU.pos(t.id) : null; if (t.k === 'W' || t.k === 'S') return typeof WAR !== 'undefined' ? WAR.pos(t.k, t.id) : null; const w = wrecks[t.id]; return w && !dead.has(w.i) ? w.pos : null; }
 
 function applyLoadout(spec, reset = true) {
   mySpec = spec; const st = statsOf(spec, lvlOf(spec.t).a); scene.remove(ship); ship = makeShip(spec); scene.add(ship); // con los puntos de nivel de ESTA nave
@@ -435,6 +435,7 @@ ws.onmessage = ev => {
   if (m.id) { myId = m.id; window.__welcome = m; if (typeof BASE !== 'undefined' && BASE.booted()) BASE.onWelcome(m); return; }
   if ((m.created !== undefined || m.joined !== undefined || m.mismatch !== undefined || m.room !== undefined || m.resumed !== undefined) && typeof BASE !== 'undefined') return void BASE.onRoomMsg(m);
   if (m.claim !== undefined) return void (typeof BASE !== 'undefined' && BASE.onClaim(m.claim));
+  if (m.wok !== undefined) return void (typeof WAR !== 'undefined' && WAR.onOk(m)); // respuesta al despliegue de un buque o satélite
   if (m.mined) { // respuesta del servidor a una extracción (asteroide de zona o casco): solo ahora se suman los recursos concedidos
     const got = Array.isArray(m.got) ? m.got : []; for (const it of got) if (RES[it.type] && it.n > 0) FOOT.add(it.type, it.n);
     if (Number.isInteger(m.z) && ZR[m.z]) { for (const it of got) { const k = ZONES[m.z].dominant.findIndex(d => d.type === it.type); if (k >= 0) ZR[m.z][k] = Math.max(0, ZR[m.z][k] - it.n); } if (!got.length) say(`${ZONES[m.z].name}: ya no queda nada de eso`); } // se descuenta ya; el tick lo confirma
@@ -451,6 +452,7 @@ ws.onmessage = ev => {
     else if (e.t === 'nhit' && typeof NEU !== 'undefined') NEU.onHit(e);
     else if (e.t === 'wreck' && e.by !== myId) boom(wrecks[e.w].pos, 80);
     else if ((e.t === 'hdead' || e.t === 'hgone') && typeof BASE !== 'undefined') BASE.onEvent(e);
+    else if (e.t === 'wdead' && typeof WAR !== 'undefined') WAR.onEvent(e);
     return;
   }
   if (m.hg && typeof BASE !== 'undefined') BASE.sync(m.hg);
@@ -458,6 +460,7 @@ ws.onmessage = ev => {
   if (Array.isArray(m.zr) && m.zr.length === ZONES.length) ZR = m.zr; // lo que queda en cada zona (igual para todos los de la sala)
   if (Array.isArray(m.wl)) LOOTED = new Set(m.wl);
   if (Array.isArray(m.nv) && typeof NEU !== 'undefined') NEU.sync(m.nv); // naves neutrales (las simula el anfitrión)
+  if (typeof WAR !== 'undefined') WAR.sync(m); // zonas de control, buques de guerra y satélites
   const wd = new Set(m.wd); for (const w of wrecks) if (dead.has(w.i) && !wd.has(w.i)) w.hp = WRECK_HP;
   dead.clear(); wd.forEach(i => dead.add(i));
   const seen = new Set();
@@ -563,7 +566,7 @@ function attackHud(W, H, now, cm) {
   const dt = now - ATK.t; if (dt > 2600) return; const k = 1 - dt / 2600, pulse = 0.5 + 0.5 * Math.sin(now / 110);
   const gr = g2.createRadialGradient(W / 2, H / 2, H * 0.32, W / 2, H / 2, H * 0.85); gr.addColorStop(0, 'rgba(255,0,0,0)'); gr.addColorStop(1, `rgba(255,20,10,${(0.25 + 0.3 * pulse) * k})`); g2.fillStyle = gr; g2.fillRect(0, 0, W, H); // viñeta roja pulsante
   g2.save(); g2.textAlign = 'center'; g2.globalAlpha = Math.min(1, k * 2.2); g2.font = 'bold 22px ui-monospace,Consolas,monospace'; g2.lineWidth = 5; g2.strokeStyle = '#000'; g2.fillStyle = pulse > 0.4 ? '#ff5a4a' : '#fff';
-  const tx = ATK.kind === 't' ? `⚠ TORRETAS DE ${ATK.name.toUpperCase()} TE ESTÁN DISPARANDO ⚠` : ATK.kind === 'p' ? `⚠ ${ATK.name.toUpperCase()} TE ESTÁ ATACANDO ⚠` : '⚠ TU BASE ESTÁ BAJO ATAQUE ⚠'; g2.strokeText(tx, W / 2, 132); g2.fillText(tx, W / 2, 132);
+  const tx = ATK.kind === 's' ? `⚠ ${ATK.name.toUpperCase()} TE ESTÁ DISPARANDO ⚠` : ATK.kind === 't' ? `⚠ TORRETAS DE ${ATK.name.toUpperCase()} TE ESTÁN DISPARANDO ⚠` : ATK.kind === 'p' ? `⚠ ${ATK.name.toUpperCase()} TE ESTÁ ATACANDO ⚠` : '⚠ TU BASE ESTÁ BAJO ATAQUE ⚠'; g2.strokeText(tx, W / 2, 132); g2.fillText(tx, W / 2, 132);
   if (ATK.pos) { // flecha en el borde hacia donde está el atacante
     const v = view(ATK.pos); cm.set(v.x, v.y, v.z).applyMatrix4(camera.matrixWorldInverse); let dx = cm.x, dy = -cm.y; const l = Math.hypot(dx, dy) || 1; dx /= l; dy /= l; const R = Math.min(W, H) * 0.38, a = Math.atan2(dy, dx);
     g2.translate(W / 2 + dx * R, H / 2 + dy * R); g2.rotate(a); g2.fillStyle = `rgba(255,50,30,${0.6 + 0.4 * pulse})`; g2.strokeStyle = '#fff'; g2.lineWidth = 3; g2.beginPath(); g2.moveTo(22, 0); g2.lineTo(-14, -16); g2.lineTo(-6, 0); g2.lineTo(-14, 16); g2.closePath(); g2.fill(); g2.stroke();
@@ -740,7 +743,7 @@ function drawHud(fwd, now, targets) {
   const nearest = Math.min(Infinity, ...targets.filter(t => t.kind === 'p').map(t => t.dist)); // enemigo más cercano (solo naves de jugadores)
   for (const t of targets) {
     if ((t.kind === 'w' && t.dist > 300000) || losBlocked(t)) continue; // sin línea de visión (planeta de por medio) no se dibuja
-    const lock = t === lockT, sel = t === S.tsel, col = sel ? '#ffd23f' : t.kind === 'n' ? (t.hostile ? (lock ? '#ff2a2a' : '#ff5a4a') : (lock ? '#ffee55' : '#c8ff5d')) : t.kind === 'p' || t.kind === 'h' ? (lock ? '#ff2a2a' : '#ff8a4c') : (lock ? '#ffee55' : '#5dff8a'); // neutrales: verde amarillento (rojo si están hostiles); elegida con B: amarillo
+    const lock = t === lockT, sel = t === S.tsel, col = sel ? '#ffd23f' : t.kind === 'n' ? (t.hostile ? (lock ? '#ff2a2a' : '#ff5a4a') : (lock ? '#ffee55' : '#c8ff5d')) : t.kind === 'p' || t.kind === 'h' || t.kind === 'W' || t.kind === 'S' ? (lock ? '#ff2a2a' : '#ff8a4c') : (lock ? '#ffee55' : '#5dff8a'); // neutrales: verde amarillento (rojo si están hostiles); elegida con B: amarillo
     tv.copy(t.grp.position).project(camera);
     let x = (tv.x * 0.5 + 0.5) * W, y = (-tv.y * 0.5 + 0.5) * H; const behind = tv.z > 1;
     if (behind) { x = W - x; y = H - y; }
@@ -756,20 +759,20 @@ function drawHud(fwd, now, targets) {
       for (const sx of [-1, 1]) for (const sy of [-1, 1]) { g2.moveTo(x + sx * s, y + sy * (s - c)); g2.lineTo(x + sx * s, y + sy * s); g2.lineTo(x + sx * (s - c), y + sy * s); }
       g2.stroke();
       const bw = 68, bx = x - bw / 2, by = y - s - 13, hbar = (yy, f, c) => { g2.fillStyle = 'rgba(0,0,0,0.6)'; g2.fillRect(bx - 1, yy - 1, bw + 2, 7); g2.fillStyle = c; g2.fillRect(bx, yy, bw * Math.max(0, Math.min(1, f)), 5); };
-      if (t.kind === 'p' || t.kind === 'h' || t.kind === 'n') { hbar(by - 8, t.sh / 100, '#4db8ff'); hbar(by, t.hp / 100, t.hp > 25 ? '#5dff8a' : '#ff4b3b'); } else hbar(by, t.hp / 100, t.hp > 40 ? '#5dff8a' : '#ff8a4c'); // vida sobre el objetivo
+      if (t.kind === 'p' || t.kind === 'h' || t.kind === 'n' || t.kind === 'W') { hbar(by - 8, t.sh / 100, '#4db8ff'); hbar(by, t.hp / 100, t.hp > 25 ? '#5dff8a' : '#ff4b3b'); } else hbar(by, t.hp / 100, t.hp > 40 ? '#5dff8a' : '#ff8a4c'); // vida sobre el objetivo
       if (sel) { g2.beginPath(); g2.moveTo(x, y - s - 24); g2.lineTo(x + s + 10, y); g2.lineTo(x, y + s + 24); g2.lineTo(x - s - 10, y); g2.closePath(); g2.stroke(); } // rombo de la nave elegida con B
       g2.fillStyle = col; g2.fillText(t.kind === 'n' ? `${t.hostile ? 'HOSTIL' : 'NEUTRAL'} · ${shipTag(t)} · ${fD(t.dist)}` : t.kind === 'p' ? `${t.name} · ${shipTag(t)} · ${fD(t.dist)}` : `${t.name} · ${fD(t.dist)}`, x, y + s + 14);
     }
   }
   tv.set(fwd.x, fwd.y, fwd.z).multiplyScalar(1000).project(camera);
   const ax = (tv.x * 0.5 + 0.5) * W, ay = (-tv.y * 0.5 + 0.5) * H,
-        cone = Math.tan(CONE) / Math.tan(camera.fov * Math.PI / 360) * H / 2 * (1 + 0.08 * Math.max(0, 1 - nearest / 2000) * Math.sin(now / 140)), hot = lockT && (lockT.kind === 'p' || lockT.kind === 'h');
+        cone = Math.tan(CONE) / Math.tan(camera.fov * Math.PI / 360) * H / 2 * (1 + 0.08 * Math.max(0, 1 - nearest / 2000) * Math.sin(now / 140)), hot = lockT && (lockT.kind === 'p' || lockT.kind === 'h' || lockT.kind === 'W' || lockT.kind === 'S');
   g2.strokeStyle = hot ? '#ff2a2a' : lockT ? '#ffee55' : '#7fe8ff'; g2.beginPath(); g2.arc(ax, ay, 3, 0, 7);
   g2.moveTo(ax - 14, ay); g2.lineTo(ax - 6, ay); g2.moveTo(ax + 6, ay); g2.lineTo(ax + 14, ay); g2.moveTo(ax, ay - 14); g2.lineTo(ax, ay - 6); g2.moveTo(ax, ay + 6); g2.lineTo(ax, ay + 14); g2.stroke();
   g2.setLineDash([4, 6]); g2.beginPath(); g2.arc(ax, ay, cone, 0, 7); g2.stroke(); g2.setLineDash([]);
   g2.font = 'bold 22px ui-monospace,Consolas,monospace';
   if (hot) {
-    g2.fillStyle = '#ff2a2a'; if (Math.floor(now / 250) % 2) g2.fillText(lockT.kind === 'h' ? '⚠ BASE ENEMIGA FIJADA — DISPAROS GUIADOS ⚠' : '⚠ BLANCO FIJADO — IMPACTO GARANTIZADO ⚠', W / 2, 70);
+    g2.fillStyle = '#ff2a2a'; if (Math.floor(now / 250) % 2) g2.fillText(lockT.kind === 'h' ? '⚠ BASE ENEMIGA FIJADA — DISPAROS GUIADOS ⚠' : lockT.kind === 'W' || lockT.kind === 'S' ? '⚠ ESTRUCTURA ENEMIGA FIJADA — DISPAROS GUIADOS ⚠' : '⚠ BLANCO FIJADO — IMPACTO GARANTIZADO ⚠', W / 2, 70);
     if (now - lastBeep > 70 + 230 * Math.min(1, lockT.dist / RANGE)) { lastBeep = now; beep(); } // más cerca = pitido más rápido
   } else if (lockT) { g2.fillStyle = '#ffee55'; g2.fillText(lockT.kind === 'n' ? `NAVE ${lockT.hostile ? 'HOSTIL' : 'NEUTRAL'} FIJADA — disparos guiados` : 'CASCO FIJADO — misil listo', W / 2, 70); }
   g2.fillStyle = '#ffd23f';
@@ -897,7 +900,7 @@ function frame(now) {
     if (P.turb > 0.05 && audio && now - lastRumble > 90) { lastRumble = now; noise(0.14, 0.03 + 0.07 * Math.min(1, P.turb), 500, 90); } // retumbar
   }
 
-  FOOT.frame(dt, now); FOOT.tickStay(dt); if (typeof BASE !== 'undefined') BASE.frame(dt, now); if (typeof BOT !== 'undefined') BOT.frame(dt, now); if (typeof NEU !== 'undefined') NEU.frame(dt, now); // modo a pie: caminar, recolectar y colocar al astronauta
+  FOOT.frame(dt, now); FOOT.tickStay(dt); if (typeof BASE !== 'undefined') BASE.frame(dt, now); if (typeof BOT !== 'undefined') BOT.frame(dt, now); if (typeof NEU !== 'undefined') NEU.frame(dt, now); if (typeof WAR !== 'undefined') WAR.frame(dt); // modo a pie: caminar, recolectar y colocar al astronauta
 
   // render con origen flotante + compresión de distancias enormes (mantiene el tamaño angular real)
   for (const b of bodies) {
@@ -941,6 +944,7 @@ function frame(now) {
   }
   if (typeof BASE !== 'undefined') for (const t of BASE.targets()) targets.push(t); // las bases enemigas también son objetivos: se pueden fijar y guiar los disparos hacia ellas
   if (typeof NEU !== 'undefined') for (const t of NEU.targets()) targets.push(t); // naves neutrales
+  if (typeof WAR !== 'undefined') for (const t of WAR.targets()) targets.push(t); // buques de guerra y satélites enemigos
   if (typeof BOT !== 'undefined') for (const t of BOT.targets()) targets.push(t); // anfitrión: sus propios bots (antes se veían pero no eran objetivo: naves fantasma)
   for (const w of wrecks) {
     w.pos = [w.parent.pos[0] + w.off[0], w.parent.pos[1] + w.off[1], w.parent.pos[2] + w.off[2]];
@@ -990,9 +994,10 @@ function frame(now) {
     if (p.fromSpace && airK(p.pos) > 0.02) { killProj(key); continue; } // viene del espacio: se consume al entrar en la atmósfera
     const ao = fields.active.find(o => segDist(old, p.pos, o.pos) < o.r); if (ao) { puff(p.pos, 2, 0xffd090, 0.4, 0.01); killProj(key); if (p.owner === myId && !p.bot) hitAsteroid(ao, p.dmg); continue; } // extraer recursos de asteroides
     if ((p.owner === myId || (p.owner >= 2000 && p.owner < 3000)) && typeof BASE !== 'undefined' && BASE.hit(old, p.pos, p)) { killProj(key); continue; } // golpe al hangar de otro jugador (las neutrales no atacan bases)
+    if (p.owner === myId && typeof WAR !== 'undefined' && WAR.hit(old, p.pos, p)) { killProj(key); continue; } // golpe a un buque de guerra o satélite ajeno (lo decide el servidor)
     const gi = planets.impact(old, p.pos); if (gi) { killProj(key); if (len(sub(gi, S.pos)) < 200) boom(gi, p.kind === 'm' ? 0.06 : 0.012); FOOT.splash(gi, p.kind); continue; } // el proyectil golpea el suelo: explosión y daño de área a los objetos
-    if (p.owner !== myId && !p.vis && alive && segDist(old, p.pos, S.pos) < (p.spd !== undefined || ak > 0.02 ? 0.04 : HIT_R)) { // en el aire y los disparos de torreta: radio real de la nave (40 m); en el espacio, el radio grande de siempre // el impacto lo decide la víctima
-      killProj(key); if (p.owner < 0 && typeof BASE !== 'undefined') { const th = BASE.HG.get(-p.owner); attackAlert('t', th ? th.nm : 'un enemigo', th ? BASE.worldOf(th) : null); } else if (p.owner !== myId) attackAlert('p', ownerName(p.owner), ownerPos(p.owner)); hurt(p.dmg, p.dir, now); send({ t: 'hit', by: p.owner, key, dmg: p.dmg, pos: S.pos, dead: P.hp <= 0, sh: P.sh });
+    if (p.owner !== myId && p.owner !== -myId && !p.vis && alive && segDist(old, p.pos, S.pos) < (p.spd !== undefined || ak > 0.02 ? 0.04 : HIT_R)) { // en el aire y los disparos de torreta: radio real de la nave (40 m); en el espacio, el radio grande de siempre // el impacto lo decide la víctima
+      killProj(key); if (p.owner < 0 && typeof BASE !== 'undefined') { const th = BASE.HG.get(-p.owner); attackAlert(p.sn ? 's' : 't', p.sn || (th ? th.nm : 'un enemigo'), th && !p.sn ? BASE.worldOf(th) : ATK.pos); } else if (p.owner !== myId) attackAlert('p', ownerName(p.owner), ownerPos(p.owner)); hurt(p.dmg, p.dir, now); send({ t: 'hit', by: p.owner, key, dmg: p.dmg, pos: S.pos, dead: P.hp <= 0, sh: P.sh });
       continue;
     }
     if (!p.vis && p.bot === undefined && p.owner > -1000 && typeof BOT !== 'undefined' && BOT.hit(old, p.pos, p, key, ak)) { killProj(key); continue; } // impacto en un bot (lo decide su anfitrión, el administrador)
@@ -1057,7 +1062,7 @@ function frame(now) {
   }
   { const sg = JSON.stringify(INV); if (sg !== rsSig) { rsSig = sg; rsEl.innerHTML = Object.keys(RES).map(k => `<span class="cost"><i>${ICONS[k]}</i>${INV[k]}</span>`).join(''); } } // recursos recogidos: arriba a la izquierda, con su icono
   hud.style.display = S.foot.on ? 'none' : ''; // a pie se ocultan los paneles de la nave
-  scoreboardTick(now); drawHud(fwd, now, targets); FOOT.hud(now); if (typeof BASE !== 'undefined') BASE.hud(now); if (typeof TV !== 'undefined') TV.update(S.foot.on ? null : aimT && (aimT.type === 'p' || aimT.type === 'n') ? aimT : S.tsel ? { type: S.tsel.kind, t: S.tsel, dist: S.tsel.dist } : aimT, now); // la nave bajo la mira manda; si no, la elegida con B; si no, lo que haya en la mira
+  scoreboardTick(now); drawHud(fwd, now, targets); FOOT.hud(now); if (typeof BASE !== 'undefined') BASE.hud(now); if (typeof WAR !== 'undefined') WAR.hud(now); if (typeof TV !== 'undefined') TV.update(S.foot.on ? null : aimT && (aimT.type === 'p' || aimT.type === 'n') ? aimT : S.tsel ? { type: S.tsel.kind, t: S.tsel, dist: S.tsel.dist } : aimT, now); // la nave bajo la mira manda; si no, la elegida con B; si no, lo que haya en la mira
   hud.textContent = planets.info.on ? `SUELO      ${fD(Math.max(0, planets.info.ground))} sobre ${planets.info.water ? 'el agua' : 'tierra'} de ${planets.info.name}` : ''; // el panel solo muestra el suelo: velocidad e impulso van en el medidor y los avisos en notificaciones
   if (ov.style.display !== 'none' && typeof hangarFrame === 'function') hangarFrame(now);
 }
