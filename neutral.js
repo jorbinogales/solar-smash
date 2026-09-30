@@ -4,9 +4,9 @@
 // Nivel 1-10 (mayor lejos de la estrella): más vida, daño y velocidad, y más XP y botín. Recompensa (para quien más daño hizo): XP, munición llena y unos pocos recursos (no salen de las zonas).
 const NEU = (() => {
   const TT = ['saeta', 'halcon', 'coloso', 'nomada'], HULL = 0x6f7b6c, ACC = 0x9dff6a, FWD = new THREE.Vector3(0, 0, -1); // TT: las 4 primeras de SHIPS (server.js), en el mismo orden: el índice viaja por la red
-  const MAINS = bodies.filter(b => b.k !== 'sun' && !b.parent), MAXG = Math.min(9, 4 + MAINS.length); // grupos vivos a la vez: 4 + planetas principales (tope 9 → ≤ 36 naves, 'ns' ≈ 3 KB)
-  const CALM = 60000, FIRE_R = 3500, SPREAD = 0.012, SEND_MS = 100, VIS = 300000, NEAR_MIN = 15000, RESPAWN = [12000, 30000]; // VIS: más lejos no se dibujan (ni son objetivo) · NEAR_MIN: nunca aparecen a menos de esto de un jugador · RESPAWN: ms tras aniquilar un grupo
-  const E = new Map(), G = new Map(), pend = []; // E: id -> nave (simulada si soy el anfitrión, o recibida del servidor) · G: grupo -> { g, s (punto de encuentro), wp, host: agresor } · pend: reapariciones programadas
+  const MAINS = bodies.filter(b => b.k !== 'sun' && !b.parent); // la población se reparte por zonas (POP, más abajo)
+  const CALM = 60000, FIRE_R = 3500, SPREAD = 0.012, SEND_MS = 100, VIS = 300000, NEAR_MIN = 15000; // VIS: más lejos no se dibujan (ni son objetivo) · NEAR_MIN: nunca aparecen a menos de esto de un jugador (si hay otro punto en su zona)
+  const E = new Map(), G = new Map(); // E: id -> nave (simulada si soy el anfitrión, o recibida del servidor) · G: grupo -> { g, s (punto de encuentro), wp, host: agresor } · pend: reapariciones programadas
   let wasHost = false, sendT = 0, nid = 3000, gid = 1;
   const stOf = (t, lv) => { const T = TYPES[t]; return { hp: Math.round(T.hp * 0.3 + 5.6 * lv), sh: Math.round(T.sh * 0.15 + 2.1 * lv), dmg: Math.round((1.4 + 0.28 * lv) * 10) / 10, cd: 1.3 - 0.04 * lv, vmax: 40 + 6 * lv, vh: 105 + 17.5 * lv, turn: 1.3 * T.agil + 0.04 * lv }; }; // −30 % como los jugadores · vmax: crucero (km/s) · vh: persecución
   const nameOf = n => `${TYPES[n.t].name} neutral`;
@@ -19,6 +19,12 @@ const NEU = (() => {
   const safeAlt = b => b.k === 'sun' ? STAR_KILL_R - b.R + 20000 : Math.max(2500 * SYS_SCALE, 6 * (ATMO[b.n] ? ATMO[b.n].H : 0)); // nunca bajan a la atmósfera (así tampoco se acercan a las bases)
   // puntos de encuentro: cada zona de recursos y cada planeta principal (rutas habituales de los jugadores); c: centro relativo al cuerpo ancla a, r: radio por el que vagan (compactado con el sistema)
   const SPOTS = [...ZONES.map(z => ({ a: z.anchor, c: z.off, r: z.radius + 8000 * SYS_SCALE })), ...MAINS.map(b => ({ a: b.i, c: [0, 0, 0], r: b.R + safeAlt(b) + 25000 * SYS_SCALE }))];
+  const CZN = genControlZones(SYS); CZN.forEach(z => { if (!z.noClaim) SPOTS.push({ a: 0, c: czCenter(z), r: Math.min(60000 * SYS_SCALE, ((Number.isFinite(z.r1) ? z.r1 : z.r0 * 1.5) - z.r0) * 0.3), zs: z.id }); }); // + el centro de cada sector
+  // ---------- POBLACIÓN POR ZONA: 5 grupos de 3 por zona de control (menos la solar). Solo se instancian y simulan los de zonas cercanas a alguien (ACT_KM), con un tope de naves activas;
+  // las demás quedan «dormidas» (solo el estado de sus 5 plazas). Grupo aniquilado: reaparece a los 60-120 s (la mitad si su zona está activa). ----------
+  const PER_ZONE = 5, GSIZE = 3, ACT_KM = 1.5e6 * SYS_SCALE, MAX_ACTIVE = 90, RESP_Z = [60000, 120000], ACT_MS = 1000;
+  const POP = CZN.map(z => z.noClaim ? [] : Array.from({ length: PER_ZONE }, (_, k) => ({ zi: z.id, k, g: null, respT: 0 })));
+  let actT = 0, ACTIVE = new Set();
   const spotPos = s => { const A = bodies[s.a].pos; return [A[0] + s.c[0], A[1] + s.c[1], A[2] + s.c[2]]; };
   function keepOut(n, w, D) { // desvía el rumbo hacia fuera al acercarse a un astro y, si aun así entra en la zona prohibida, la saca
     for (const b of bodies) {
@@ -34,13 +40,13 @@ const NEU = (() => {
     return wp;
   }
   function newId() { let k = 0; do { nid = nid >= 3999 ? 3000 : nid + 1; } while (E.has(nid) && ++k < 1000); return nid; }
-  function spawnGroup() { // en un punto de encuentro (zonas y planetas), sin otro grupo si se puede y nunca a menos de NEAR_MIN de un jugador
+  function spawnGroup(zi, slot) { // en un punto de encuentro de SU zona (cúmulo, planeta o centro del sector), sin otro grupo si se puede y nunca a menos de NEAR_MIN de un jugador si hay alternativa
     const foes = [S.pos, ...[...remotes.values()].filter(r => r.apos).map(r => r.apos)], used = new Set([...G.values()].map(g => g.s));
-    const cand = SPOTS.map((s, si) => ({ si, d: Math.min(...foes.map(f => dist(f, spotPos(s)))) }));
+    let cand = SPOTS.map((s, si) => ({ si, d: Math.min(...foes.map(f => dist(f, spotPos(s)))) })).filter(c => SPOTS[c.si].zs === zi || czAt(SYS, CZN, spotPos(SPOTS[c.si])) === zi); if (!cand.length) return;
     let pool = cand.filter(c => c.d > NEAR_MIN && !used.has(c.si)); if (!pool.length) pool = cand.filter(c => c.d > NEAR_MIN); if (!pool.length) pool = [cand.sort((a, b) => b.d - a.d)[0]];
     const si = pool[(Math.random() * pool.length) | 0].si, s = SPOTS[si], far = len(spotPos(s)) / Math.max(...SPOTS.map(q => len(spotPos(q)))), lv0 = Math.max(1, Math.min(10, 1 + Math.floor(Math.random() * 5 + far * 5))); // nivel: al azar y mayor cuanto más lejos de la estrella
-    const g = gid++, size = [2, 3, 3, 3, 4][(Math.random() * 5) | 0], c0 = wpOf(si);
-    G.set(g, { g, s: si, wp: wpOf(si), host: null });
+    const g = gid++, size = GSIZE, c0 = wpOf(si);
+    G.set(g, { g, s: si, wp: wpOf(si), host: null, zi, slot }); if (slot) slot.g = g;
     for (let i = 0; i < size; i++) {
       const t = TT[(Math.random() * TT.length) | 0], lv = Math.max(1, Math.min(10, lv0 + (Math.random() < 0.3 ? (Math.random() < 0.5 ? -1 : 1) : 0))), st = stOf(t, lv), id = newId(), off = [(i - (size - 1) / 2) * 2.5, (i % 2) * 1.2, (i % 2 ? 1 : -1) * 1.5];
       const n = { id, g, t, lv, a: s.a, r: c0.map((c, k) => c + off[k]), q: new THREE.Quaternion().setFromEuler(new THREE.Euler(0, rnd(0, 6.28), 0)), v: st.vmax * 0.5, hp: 100, sh: 100, h: 0, st, hpA: st.hp, shA: st.sh, cd: rnd(0, 1), dmg: new Map(), off };
@@ -50,7 +56,7 @@ const NEU = (() => {
   function adopt() { // paso a ser el anfitrión: sigo simulando las naves que ya existían (último estado recibido del servidor), sin duplicarlas
     for (const n of E.values()) {
       if (!n.st) { n.st = stOf(n.t, n.lv); n.hpA = n.hp / 100 * n.st.hp; n.shA = n.sh / 100 * n.st.sh; n.cd = rnd(0, 1); n.dmg = new Map(); n.off = [rnd(-2, 2), rnd(-1, 1), rnd(-2, 2)]; n.t0 = 0; }
-      if (!G.has(n.g)) { const w = world(n); let si = 0, bd = Infinity; SPOTS.forEach((s, i) => { const d = dist(spotPos(s), w); if (d < bd) { bd = d; si = i; } }); G.set(n.g, { g: n.g, s: si, wp: wpOf(si), host: null }); }
+      if (!G.has(n.g)) { const w = world(n); let si = 0, bd = Infinity; SPOTS.forEach((s, i) => { const d = dist(spotPos(s), w); if (d < bd) { bd = d; si = i; } }); const zi = czAt(SYS, CZN, w), sl = (POP[zi] || []).find(q => q.g == null); G.set(n.g, { g: n.g, s: si, wp: wpOf(si), host: null, zi, slot: sl || null }); if (sl) sl.g = n.g; }
       const sa = SPOTS[G.get(n.g).s].a; if (sa !== n.a) { const w = world(n); n.a = sa; n.r = sub(w, bodies[sa].pos); } // mismo ancla que su punto de encuentro
       nid = Math.max(nid, n.id); gid = Math.max(gid, n.g + 1);
     }
@@ -79,8 +85,8 @@ const NEU = (() => {
     if (f.x * ad[0] + f.y * ad[1] + f.z * ad[2] > Math.cos(0.3)) { n.cd = weaponCd(WEAPONS.plasma, n, st.cd); fire(n, mp, nrm(ad.map(c => c + rnd(-SPREAD, SPREAD)))); } // con dispersión: puntería imperfecta
   }
   function sim(dt, now) {
-    for (const g of [...G.keys()]) if (![...E.values()].some(n => n.g === g)) { G.delete(g); pend.push(now + rnd(RESPAWN[0], RESPAWN[1])); } // grupo aniquilado: otro aparecerá en 12-30 s
-    if (G.size + pend.length < MAXG) spawnGroup(); else { const i = pend.findIndex(t => t <= now); if (i >= 0) { pend.splice(i, 1); spawnGroup(); } } // al empezar se reponen todos (uno por cuadro)
+    for (const [g, gr] of [...G]) if (![...E.values()].some(n => n.g === g)) { G.delete(g); if (gr.slot) { gr.slot.g = null; gr.slot.respT = now + rnd(RESP_Z[0], RESP_Z[1]) * (ACTIVE.has(gr.zi) ? 0.5 : 1); } } // grupo aniquilado: su plaza reaparece en 60-120 s (30-60 s si hay alguien cerca)
+    if (now >= actT) { actT = now + ACT_MS; population(now); }
     for (const gr of G.values()) {
       const ms = [...E.values()].filter(n => n.g === gr.g), lead = ms[0]; if (!lead) continue;
       let F = gr.host != null ? foe(gr.host) : null;
@@ -91,9 +97,17 @@ const NEU = (() => {
     }
     if (now - sendT > SEND_MS) { sendT = now; send({ t: 'ns', l: [...E.values()].map(n => [n.id, n.g, n.a, r1(n.r[0]), r1(n.r[1]), r1(n.r[2]), r3(n.q.x), r3(n.q.y), r3(n.q.z), r3(n.q.w), Math.round(n.v), Math.round(n.hp), Math.round(n.sh), TT.indexOf(n.t), n.lv, n.h]) }); }
   }
+  const watchers = () => [S.pos, ...[...remotes.values()].filter(r => r.apos && r.hp > 0).map(r => r.apos), ...(typeof BOT !== 'undefined' ? [...BOT.bots.values()].filter(B => !B.dead).map(B => B.pos) : [])]; // jugadores y bots
+  function population(now, W = watchers()) { // activa las zonas cercanas (por distancia), duerme las lejanas y repone plazas hasta el tope de naves activas (≤ 3 grupos nuevos por segundo)
+    const dz = CZN.map((z, zi) => ({ zi, d: z.noClaim ? Infinity : Math.min(...W.map(p => czDist(z, p))) })).filter(x => x.d < ACT_KM).sort((a, b) => a.d - b.d); ACTIVE = new Set(dz.map(x => x.zi));
+    for (const [g, gr] of [...G]) if (gr.zi !== undefined && !ACTIVE.has(gr.zi) && gr.host == null) { for (const n of [...E.values()]) if (n.g === g) drop(n.id); G.delete(g); if (gr.slot) gr.slot.g = null; } // se duerme: la plaza queda viva (reaparece al volver)
+    let n = E.size, made = 0;
+    for (const { zi } of dz) for (const sl of POP[zi]) { if (made >= 3 || n + GSIZE > MAX_ACTIVE) return; if (sl.g != null || now < sl.respT) continue; spawnGroup(zi, sl); n += GSIZE; made++; }
+  }
+  const popStats = () => ({ zones: POP.filter(p => p.length).length, perZone: PER_ZONE, gsize: GSIZE, active: E.size, groups: G.size, activeZones: ACTIVE.size, dormant: POP.reduce((a, p) => a + p.filter(sl => sl.g == null).length, 0) });
   function frame(dt, now) {
     const host = BASE.isHost() && BASE.started() && !BASE.loading() && BASE.LB.phase === 'playing';
-    if (host && !wasHost) adopt(); if (!host && wasHost) { G.clear(); pend.length = 0; } wasHost = host;
+    if (host && !wasHost) adopt(); if (!host && wasHost) { G.clear(); for (const p of POP) for (const sl of p) sl.g = null; } wasHost = host;
     if (host) sim(dt, now);
     for (const n of E.values()) { // dibujo (los demás clientes extrapolan con la velocidad desde el último tick); más allá de VIS no se dibujan
       if (!n.grp) model(n);
@@ -159,5 +173,5 @@ const NEU = (() => {
   function nearest(w, range) { // (anfitrión) la neutral más cercana al alcance, cualquiera: buques, satélites y cazas también les disparan (y se vuelven hostiles al dueño)
     if (!wasHost) return null; let best = null, bd = range; for (const n of E.values()) { if (!n.w) continue; const d = dist(n.w, w); if (d < bd) { bd = d; best = { pos: n.w, v: n.v, q: n.q, d, id: n.id }; } } return best;
   }
-  return { frame, sync, hit, onHit, targets, hostileNear, nearest, E, G, MAXG, SPOTS, pos: id => (E.get(id) || {}).w || null, speed: id => (E.get(id) || {}).v || 0, name: id => { const n = E.get(id); return n ? nameOf(n) : 'Nave neutral'; } };
+  return { population, popStats, POP, ACTIVE: () => ACTIVE, frame, sync, hit, onHit, targets, hostileNear, nearest, E, G, MAXG: MAX_ACTIVE / GSIZE, SPOTS, pos: id => (E.get(id) || {}).w || null, speed: id => (E.get(id) || {}).v || 0, name: id => { const n = E.get(id); return n ? nameOf(n) : 'Nave neutral'; } };
 })();

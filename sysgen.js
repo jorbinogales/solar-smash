@@ -141,7 +141,7 @@
   // angulares con desfase determinista) · «Confines» (6 sectores, sin límite exterior: cubre todo lo que queda fuera). Fijas respecto a la estrella (no siguen a los planetas,
   // que además apenas se mueven en una partida: sus años duran meses reales). Se reclaman permaneciendo dentro; reclamadas permiten desplegar buques y construir satélites.
   const WARCFG = {
-    capS: 50, // s para reclamar una zona en solitario (más rápido con tu buque dentro; baja si hay enemigos dentro o nadie)
+    capRate: 100 / 15, capRateDanger: 100 / 30, // %/s de captura por unidad de presencia (≈ 15 s con presencia 1; ≈ 30 s en ZONA ROJA); el decaimiento guarda la misma proporción (½ disputada · 1 con el rival · ⅓ vacía)
     exclHg: 150000 * SYS_SCALE, exclWs: 100000 * SYS_SCALE, // ZONA ROJA (no se despliega): la zona que contiene un planeta con hangar enemigo o un buque enemigo, y las vecinas a las que llega ese radio
     starClear: 1000000, orbitClear: 80000 * SYS_SCALE, // no se despliega a menos de esto de la estrella (sin compactar: la estrella no cambia; el Núcleo, no reclamable, ya lo cubre) ni de la órbita de un planeta principal (sus lunas quedan dentro de ese margen)
     sectors: [4, 4, 5, 5, 6, 6, 6, 6], outerSectors: 6,
@@ -154,7 +154,7 @@
     // range 6000 km de detección y disparo (satélite 1200, cazas 3000, torres de base mucho menos) · spd 300 km/s (el servidor admite hasta 500) → a 6000 km tarda 20 s y el
     // proyectil vive l/spd·1,5 + 3 s (≤ 60) · hr 0,25 km: radio de espoleta de proximidad del proyectil (las demás torretas, 0,04-0,05) · cd 1,1 s entre disparos del buque,
     // que alternan entre las 3 torretas gemelas del costado que mira al blanco (cada torreta dispara cada 3,3 s, cañón izquierdo y derecho por turnos)
-    ws: { max: 2, hp: 3000, sh: 1000, scale: 4, near: 32, range: 6000, dmg: 6, cd: 1.1, spd: 300, hr: 0.25, w: 'cannon', cost: { oro: 40, diamante: 8, plata: 60, cobre: 100, piedra: 150 } },
+    ws: { max: 2, hp: 3000, sh: 1000, scale: 4, near: 32, range: 6000, dmg: 6, cd: 1.1, spd: 300, hr: 0.25, w: 'plasma', closeKm: 300, ammoRange: 300, ammoMinKm: 100, missileRange: 6000, ammo: { w: 'cannon', dmg: 1, cd: 0.09, spd: 400, hr: 0.1, spread: 0.004 }, missile: { w: 'missile', dmg: 20, cd: 4, spd: 150, hr: 0.25 }, cost: { oro: 40, diamante: 8, plata: 60, cobre: 100, piedra: 150 } },
     ftr: { max: 30, n: 3, hp: 60, dmg: 4, cd: 0.8, range: 3000, w: 'plasma', engage: 8000, patrol: 6000, vmax: 200, turn: 1.1, scale: 6, cost: { plata: 15, cobre: 30, piedra: 30 } }, // escuadrón de CAZAS: n cazas de hp cada uno (cada caza es una UNIDAD: icono, objetivo y daño propios), plasma ligero; vmax 200 km/s (< las naves de jugador), giro 1,1 rad/s, modelo ×6; patrullan patrol km en torno a su punto y atacan hasta engage km de él
     sat: { maxZone: 3, hp: 800, range: 1200, dmg: 20, cd: 4, spd: 50, w: 'missile', radar: 1500000, cost: { oro: 8, plata: 20, cobre: 40, piedra: 60 } }, // satélite defensivo (~1 km): misiles guiados de largo alcance
   };
@@ -230,13 +230,13 @@
   function czCheck(sys, zs, zi, off, me, owner, hangars, ships, t, anch, kind) { // buques, satélites y cazas: zonas propias o SIN DUEÑO (sus unidades la reclaman) y, en ataque, junto a un planeta con base rival · kind: reservado · off: posición ABSOLUTA · anch > 0: desplegado junto a ese planeta (anclado a él): sin la regla de órbita, fuera de su atmósfera
     const z = zs[zi]; if (!z || !Array.isArray(off) || off.length !== 3 || !off.every(Number.isFinite) || Math.abs(off[1]) > 5000) return 'Zona no válida';
     if (z.noClaim) return 'Zona solar: no se puede desplegar';
-    const attack = anch > 0 && hangars.some(h => h.o !== me && h.b === (sys.bodies[anch] || {}).n); // ATAQUE: junto a un planeta con base rival (o de bot): vale aunque la zona sea suya o roja
+    const attack = (anch > 0 && hangars.some(h => h.o !== me && h.b === (sys.bodies[anch] || {}).n)) || (ships || []).some(s => s.o !== me && czDist(z, add3(bodyPosAt(sys, s.a, t), s.off)) < WARCFG.exclWs); // ATAQUE: junto a un planeta con base rival (o de bot) o donde hay un buque enemigo // ATAQUE: junto a un planeta con base rival (o de bot): vale aunque la zona sea suya o roja
     if (owner && owner !== me && !attack) return 'Zona de otro jugador: solo junto a su planeta con base (ataque)';
     if (czAt(sys, zs, off) !== zi && !(anch > 0 && czAt(sys, zs, bodyPosAt(sys, anch, t)) === zi)) return 'Fuera de la zona'; // anclado a un planeta: cuenta la zona del PLANETA (a 300 km de altitud el punto puede asomar al sector vecino si el planeta está junto al borde)
     const rr = Math.hypot(off[0], off[2]); if (rr < WARCFG.starClear) return 'Demasiado cerca de la estrella';
-    if (anch > 0) { const b = sys.bodies[anch], H = sys.atmo[b.n] ? sys.atmo[b.n].H : 0; if (d3(off, bodyPosAt(sys, anch, t)) < b.R + 5.5 * H + 5) return 'Dentro de la atmósfera'; return attack ? '' : czDanger(sys, zs, zi, me, hangars, ships, t, anch); }
+    if (anch > 0) { const b = sys.bodies[anch], H = sys.atmo[b.n] ? sys.atmo[b.n].H : 0; if (d3(off, bodyPosAt(sys, anch, t)) < b.R + 5.5 * H + 5) return 'Dentro de la atmósfera'; return attack ? '' : czDanger(sys, zs, zi, me, hangars, [], t, anch); }
     for (const b of sys.bodies) if (b.k !== 'sun' && !b.parent && Math.abs(rr - b.a * DS) < WARCFG.orbitClear) return `Demasiado cerca de la órbita de ${b.n}`;
-    return czDanger(sys, zs, zi, me, hangars, ships, t);
+    return attack ? '' : czDanger(sys, zs, zi, me, hangars, [], t); // los buques (propios o enemigos) ya no impiden desplegar
   }
   root.SYS_SCALE = SYS_SCALE; root.genSystem = genSystem; root.genZones = genZones; root.wreckLoot = wreckLoot; root.BASE_UP = BASE_UP; root.baseStats = baseStats; root.TOWER_STYLES = TOWER_STYLES; root.WEAPONS = WEAPONS; root.weaponCd = weaponCd;
   root.WARCFG = WARCFG; root.genControlZones = genControlZones; root.bodyPosAt = bodyPosAt; root.czAt = czAt; root.czCheck = czCheck; root.czDist = czDist; root.czCenter = czCenter; root.czDanger = czDanger; root.czDeployPoint = czDeployPoint;

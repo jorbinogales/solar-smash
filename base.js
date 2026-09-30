@@ -202,9 +202,9 @@ const BASE = (() => {
       seen.add(e.o); let h = HG.get(e.o);
       if (!h) {
         const b = bodyBy(e.b); if (!b) continue; const dir = dirOf(e.la, e.lo), info = padInfo(b, dir);
-        h = { o: e.o, nm: e.nm, b: e.b, la: e.la, lo: e.lo, hp: e.hp, sh: e.sh || 0, up: e.up || {}, st: baseStats(e.up || {}), ts: (e.ts || ['plasma', 'plasma', 'plasma', 'plasma']).slice(), dir, info, tw: null, bot: !!e.bot, sp: e.sp || null }; HG.set(e.o, h); planets.addPad(e.b, dir, PAD_R * BK, info.top); build(h); applyTw(h, e.tw || [h.st.twMax, h.st.twMax, h.st.twMax, h.st.twMax], true);
+        h = { o: e.o, nm: e.nm, b: e.b, la: e.la, lo: e.lo, hp: e.hp, sh: e.sh || 0, up: e.up || {}, st: baseStats(e.up || {}), ts: (e.ts || ['plasma', 'plasma', 'plasma', 'plasma']).slice(), dir, info, tw: null, bot: !!e.bot, sp: e.sp || null, rs: e.rs }; HG.set(e.o, h); planets.addPad(e.b, dir, PAD_R * BK, info.top); build(h); applyTw(h, e.tw || [h.st.twMax, h.st.twMax, h.st.twMax, h.st.twMax], true);
         if (e.o === myId) { hadHangar = true; defeated = false; if (LB.phase !== 'lobby' && !started) startGame(); else if (pendingSpawn) { pendingSpawn = false; if (P.hp > 0) { spawn(); P.deadUntil = 0; } } }
-      } else { if (e.o === myId && lastHp !== null && e.hp < lastHp - 0.5 && performance.now() - lastAlert > 4000) { lastAlert = performance.now(); say('¡TU HANGAR ESTÁ BAJO ATAQUE!'); if (typeof attackAlert === 'function') attackAlert('b', '', null); } h.sp = e.sp || null; h.hp = e.hp; h.sh = e.sh || 0; h.up = e.up || h.up; h.st = baseStats(h.up); h.nm = e.nm; h.bot = !!e.bot; applyTw(h, e.tw); if (e.ts && e.ts.some((v, i) => v !== h.ts[i])) { h.ts = e.ts.slice(); setHeads(h); } }
+      } else { if (e.o === myId && lastHp !== null && e.hp < lastHp - 0.5 && performance.now() - lastAlert > 4000) { lastAlert = performance.now(); say('¡TU HANGAR ESTÁ BAJO ATAQUE!'); if (typeof attackAlert === 'function') attackAlert('b', '', null); } h.sp = e.sp || null; h.rs = e.rs; if (e.hp < h.hp - 0.5 && h.info) puff(worldOf(h).map((c, i) => c + h.dir[i] * 0.03 * BK), 0.04 * BK, 0xffb050, 0.6, 0.02); h.hp = e.hp; h.sh = e.sh || 0; h.up = e.up || h.up; h.st = baseStats(h.up); h.nm = e.nm; h.bot = !!e.bot; applyTw(h, e.tw); if (e.ts && e.ts.some((v, i) => v !== h.ts[i])) { h.ts = e.ts.slice(); setHeads(h); } }
       if (e.o === myId) lastHp = e.hp;
     }
     for (const [o, h] of [...HG]) if (!seen.has(o)) { drop(h); HG.delete(o); if (o === myId && hadHangar) lost(); }
@@ -347,6 +347,7 @@ const BASE = (() => {
         const bt = (typeof BOT !== 'undefined' && BOT.nearestTo(w, TW_RANGE_ATMO + 1)) || (typeof NEU !== 'undefined' && NEU.hostileNear(w, TW_RANGE_ATMO + 1, h.o));
         if (bt && bt.d < rangeFor(bt.pos) + 1) { tgt = bt.pos; tvel = bt.v; tq = bt.q; td = bt.d; rng = rangeFor(bt.pos); tid = bt.id; }
       }
+      if (!tgt && typeof WAR !== 'undefined' && WAR.structNear && (h.o === myId || (h.o >= 1000 && BASE.isHost()))) { const st = WAR.structNear(w, TW_RANGE + 1, h.o); if (st && st.d < rangeFor(st.pos) + 1) { tgt = st.pos; tvel = 0; tq = st.q; td = st.d; rng = rangeFor(st.pos); tid = st; } } // buques, satélites y cazas enemigos al alcance (200 km: los buques las superan en alcance)
       if (!tgt) continue;
       const qi = h.q.clone().invert();
       for (const [ti, t] of h.towers.entries()) {
@@ -359,7 +360,7 @@ const BASE = (() => {
         const dir = [ap[0] - mp[0], ap[1] - mp[1], ap[2] - mp[2]], l = Math.hypot(...dir); if (l < 0.01) continue; dir[0] /= l; dir[1] /= l; dir[2] /= l;
         if (dir[0] * h.dir[0] + dir[1] * h.dir[1] + dir[2] * h.dir[2] < 0.03 || !clearShot(bb, mp, ap)) { t.cd = 0.25; continue; } // solo disparan hacia arriba y nunca a través del terreno o del planeta
         if (sty.spread) { for (let k = 0; k < 3; k++) dir[k] += (Math.random() - 0.5) * 2 * sty.spread; const dl = Math.hypot(...dir); dir[0] /= dl; dir[1] /= dl; dir[2] /= dl; } // munición: ligera dispersión
-        const dmg = sty.dmg * h.st.dmgMul, key = `${myId ?? 0}:t${++seq}`, life = Math.min(40, l / sty.spd * 1.4 + 2), kind = sty.kind, tg = sty.homing ? { k: tid >= 3000 ? 'n' : 'p', id: tid } : null; t.cd = weaponCd(sty, t); // cadencia propia de cada arma (plasma irregular, munición en ráfagas)
+        const dmg = sty.dmg * h.st.dmgMul, key = `${myId ?? 0}:t${++seq}`, life = Math.min(40, l / sty.spd * 1.4 + 2), kind = sty.kind, tg = sty.homing ? (typeof tid === 'object' ? { k: tid.k, id: tid.id } : { k: tid >= 3000 ? 'n' : 'p', id: tid }) : null; t.cd = weaponCd(sty, t); // cadencia propia de cada arma (plasma irregular, munición en ráfagas)
         const mz = mp.map((c, i) => c + dir[i] * (MUZ[h.ts[ti]] ?? 0.012) * BK), mk = kind === 'c' ? 0.5 : 1; spawnProj(-h.o, key, kind, mz, dir, tg, dmg, { spd: sty.spd, col: sty.col, life }); send({ t: 'fire', key, kind, w: h.ts[ti], pos: mz, dir, tgt: tg, dmg, tw: 1, spd: sty.spd, rb: S.refB, rp: S.refB >= 0 ? sub(mz, bodies[S.refB].pos) : null }); sfx(sty.snd, mz); puff(mz, 0.014 * BK * mk, sty.col, kind === 'c' ? 0.08 : 0.22, 0.012 * mk); puff(mz, 0.006 * BK * mk, 0xffffff, 0.12 * mk, 0.008 * mk); // resplandor en la boca del cañón (munición: chispa corta)
         if (tid === myId && typeof attackAlert === 'function') attackAlert('t', h.nm, w); // esta torreta me apunta a mí
       }
@@ -368,22 +369,26 @@ const BASE = (() => {
   function rail(h, ti, t, sty, tgt, tid, bb, w, dt) { // CAÑÓN DE RIEL: haz instantáneo mientras vea al blanco; daño en pasos de sty.tick s y un evento 'fire' kind 'r' por paso para que los demás lo dibujen y oigan
     const mp = localToWorld(h, t.g.position.x, HEAD_Y, t.g.position.z), dir = [tgt[0] - mp[0], tgt[1] - mp[1], tgt[2] - mp[2]], l = Math.hypot(...dir); if (l < 0.01) return; dir[0] /= l; dir[1] /= l; dir[2] /= l;
     if (dir[0] * h.dir[0] + dir[1] * h.dir[1] + dir[2] * h.dir[2] < 0.03 || !clearShot(bb, mp, tgt)) { t.bt = 0; return; } // sin línea de visión: el haz se corta (caduca solo) y el siguiente contacto daña al instante
-    const mz = mp.map((c, i) => c + dir[i] * MUZ.rail * BK), key = `b${myId ?? 0}_${h.o}_${ti}`, tg = { k: tid >= 3000 ? 'n' : 'p', id: tid };
+    const mz = mp.map((c, i) => c + dir[i] * MUZ.rail * BK), key = `b${myId ?? 0}_${h.o}_${ti}`, tg = typeof tid === 'object' ? { k: tid.k, id: tid.id } : { k: tid >= 3000 ? 'n' : 'p', id: tid };
     beamSet(key, mz, tgt, tg); if ((t.bt = (t.bt || 0) - dt) > 0) return; t.bt = Math.max(0, t.bt + sty.tick);
     const dmg = sty.dps * sty.tick * h.st.dmgMul; beamHit(-h.o, key, tg, dmg, mz);
     send({ t: 'fire', key, kind: 'r', w: 'rail', pos: mz, dir, len: l, tgt: tg, dmg, tw: 1, rb: S.refB, rp: S.refB >= 0 ? sub(mz, bodies[S.refB].pos) : null });
     if (tid === myId && typeof attackAlert === 'function') attackAlert('t', h.nm, w);
   }
-  function hit(old, pos, p) { // proyectiles míos o de mis bots contra el hangar de otro jugador (los bots solo atacan a humanos)
-    for (const h of HG.values()) {
-      if (h.o === myId || (p.owner >= 2000 && h.o >= 1000)) continue; const w = worldOf(h); if (Math.abs(w[0] - pos[0]) > 6 || Math.abs(w[1] - pos[1]) > 6 || Math.abs(w[2] - pos[2]) > 6) continue;
+  function hitOne(h, old, pos, p, ex) { // ¿toca el proyectil el escudo, una torreta o el hangar h? envía 'hh' (ex: campos extra, p. ej. ws = estructura atacante)
+    const w = worldOf(h); if (Math.abs(w[0] - pos[0]) > 6 || Math.abs(w[1] - pos[1]) > 6 || Math.abs(w[2] - pos[2]) > 6) return false;
       const c = [w[0] + h.dir[0] * 0.01 * BK, w[1] + h.dir[1] * 0.01 * BK, w[2] + h.dir[2] * 0.01 * BK];
-      if (h.sh > 0 && segDist(old, pos, c) < 0.095 * BK) { send({ t: 'hh', o: h.o, dmg: p.dmg }); h.sh -= p.dmg; boom(pos, 0.012); return true; } // el escudo de la base absorbe las balas
-      if (h.towers && h.tw) for (const [ti, t] of h.towers.entries()) { if (!(h.tw[ti] > 0)) continue; const tp = localToWorld(h, t.g.position.x, HEAD_Y * 0.8, t.g.position.z); if (segDist(old, pos, tp) < 0.011 * BK) { send({ t: 'hh', o: h.o, dmg: p.dmg, tw: ti }); h.tw[ti] -= p.dmg; boom(pos, 0.012); return true; } }
-      if (segDist(old, pos, c) < HG_R * BK) { send({ t: 'hh', o: h.o, dmg: p.dmg }); h.hp -= p.dmg; boom(pos, p.kind === 'm' ? 0.04 : 0.01); return true; }
-    }
+      if (h.sh > 0 && segDist(old, pos, c) < 0.095 * BK) { send({ t: 'hh', o: h.o, dmg: p.dmg, ...ex }); h.sh -= p.dmg; boom(pos, 0.012); return true; } // el escudo de la base absorbe las balas
+      if (h.towers && h.tw) for (const [ti, t] of h.towers.entries()) { if (!(h.tw[ti] > 0)) continue; const tp = localToWorld(h, t.g.position.x, HEAD_Y * 0.8, t.g.position.z); if (segDist(old, pos, tp) < 0.011 * BK) { send({ t: 'hh', o: h.o, dmg: p.dmg, ...ex, tw: ti }); h.tw[ti] -= p.dmg; boom(pos, 0.012); return true; } }
+      if (segDist(old, pos, c) < HG_R * BK) { send({ t: 'hh', o: h.o, dmg: p.dmg, ...ex }); h.hp -= p.dmg; boom(pos, p.kind === 'm' ? 0.04 : 0.01); return true; }
     return false;
   }
+  const flashHit = (pos, p) => puff(pos, 0.02 * BK, p.col ?? 0xffb050, 0.45, 0.015); // fogonazo del color del arma con tamaño mínimo en pantalla (se ve aunque ocurra lejos)
+  function hit(old, pos, p) { // proyectiles míos o de mis bots contra el hangar de otro jugador (los bots solo atacan a humanos)
+    for (const h of HG.values()) { if (h.o === myId || (p.owner >= 2000 && h.o >= 1000)) continue; if (hitOne(h, old, pos, p, {})) { flashHit(pos, p); return true; } }
+    return false;
+  }
+  function hitMine(old, pos, p) { const h = HG.get(p.hb); if (!h || !hitOne(h, old, pos, p, { ws: p.hw })) return false; flashHit(pos, p); return true; } // disparo de un buque/satélite contra una base que simulo yo (la mía o, en el anfitrión, la de un bot)
 
   // ---------- HUD ----------
 
@@ -460,5 +465,5 @@ const BASE = (() => {
   const AT_BASE_KM = 3; // la plataforma mide el doble (BK 6)
   const targetPos = id => { const h = HG.get(id); if (!h || h.hp <= 0) return null; const w = worldOf(h); return [w[0] + h.dir[0] * 0.012, w[1] + h.dir[1] * 0.012, w[2] + h.dir[2] * 0.012]; };
   const towerPos = (h, i) => { const t = h.towers && h.towers[i]; return t ? localToWorld(h, t.g.position.x, HEAD_Y, t.g.position.z) : null; }; // (bot.js) cabeza de la torreta i de un hangar, en el mundo
-  return { towerPos, model, dispose: o => o.traverse(x => { if (x.geometry && !x.geometry.userData.keep) x.geometry.dispose(); }), targets, targetPos, atBase, mine: () => HG.get(myId) || null, canRespawn: () => !!HG.get(myId) || (typeof WAR !== 'undefined' && WAR.mine().length > 0), sync, onEvent, onClaim, onLobby, LB, started: () => started, choose: show, spawnAt, frame, hit, hud, HG, worldOf, isHost: () => LB.adm === myId, booted: () => MM.booted, onWelcome, onRoomMsg, loading: () => loading };
+  return { hitMine, towerPos, model, dispose: o => o.traverse(x => { if (x.geometry && !x.geometry.userData.keep) x.geometry.dispose(); }), targets, targetPos, atBase, mine: () => HG.get(myId) || null, canRespawn: () => !!HG.get(myId) || (typeof WAR !== 'undefined' && WAR.mine().length > 0), sync, onEvent, onClaim, onLobby, LB, started: () => started, choose: show, spawnAt, frame, hit, hud, HG, worldOf, isHost: () => LB.adm === myId, booted: () => MM.booted, onWelcome, onRoomMsg, loading: () => loading };
 })();

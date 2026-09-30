@@ -7,7 +7,7 @@ const BOT = (() => {
   const bots = new Map(); // idx -> { pos, q, v, hp, sh, dead, cd, grp, ang, sendT, mode, K (estadísticas), ph (fase de asalto), ev (esquiva hasta), aggr (quien le ataca) }
   const CD = 0.45, FWD = new THREE.Vector3(0, 0, -1);
   // parámetros tácticos (documentados en el informe)
-  const AI = { react: [0.2, 0.4], retreat: 0.3, back: 0.9, stage: 250, regroup: 8, mCd: 7, mRange: [1.5, 6], chase: 20, chaseKm: 60, help: 50, dodgeLook: 3, dodgeR: 0.25, dodgeT: 0.5 };
+  const AI = { react: [0.2, 0.4], retreat: 0.3, back: 0.9, stage: 250, regroup: 8, mCd: 7, mRange: [1.5, 6], chase: 20, chaseKm: 60, help: 50, dodgeLook: 3, dodgeR: 0.25, dodgeT: 0.5, goalEvery: 15, lowRes: 60, claimKm: 3e6, warpMin: 200000, warpCd: 2.5, warpV: 5 * 299792.458, warpStop: 3000, calm: 10 };
   const K_HP = 1.2, K_SH = 0.75, K_DMG = 0.625; // bot = chasis de ships.js con estos factores (Halcón: 84 casco · 42 escudo · 3,5 de daño, como antes)
   const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
   const specOf = h => validSpec({ ...(h && h.sp ? h.sp : { t: 'halcon', a: [0, 0, 0, 0, 0, 0] }), c: 0xff4030 });
@@ -18,6 +18,18 @@ const BOT = (() => {
       const rel = sub(B.pos, p.pos), al = rel[0] * p.dir[0] + rel[1] * p.dir[1] + rel[2] * p.dir[2]; if (al <= 0 || al > AI.dodgeLook) continue;
       const perp = rel.map((c, i) => c - p.dir[i] * al), pd = len(perp); if (pd > AI.dodgeR) continue;
       (p.dg = p.dg || new Set()).add(B.idx); const side = pd > 1e-6 ? perp.map(c => c / pd) : nrm([p.dir[2], 0, -p.dir[0]]); return side; }
+    return null;
+  }
+  const warpPlan = (d, fUp, alt, combat) => combat || d <= AI.warpMin ? 'volar' : alt < 5000 && fUp <= 0.15 ? 'subir' : 'saltar'; // salto luz del bot: lejos (> 200 000 km), sin combate; junto a un planeta, primero orientarse hacia fuera
+  function waypoint(a, T) { // si el tramo a→T atraviesa la estrella (3 R★) o un cuerpo (1,5 R), punto de desvío lateral (4 R★ / 3 R) junto a él
+    for (const b of bodies) { const lim = b.k === 'sun' ? 3 * b.R : 1.5 * b.R; if (dist(a, b.pos) < lim + 1 || dist(T, b.pos) < lim + 1 || segDist(a, T, b.pos) >= lim) continue;
+      const ab = sub(T, a), L = len(ab), u = ab.map(c => c / L), k = Math.max(0, Math.min(L, (b.pos[0] - a[0]) * u[0] + (b.pos[1] - a[1]) * u[1] + (b.pos[2] - a[2]) * u[2])), cpt = a.map((c, i) => c + u[i] * k); let pr = sub(cpt, b.pos); if (len(pr) < 1e-6) pr = [u[2], 0, -u[0]]; const pn = nrm(pr);
+      return b.pos.map((c, i) => c + pn[i] * (b.k === 'sun' ? 4 : 3) * b.R); }
+    return null;
+  }
+  function pickGoal(h, idx, home) { // cada 15 s sin enemigos: MINAR (inventario bajo) > RECLAMAR la zona libre más cercana > asalto/patrulla
+    if ((h.rs ?? 9999) < AI.lowRes) { let best = null, bd = Infinity; ZT.forEach((z, zi) => { if (!ZR[zi] || !ZR[zi].some(n => n > 0)) return; const d = dist(z.pos, home); if (d < bd) { bd = d; best = { k: 'minar', zi }; } }); if (best) return best; }
+    if (typeof WAR !== 'undefined') { let best = null, bd = AI.claimKm; WAR.CZ.forEach((z, zi) => { if (z.noClaim || WAR.CZS[zi].o) return; const d = dist(czCenter(z), home); if (d < bd) { bd = d; best = { k: 'reclamar', zi }; } }); if (best) return best; }
     return null;
   }
   const phaseOf = (ph, frac, shFrac, staged) => frac < AI.retreat ? 'retirada' : ph === 'retirada' ? (shFrac >= AI.back ? 'reunir' : 'retirada') : ph === 'reunir' && staged ? 'asalto' : ph || 'reunir'; // asalto a bases por fases
@@ -50,21 +62,34 @@ const BOT = (() => {
       if (!foe) { const cand = [...remotes.values()].filter(r => r.id < 1000 && r.hp > 0 && r.apos).map(r => [r.id, r.apos]); if (P.hp > 0) cand.push([myId, S.pos]); for (const [id, f] of cand) { const db = dist(f, B.pos); if ((dist(f, home) < 6 || db < 3) && db < fd) { fd = db; foe = f; foeId = id; } } }
       if (foe && B.foeId !== foeId) { B.foeId = foeId; B.seeT = now + 1000 * (AI.react[0] + Math.random() * (AI.react[1] - AI.react[0])); } // tiempo de reacción antes del primer disparo
       if (!foe) B.foeId = null;
-      let T, vDes, aimAt = null, mTgt = null;
+      let T, vDes, aimAt = null, mTgt = null, stop = 0;
       if (foe) { B.mode = 'defender'; T = foe; vDes = Math.min(1.2, 0.4 + fd * 0.5) * B.K.vmul; aimAt = foe; mTgt = { k: 'p', id: foeId }; }
       else {
         let eh = null, ed = 1e30; for (const x of BASE.HG.values()) { if (x.o >= 1000 || x.hp <= 0) continue; const w = BASE.worldOf(x), d = dist(w, B.pos); if (d < ed) { ed = d; eh = { x, w }; } }
-        if (eh) { // ASALTO a la base humana: reunir fuera del alcance de las torretas → asalto (torreta más débil primero, misiles al hangar) → retirada al 30 % hasta recargar el escudo
+        if (!B.goalT || now > B.goalT) { B.goalT = now + AI.goalEvery * 1000; B.goal = pickGoal(h, idx, home); }
+        const Gl = B.goal; if (Gl && Gl.k === 'reclamar' && WAR.CZS[Gl.zi].o) B.goal = null; // ya reclamada: a por la siguiente en la próxima decisión
+        if (B.goal && B.goal.k === 'minar') { const z = ZT[B.goal.zi], dz = dist(z.pos, B.pos); B.mode = 'minar'; const tg = tang(new THREE.Vector3(0, 1, 0), z.R * 0.4, B.ang * 0.2); T = z.pos.map((c, i) => c + (i === 0 ? tg.x : i === 1 ? tg.y : tg.z)); stop = z.R + 1000; vDes = Math.min(1500, Math.max(0.8, dz * 0.35)) * B.K.vmul; if (!ZR[B.goal.zi].some(n => n > 0)) B.goal = null; } // dentro del cúmulo: el servidor le concede lo que «mina» (fogonazo bmine)
+        else if (B.goal && B.goal.k === 'reclamar') { const c = czCenter(WAR.CZ[B.goal.zi]), tg = tang(new THREE.Vector3(0, 1, 0), 2000, B.ang * 0.2); B.mode = 'reclamar'; T = c.map((q, i) => q + (i === 0 ? tg.x : i === 1 ? tg.y : tg.z)); stop = AI.warpStop; vDes = Math.min(1500, Math.max(0.8, dist(T, B.pos) * 0.35)) * B.K.vmul; } // permanece en la zona hasta reclamarla (presencia 1)
+        else if (eh) { // ASALTO a la base humana: reunir fuera del alcance de las torretas → asalto (torreta más débil primero, misiles al hangar) → retirada al 30 % hasta recargar el escudo
           B.mode = 'atacar'; const stage = eh.w.map((c, i) => c + eh.x.dir[i] * AI.stage), mates = [...bots.values()].filter(o => o !== B && !o.dead && o.ph === 'reunir' && dist(o.pos, stage) < 30).length;
           B.stT = B.ph === 'reunir' && dist(B.pos, stage) < 30 ? (B.stT || now) : 0; B.ph = phaseOf(B.ph, frac, B.sh / B.K.SH, B.stT && (mates >= 1 || now - B.stT > AI.regroup * 1000) && B.sh >= B.K.SH * AI.back);
           if (B.ph === 'asalto') {
             let tw = -1, tv = 1e9; (eh.x.tw || []).forEach((v, i) => { if (v > 0 && v < tv) { tv = v; tw = i; } }); const tp = tw >= 0 && BASE.towerPos ? BASE.towerPos(eh.x, tw) : null;
-            const tg = tang(new THREE.Vector3(...eh.x.dir), 1.3, B.ang); T = eh.w.map((c, i) => c + eh.x.dir[i] * 0.6 + (i === 0 ? tg.x : i === 1 ? tg.y : tg.z)); vDes = Math.min(2e5, Math.max(0.8, ed * 0.35)) * B.K.vmul;
+            const tg = tang(new THREE.Vector3(...eh.x.dir), 1.3, B.ang); T = eh.w.map((c, i) => c + eh.x.dir[i] * 0.6 + (i === 0 ? tg.x : i === 1 ? tg.y : tg.z)); vDes = Math.min(1500, Math.max(0.8, ed * 0.35)) * B.K.vmul;
             aimAt = tp || eh.w.map((c, i) => c + eh.x.dir[i] * 0.008); mTgt = { k: 'h', id: eh.x.o };
-          } else { T = B.ph === 'retirada' ? home.map((c, i) => c + h.dir[i] * 3) : stage; vDes = Math.min(2e5, Math.max(0.8, dist(T, B.pos) * 0.35)) * B.K.vmul; }
+          } else { T = B.ph === 'retirada' ? home.map((c, i) => c + h.dir[i] * 3) : stage; vDes = Math.min(1500, Math.max(0.8, dist(T, B.pos) * 0.35)) * B.K.vmul; }
         }
         else { B.mode = 'defender'; const tg = tang(new THREE.Vector3(...h.dir), 0.9, B.ang); T = home.map((c, i) => c + h.dir[i] * 0.45 + (i === 0 ? tg.x : i === 1 ? tg.y : tg.z)); vDes = 0.5; }
       }
+      if (B.w) { // EN SALTO: cuenta atrás con la nave fija y viaje a 5 c hasta `stop` km del destino (no fijable ni dañable)
+        if (B.w.st === 'cd') { B.v = 0; if ((B.w.t -= dt) <= 0) B.w.st = 'go'; }
+        else { const rem = dist(B.pos, B.w.T) - B.w.stop, step = AI.warpV * dt; if (rem <= step) { B.pos = B.w.T.map((c, i) => c - B.w.dir[i] * B.w.stop); B.w = null; B.v = 0.5; sfx('warpSalida', B.pos); puff(B.pos, 0.6, 0x9fe8ff, 0.5, 0.02); } else B.pos = B.pos.map((c, i) => c + B.w.dir[i] * step); }
+        const vw = view(B.pos), scw = Math.max(vw.s, vw.rd * 0.12); B.grp.visible = true; B.grp.position.set(vw.x, vw.y, vw.z); if (B.w && B.w.st === 'go') B.grp.scale.set(scw, scw, scw * 30); else B.grp.scale.setScalar(scw); B.grp.quaternion.copy(B.q); setThrust(B.grp, B.w ? 40 : B.v, now);
+        sendState(B, idx, h, now); continue;
+      }
+      { const wpT = waypoint(B.pos, T) || T, dT = dist(wpT, B.pos), upV = sub(B.pos, nb.b.pos), ul = len(upV), dir = nrm(sub(wpT, B.pos)), fUp = (dir[0] * upV[0] + dir[1] * upV[1] + dir[2] * upV[2]) / ul, plan = warpPlan(dT, fUp, nb.alt, !!foe || now - (B.hitT || 0) < AI.calm * 1000);
+        if (plan === 'saltar' && dist(B.pos, bodies[0].pos) > 2.6 * bodies[0].R) { const f0 = FWD.clone().applyQuaternion(B.q); if (f0.x * dir[0] + f0.y * dir[1] + f0.z * dir[2] > 0.995) { B.w = { st: 'cd', t: AI.warpCd, T: wpT, dir, stop: wpT === T ? stop : 0 }; } else { T = B.pos.map((c, i) => c + dir[i] * 10); vDes = 0.3; } } // alinea el rumbo y empieza la cuenta atrás (2,5 s)
+        else if (plan === 'subir') { T = B.pos.map((c, i) => c + upV[i] / ul * 50); vDes = Math.max(vDes, 5); } } // junto a un planeta: primero hacia fuera
       // atmósfera: velocidad máxima y altura mínima sobre el suelo
       const relN = sub(B.pos, nb.b.pos), l = len(relN), upN = relN.map(c => c / l); const D = new THREE.Vector3(...nrm(sub(T, B.pos)));
       const side = incoming(B, plist, now); if (side) { B.ev = now + AI.dodgeT * 1000; B.evS = side; B.dp = dodgeP(B.K.agil); } // proyectil hostil en camino: maniobra evasiva (lateral + alabeo)
@@ -86,14 +111,14 @@ const BOT = (() => {
   }
   function sendState(B, idx, h, now) { // estado del bot para los demás (cada 66 ms)
     if (now - B.sendT <= 66) return; B.sendT = now; const n2 = nearest(B.pos), rb = n2.b && n2.alt < n2.b.R * 30 ? n2.b.i : -1;
-    send({ t: 'bs', i: idx, name: 'BOT ' + h.b, pos: B.pos, q: B.q.toArray(), v: B.dead ? 0 : B.v, hp: B.dead ? 0 : B.hp / B.K.HP * 100, sh: B.dead ? 0 : B.sh / B.K.SH * 100, sp: specOf(h), lv: B.K.LV, pk: 0, ms: B.mis || 0, rb, rp: rb >= 0 ? sub(B.pos, bodies[rb].pos) : null });
+    send({ t: 'bs', i: idx, name: 'BOT ' + h.b, pos: B.pos, q: B.q.toArray(), wp: B.w ? 1 : 0, v: B.dead ? 0 : B.w && B.w.st === 'go' ? AI.warpV : B.v, hp: B.dead ? 0 : B.hp / B.K.HP * 100, sh: B.dead ? 0 : B.sh / B.K.SH * 100, sp: specOf(h), lv: B.K.LV, pk: 0, ms: B.mis || 0, rb, rp: rb >= 0 ? sub(B.pos, bodies[rb].pos) : null });
   }
   function hit(old, pos, p, key, ak) { // proyectil (de humanos o torretas de humanos) contra un bot: lo decide el administrador
     if (p.owner <= -1000) return false; // las torretas de las bases bot solo disparan a humanos
     for (const [idx, B] of bots) {
-      if (B.dead || segDist(old, pos, B.pos) >= (p.hr ?? (p.spd !== undefined || ak > 0.02 ? 0.05 : HIT_R))) continue;
+      if (B.dead || (B.w && B.w.st === 'go') || segDist(old, pos, B.pos) >= (p.hr ?? (p.spd !== undefined || ak > 0.02 ? 0.05 : HIT_R))) continue;
       if (p.nl && Math.random() >= NOLOCK_HIT) { puff(pos, 0.01, 0xffd070, 0.3, 0.006); return true; } // disparo sin bloqueo: solo cuenta el 45 % de los impactos
-      const now = performance.now(), who = p.owner > 0 && p.owner < 1000 ? p.owner : p.owner < 0 && p.owner > -1000 ? -p.owner : null;
+      const now = performance.now(), who = p.owner > 0 && p.owner < 1000 ? p.owner : p.owner < 0 && p.owner > -1000 ? -p.owner : null; B.hitT = now;
       if (who) for (const o of bots.values()) if (o === B || (!o.dead && dist(o.pos, B.pos) < AI.help)) o.aggr = { id: who, t: now + AI.chase * 1000 }; // persigue a quien le ataca; los bots cercanos acuden
       if (B.ev > now && Math.random() < (B.dp || 0.25)) { puff(pos, 0.01, 0xffd070, 0.3, 0.006); return true; } // esquiva (misma probabilidad que el jugador: 25-45 % según maniobra)
       const over = p.dmg - B.sh; B.sh = Math.max(0, B.sh - p.dmg); if (over > 0) B.hp -= over;
@@ -104,12 +129,12 @@ const BOT = (() => {
     }
     return false;
   }
-  function nearestTo(w, range) { let best = null, bd = range; for (const [idx, B] of bots) { if (B.dead) continue; const d = dist(B.pos, w); if (d < bd) { bd = d; best = { pos: B.pos, v: B.v, q: B.q, d, id: 2000 + idx }; } } return best; }
+  function nearestTo(w, range) { let best = null, bd = range; for (const [idx, B] of bots) { if (B.dead || B.w) continue; const d = dist(B.pos, w); if (d < bd) { bd = d; best = { pos: B.pos, v: B.v, q: B.q, d, id: 2000 + idx }; } } return best; }
   function targets() { // en el anfitrión sus bots no llegan como remotos: se añaden aquí como objetivos (fijables, marcadores, Tab y recuadro)
     const out = []; if (P.hp <= 0) return out;
-    for (const [idx, B] of bots) { if (B.dead || !B.grp || !B.grp.visible) continue; const v = view(B.pos), h = BASE.HG.get(1000 + idx), sp = specOf(h); out.push({ kind: 'p', id: 2000 + idx, name: B.name || 'BOT', hp: B.hp / B.K.HP * 100, sh: B.sh / B.K.SH * 100, grp: B.grp, dist: v.d, dir: [v.rel[0] / v.d, v.rel[1] / v.d, v.rel[2] / v.d], lv: B.K.LV, st: sp.t, sp, pos: B.pos }); }
+    for (const [idx, B] of bots) { if (B.dead || B.w || !B.grp || !B.grp.visible) continue; const v = view(B.pos), h = BASE.HG.get(1000 + idx), sp = specOf(h); out.push({ kind: 'p', id: 2000 + idx, name: B.name || 'BOT', hp: B.hp / B.K.HP * 100, sh: B.sh / B.K.SH * 100, grp: B.grp, dist: v.d, dir: [v.rel[0] / v.d, v.rel[1] / v.d, v.rel[2] / v.d], lv: B.K.LV, st: sp.t, sp, pos: B.pos }); }
     return out;
   }
   const get = id => { const B = id >= 2000 && id < 3000 ? bots.get(id - 2000) : null; return B && !B.dead ? B : null; };
-  return { frame, hit, nearestTo, bots, targets, pos: id => (get(id) || {}).pos || null, speed: id => (get(id) || {}).v || 0, name: id => (get(id) || {}).name || null, logic: { incoming, phaseOf, statsFor, dodgeP, AI } };
+  return { frame, hit, nearestTo, bots, targets, pos: id => (get(id) || {}).pos || null, speed: id => (get(id) || {}).v || 0, name: id => (get(id) || {}).name || null, logic: { incoming, phaseOf, statsFor, dodgeP, warpPlan, waypoint, pickGoal, AI } };
 })();
