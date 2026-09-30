@@ -55,15 +55,31 @@ const BASE = (() => {
   // ---------- modelo 3D ----------
   // Piezas y torretas se funden por material con kit() (ships.js): unos pocos meshes por hangar. Unidades: km; la cara superior de la plataforma queda a y = 0.
   const HEAD_Y = 0.0255, MUZ = { plasma: 0.0150, cannon: 0.0135, missile: 0.0125, rail: 0.0225 }; // altura del eje de la cabeza de cada torreta sobre la plataforma y distancia de la boca del cañón a ese eje (km)
-  const std = (c, r = 0.7, m = 0.3, e = 0.07) => new THREE.MeshStandardMaterial({ color: c, roughness: r, metalness: m, emissive: c, emissiveIntensity: e });
-  const concrete = new THREE.MeshStandardMaterial({ color: 0x9a9da3, roughness: 0.95, metalness: 0.05 }), dark = new THREE.MeshStandardMaterial({ color: 0x4a4f57, roughness: 0.7, metalness: 0.5 });
-  const hSteel = std(0xb0b8c2, 0.5, 0.45, 0.14), hArmor = std(0x8a939e, 0.55, 0.5, 0.14), hDark = std(0x333940, 0.6, 0.5, 0.1), hAmmo = std(0x7a7038, 0.6, 0.3, 0.1), hWhite = std(0xe8edf2, 0.5, 0.1, 0.15);
-  const hazY = std(0xf2c230, 0.7, 0.1, 0.25), seamM = new THREE.MeshStandardMaterial({ color: 0x6f737a, roughness: 1, metalness: 0 }), winM = new THREE.MeshBasicMaterial({ color: 0x86d8f4 }), redL = new THREE.MeshBasicMaterial({ color: 0xff3030 }), whiteL = new THREE.MeshBasicMaterial({ color: 0xf4fbff });
+  const HT = SHIPGFX.tex('hull'), MXT = SHIPGFX.tex('metal'), GT = SHIPGFX.tex('ground'), WT = SHIPGFX.tex('win'), ENV = SHIPGFX.tex('env');
+  const std = (c, r = 0.7, m = 0.3, e = 0.07, map = null) => new THREE.MeshStandardMaterial({ color: c, roughness: r, metalness: m, emissive: c, emissiveIntensity: e, map, envMap: map ? ENV : null, envMapIntensity: 0.7 });
+  const concrete = new THREE.MeshStandardMaterial({ color: 0xe2e4e8, map: GT, roughness: 0.95, metalness: 0.04, emissive: 0x9a9da3, emissiveIntensity: 0.07 }), dark = new THREE.MeshStandardMaterial({ color: 0x4a4f57, roughness: 0.7, metalness: 0.5 });
+  const rockM = new THREE.MeshStandardMaterial({ color: 0xa89c8a, map: GT, roughness: 1, metalness: 0, emissive: 0x6b6357, emissiveIntensity: 0.1 }); // roca y talud de tierra alrededor de la plataforma
+  const hSteel = std(0xc6ced8, 0.5, 0.45, 0.14, HT), hArmor = std(0xa3acb8, 0.55, 0.5, 0.14, HT), hDark = std(0x555c66, 0.6, 0.5, 0.1, MXT), hAmmo = std(0x7a7038, 0.6, 0.3, 0.1), hWhite = std(0xe8edf2, 0.5, 0.1, 0.15);
+  const hazY = std(0xf2c230, 0.7, 0.1, 0.25), seamM = new THREE.MeshStandardMaterial({ color: 0x6f737a, roughness: 1, metalness: 0 }), redL = new THREE.MeshBasicMaterial({ color: 0xff3030 }), whiteL = new THREE.MeshBasicMaterial({ color: 0xf4fbff });
+  const winM = new THREE.MeshStandardMaterial({ color: 0x9aa8b8, map: WT, emissive: 0xffffff, emissiveMap: WT, emissiveIntensity: 1, roughness: 0.6, metalness: 0.2 }); // ventanas encendidas de la torre de control
+  const pvM = new THREE.MeshStandardMaterial({ color: 0xffffff, map: SHIPGFX.tex('pvr'), metalness: 0.6, roughness: 0.3, emissive: 0x143070, emissiveIntensity: 0.4, envMap: ENV, envMapIntensity: 1.2 });
+  const GP = {}, keepAll = list => { for (const [, geo] of list) geo.userData.keep = true; return list; }; // GP: material de luz de la base (propio de cada dueño) al que se sustituye la marca; keep: geometría compartida y cacheada (no se libera)
   const cyl = (r0, r1, h, seg = 16) => new THREE.CylinderGeometry(r0, r1, h, seg), box = (w, h, d) => new THREE.BoxGeometry(w, h, d), torusH = (r, t, seg = 20) => new THREE.TorusGeometry(r, t, 4, seg).rotateX(Math.PI / 2);
 
-  function scenery(g, glow, sk) { // plataforma de hormigón con juntas y franjas de peligro, pista de aterrizaje, luces de balizamiento y complejo de control al norte
-    const K = kit(), L = kit();
-    K.add(concrete, cyl(PAD_R, PAD_R + 0.003, sk + 0.0008, 40), [0, -(sk + 0.0008) / 2, 0]); K.add(hArmor, cyl(PAD_R + 0.0008, PAD_R + 0.0008, 0.0024, 40), [0, -0.0018, 0]); // cuerpo y faja de acero del borde
+  function rocks() { // 22 rocas low-poly (icosaedros de 20 caras deformados, sombreado plano) en el borde de la plataforma: una sola malla
+    const K = kit(0.02), R = rndOf(913), TP = 6.2832;
+    for (let i = 0; i < 22; i++) {
+      const g = new THREE.IcosahedronGeometry(1, 0), p = g.attributes.position, j = new Map();
+      for (let v = 0; v < p.count; v++) { const key = p.getX(v).toFixed(3) + p.getY(v).toFixed(3) + p.getZ(v).toFixed(3); if (!j.has(key)) j.set(key, 0.72 + R() * 0.5); p.setXYZ(v, p.getX(v) * j.get(key), p.getY(v) * j.get(key), p.getZ(v) * j.get(key)); }
+      g.computeVertexNormals();
+      const a = (i + R() * 0.7) / 22 * TP, r = PAD_R + 0.0046 + R() * 0.0036, sz = 0.0018 + R() * 0.0030;
+      K.add(rockM, g, [Math.cos(a) * r, sz * 0.18 - 0.0012, Math.sin(a) * r], [R() * 3, R() * 3, R() * 3], [sz * 1.25, sz * 0.72, sz]);
+    }
+    return keepAll(K.parts());
+  }
+  let _sc = null; // parte estática de la plataforma (igual en todos los hangares): se construye UNA vez y se comparte; solo el cuerpo (su altura sk) y el talud son propios de cada base
+  function sceneryParts() { // plataforma de hormigón con juntas y franjas de peligro, pista de aterrizaje, luces de balizamiento, paneles solares y complejo de control al norte
+    if (_sc) return _sc; const K = kit(0.03), L = kit(0.008), Kp = kit(0.012), glow = GP;
     for (let i = 0; i < 32; i++) { const a = (i + 0.5) * PI / 16; K.add(i % 2 ? hDark : hazY, box(0.0102, 0.0003, 0.0017), [Math.cos(a) * 0.0538, 0.00015, Math.sin(a) * 0.0538], [0, -(a + PI / 2), 0]); } // franjas de peligro del borde
     for (let k = -4; k <= 4; k++) { const c = k * 0.0105, half = Math.sqrt(PAD_R * PAD_R - c * c) - 0.0032; if (half < 0.004) continue; K.add(seamM, box(0.00016, 0.00012, half * 2), [c, 0.00006, 0]); K.add(seamM, box(half * 2, 0.00012, 0.00016), [0, 0.00006, c]); } // juntas de dilatación del hormigón
     L.add(glow, new THREE.RingGeometry(0.020, 0.0245, 48).rotateX(-PI / 2), [0, 0.0003, 0]); L.add(glow, new THREE.RingGeometry(0.0266, 0.0276, 48).rotateX(-PI / 2), [0, 0.0003, 0]);
@@ -84,15 +100,28 @@ const BASE = (() => {
     K.add(hArmor, box(0.0062, 0.0036, 0.0064), [0.0215, 0.0018, bz]); for (const dz of [-0.0016, 0.0016]) { K.add(hDark, cyl(0.0014, 0.0014, 0.0005, 14), [0.0215, 0.0038, bz + dz]); K.add(hSteel, cyl(0.0011, 0.0011, 0.0003, 10), [0.0215, 0.0041, bz + dz]); } K.add(hDark, box(0.0062, 0.0009, 0.0007), [0.0215, 0.0012, bz + 0.0034]); // generador con ventiladores
     for (let i = 0; i < 3; i++) { K.add(hDark, cyl(0.0003, 0.0003, 0.0040, 5), [0.0142 + i * 0.0007, 0.0056 + 0.0009 * i, bz - 0.0020]); }
     for (const [x, c] of [[-0.0125, hSteel], [-0.0068, hArmor], [0.0118, hSteel]]) { K.add(c, box(0.0054, 0.0030, 0.0026), [x, 0.0015, 0.0440]); K.add(hDark, box(0.0055, 0.0003, 0.0027), [x, 0.0022, 0.0440]); K.add(hDark, box(0.0002, 0.0030, 0.0027), [x + 0.0009, 0.0015, 0.0440]); } L.add(glow, box(0.0054, 0.0004, 0.0028), [-0.0068, 0.0031, 0.0440]); // contenedores de carga
-    K.build(g); L.build(g);
+    for (let i = 0; i < 3; i++) { const z = -0.014 + i * 0.014; Kp.add(pvM, box(0.0108, 0.0008, 0.0125), [-0.0425, 0.0036, z], [0, 0, 0.42]); K.add(hDark, box(0.0114, 0.0006, 0.0131), [-0.0425, 0.0032, z], [0, 0, 0.42]); K.add(hDark, cyl(0.0004, 0.0004, 0.0034, 5), [-0.0425, 0.0016, z]); } // campo de paneles solares (oeste)
+    return (_sc = { parts: keepAll([...K.parts(), ...L.parts(), ...Kp.parts(), ...rocks()]) });
   }
-  function tower(glowM) { // base y columna de una torreta: el zócalo queda como ruina al destruirla; la columna (col) desaparece con la cabeza
-    const K = kit(), C = kit(), t = new THREE.Group(), col = new THREE.Group();
+  function scenery(g, glow, sk) {
+    for (const [m, geo] of sceneryParts().parts) g.add(new THREE.Mesh(geo, m === GP ? glow : m));
+    const K = kit(0.03), r0 = PAD_R + 0.0011, dh = sk + 0.0008;
+    K.add(concrete, cyl(PAD_R, PAD_R + 0.003, dh, 40), [0, -dh / 2, 0]); K.add(hArmor, cyl(PAD_R + 0.0008, PAD_R + 0.0008, 0.0024, 40), [0, -0.0018, 0]); // cuerpo y faja de acero del borde
+    K.add(rockM, new THREE.CylinderGeometry(r0, r0 + dh * 1.2 + 0.0015, dh + 0.0004, 28, 1, true), [0, -dh / 2 - 0.0002, 0]); // talud de tierra: oculta el desnivel del terreno bajo la plataforma
+    K.build(g);
+  }
+  let _tw = null; // torreta (zócalo y columna): geometría cacheada y compartida por las 4 torretas de todas las bases
+  function towerParts() {
+    if (_tw) return _tw; const K = kit(0.03), C = kit(0.03), glowM = GP;
     K.add(concrete, cyl(0.0062, 0.0066, 0.0016, 18), [0, 0.0008, 0]); K.add(hArmor, cyl(0.0048, 0.0054, 0.0052, 14), [0, 0.0042, 0]); K.add(glowM, torusH(0.0051, 0.00025), [0, 0.0030, 0]); K.add(hDark, box(0.0018, 0.0026, 0.0006), [0, 0.0034, 0.0053]);
     for (let i = 0; i < 8; i++) { const a = i * PI / 4 + PI / 8; K.add(hDark, box(0.0009, 0.0006, 0.0009), [Math.cos(a) * 0.0057, 0.0019, Math.sin(a) * 0.0057]); } // pernos del zócalo
     C.add(hArmor, cyl(0.0027, 0.0034, 0.0150, 12), [0, 0.0143, 0]); C.add(hSteel, cyl(0.0050, 0.0052, 0.0010, 18), [0, 0.0217, 0]); C.add(glowM, torusH(0.0051, 0.00022), [0, 0.0222, 0]); C.add(hDark, cyl(0.0004, 0.0004, 0.0120, 5), [0.0033, 0.0143, 0.0007]);
     for (let i = 0; i < 4; i++) { const a = i * PI / 2 + PI / 4; C.add(hDark, box(0.0006, 0.0140, 0.0010), [Math.cos(a) * 0.0031, 0.0143, Math.sin(a) * 0.0031], [0, -a, 0]); } // nervios de la columna
-    K.build(t); C.build(col); t.add(col); return { g: t, col };
+    return (_tw = { K: keepAll(K.parts()), C: keepAll(C.parts()) });
+  }
+  function tower(glowM) { // base y columna de una torreta: el zócalo queda como ruina al destruirla; la columna (col) desaparece con la cabeza
+    const T = towerParts(), t = new THREE.Group(), col = new THREE.Group(), fill = (parent, list) => { for (const [m, geo] of list) parent.add(new THREE.Mesh(geo, m === GP ? glowM : m)); };
+    fill(t, T.K); fill(col, T.C); t.add(col); return { g: t, col };
   }
   let _bt = null; const beaconTex = () => _bt || (_bt = (() => { const c = document.createElement('canvas'); c.width = c.height = 64; const x = c.getContext('2d'), gr = x.createRadialGradient(32, 32, 0, 32, 32, 32); gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.2, 'rgba(255,255,255,0.6)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); x.fillStyle = gr; x.fillRect(0, 0, 64, 64); return new THREE.CanvasTexture(c); })());
   function build(h) {
@@ -123,8 +152,10 @@ const BASE = (() => {
     if (t.next === undefined || now > t.next || moved) { t.y0 = moved || t.yaw === undefined ? t.head.rotation.y : t.yaw; t.p0 = moved || t.pit === undefined ? t.head.rotation.x : t.pit; t.y1 = t.y0 + (Math.random() - 0.5) * 3.6; t.p1 = 0.04 + Math.random() * 0.45; t.t0 = now; t.next = now + 2000 + Math.random() * 2500; }
     const k = Math.min(1, (now - t.t0) / 1100), e = k * k * (3 - 2 * k); t.yaw = t.y0 + (t.y1 - t.y0) * e; t.pit = t.p0 + (t.p1 - t.p0) * e; t.head.rotation.set(t.pit, t.yaw, 0, 'YXZ');
   }
-  function styleHead(style) { // cabeza de la torreta (eje en el origen, cañón hacia -z): plasma = dos cañones con bobinas · munición = cañón rotativo con cajas de munición · misil = dos racks de tubos con misiles · riel = dos raíles largos con bobinas y disipadores
-    const g = new THREE.Group(), K = kit(), gm = new THREE.MeshBasicMaterial({ color: TOWER_STYLES[style].col });
+  const _hp = {}; // piezas de cada estilo de cabeza: se construyen UNA vez (4 estilos) y las comparten todas las torretas
+  function styleHead(style) { const g = new THREE.Group(); for (const [m, geo] of _hp[style] || (_hp[style] = keepAll(headKit(style)))) g.add(new THREE.Mesh(geo, m)); return g; }
+  function headKit(style) { // cabeza de la torreta (eje en el origen, cañón hacia -z): plasma = dos cañones con bobinas · munición = cañón rotativo con cajas de munición · misil = dos racks de tubos con misiles · riel = dos raíles largos con bobinas y disipadores
+    const K = kit(0.03), gm = new THREE.MeshBasicMaterial({ color: TOWER_STYLES[style].col });
     K.add(hSteel, new THREE.SphereGeometry(0.0048, 18, 10), [0, 0, 0.0004], [0, 0, 0], [1, 0.72, 1.12]); K.add(hDark, cyl(0.0046, 0.0050, 0.0010, 18), [0, -0.0030, 0]); K.add(hArmor, box(0.0072, 0.0034, 0.0016), [0, 0, -0.0044]); K.add(hDark, box(0.0074, 0.0006, 0.0018), [0, 0.0010, -0.0044]); // cúpula, aro y escudo frontal del cañón
     K.add(gm, new THREE.SphereGeometry(0.0004, 6, 5), [-0.0040, 0.0016, -0.0020]); K.add(gm, new THREE.SphereGeometry(0.0004, 6, 5), [0.0040, 0.0016, -0.0020]); K.add(hDark, box(0.0030, 0.0014, 0.0036), [0, 0.0025, 0.0022]); // luces de estado y caja de control
     if (style === 'plasma') {
@@ -153,9 +184,9 @@ const BASE = (() => {
       for (let i = 0; i < 6; i++) K.add(hDark, box(0.0036, 0.0002, 0.0034), [0, 0.0032 + i * 0.0005, 0.0006]); // disipador de calor
       K.add(hDark, box(0.0052, 0.0030, 0.0018), [0, 0, -0.0216]); K.add(hSteel, box(0.0014, 0.0030, 0.0020), [0, 0, -0.0218]); K.add(gm, box(0.0009, 0.0009, 0.0004), [0, 0, -0.0228]); // freno de boca
     }
-    K.build(g); return g;
+    return K.parts();
   }
-  function setHeads(h) { if (!h.towers) return; h.towers.forEach((t, i) => { if (t.style === h.ts[i]) return; t.style = h.ts[i]; t.g.remove(t.head); t.head.traverse(o => { if (o.geometry) o.geometry.dispose(); }); const nh = styleHead(h.ts[i]); nh.position.y = HEAD_Y; nh.visible = t.head.visible; t.g.add(nh); t.head = nh; }); }
+  function setHeads(h) { if (!h.towers) return; h.towers.forEach((t, i) => { if (t.style === h.ts[i]) return; t.style = h.ts[i]; t.g.remove(t.head); t.head.traverse(o => { if (o.geometry && !o.geometry.userData.keep) o.geometry.dispose(); }); const nh = styleHead(h.ts[i]); nh.position.y = HEAD_Y; nh.visible = t.head.visible; t.g.add(nh); t.head = nh; }); }
   const worldOf = h => { const b = bodyBy(h.b), r = b.R + h.info.top; return b.pos.map((c, i) => c + h.dir[i] * r); };
   const localToWorld = (h, x, y, z) => { const w = worldOf(h), v = new THREE.Vector3(x * BK, y * BK, z * BK).applyQuaternion(h.q); return [w[0] + v.x, w[1] + v.y, w[2] + v.z]; };
 
@@ -164,7 +195,7 @@ const BASE = (() => {
     tw.forEach((v, i) => { const t = h.towers[i]; if (!t) return; const was = h.tw ? h.tw[i] : TW_HP; if (was > 0 && v <= 0 && !silent && h.grp.visible) boom(localToWorld(h, t.g.position.x, HEAD_Y * 0.8, t.g.position.z), 0.03); t.head.visible = v > 0; t.col.visible = v > 0; });
     h.tw = tw.slice();
   }
-  function drop(h) { if (h.beacon) { scene.remove(h.beacon); h.beacon.material.dispose(); } if (h.grp) { scene.remove(h.grp); h.grp.traverse(o => { if (o.geometry) o.geometry.dispose(); }); } planets.removePad(h.b, h.dir); }
+  function drop(h) { if (h.beacon) { scene.remove(h.beacon); h.beacon.material.dispose(); } if (h.grp) { scene.remove(h.grp); h.grp.traverse(o => { if (o.geometry && !o.geometry.userData.keep) o.geometry.dispose(); }); } planets.removePad(h.b, h.dir); }
   function sync(list) { // lista de hangares del servidor
     const seen = new Set();
     for (const e of list) {
@@ -227,7 +258,7 @@ const BASE = (() => {
   }
   function startGame() { // el administrador inició la partida (o te uniste con ella en marcha): nave básica, inventario vacío, reaparecer en tu hangar
     started = true; chooserShown = false; pl.style.display = 'none'; myName = ($('lbName') && $('lbName').value || myName).slice(0, 16) || 'Piloto';
-    FOOT.resetInv(ROOMCFG); if (typeof resetShips === 'function') resetShips(); resetLv(); const b0 = basicSpec(mySpec.c); saveSpec(b0); applyLoadout(b0, true); P.kills = 0; P.deaths = 0; P.deadUntil = 0;
+    FOOT.resetInv(ROOMCFG); if (typeof resetShips === 'function') resetShips(); resetLv(); const b0 = basicSpec(mySpec.c, mySpec.sk); saveSpec(b0); applyLoadout(b0, true); P.kills = 0; P.deaths = 0; P.deadUntil = 0;
     if (typeof refresh === 'function') { sel = JSON.parse(JSON.stringify(b0)); refresh(); }
     document.exitPointerLock(); ov.style.display = 'none'; say('¡Partida iniciada! Esc abre el menú de mejoras'); // el menú no se abre solo: haz clic para tomar el control
     { const pn = document.getElementById('pname'); if (pn) pn.value = myName; }
@@ -416,5 +447,5 @@ const BASE = (() => {
   }
   const AT_BASE_KM = 3; // la plataforma mide el doble (BK 6)
   const targetPos = id => { const h = HG.get(id); if (!h || h.hp <= 0) return null; const w = worldOf(h); return [w[0] + h.dir[0] * 0.012, w[1] + h.dir[1] * 0.012, w[2] + h.dir[2] * 0.012]; };
-  return { model, targets, targetPos, atBase, mine: () => HG.get(myId) || null, canRespawn: () => !!HG.get(myId) || (typeof WAR !== 'undefined' && WAR.mine().length > 0), sync, onEvent, onClaim, onLobby, LB, started: () => started, choose: show, spawnAt, frame, hit, hud, HG, worldOf, isHost: () => LB.adm === myId, booted: () => MM.booted, onWelcome, onRoomMsg, loading: () => loading };
+  return { model, dispose: o => o.traverse(x => { if (x.geometry && !x.geometry.userData.keep) x.geometry.dispose(); }), targets, targetPos, atBase, mine: () => HG.get(myId) || null, canRespawn: () => !!HG.get(myId) || (typeof WAR !== 'undefined' && WAR.mine().length > 0), sync, onEvent, onClaim, onLobby, LB, started: () => started, choose: show, spawnAt, frame, hit, hud, HG, worldOf, isHost: () => LB.adm === myId, booted: () => MM.booted, onWelcome, onRoomMsg, loading: () => loading };
 })();

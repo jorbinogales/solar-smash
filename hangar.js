@@ -32,7 +32,7 @@ function renderRes() {
   $('resbar').innerHTML = keys.map(k => `<span class="cost"><i>${icon(k)}</i>${inv()[k] || 0}</span>`).join('');
 }
 function renderShip() {
-  sel = validSpec(sel); const shown = (() => { if (!pvs) return sel; if (pvs.startsWith('ship:')) return validSpec({ ...sel, t: pvs.slice(5) }); if (pvs.startsWith('add:')) { const i = +pvs.slice(4), a = sel.a.slice(); a[i] = Math.min(ADDONS[i].max, a[i] + 1); return validSpec({ ...sel, a }); } return sel; })(), previewing = shown !== sel, st = statsOf(shown, lvA(shown.t)), used = sel.a.reduce((x, y) => x + y, 0), tot = ADDONS.reduce((x, d) => x + d.max, 0);
+  sel = validSpec(sel); const shown = (() => { if (!pvs) return sel; if (pvs.startsWith('ship:')) return validSpec({ ...sel, t: pvs.slice(5) }); if (pvs.startsWith('skin:')) return validSpec({ ...sel, sk: +pvs.slice(5) }); if (pvs.startsWith('add:')) { const i = +pvs.slice(4), a = sel.a.slice(); a[i] = Math.min(ADDONS[i].max, a[i] + 1); return validSpec({ ...sel, a }); } return sel; })(), previewing = shown !== sel, st = statsOf(shown, lvA(shown.t)), used = sel.a.reduce((x, y) => x + y, 0), tot = ADDONS.reduce((x, d) => x + d.max, 0);
   $('shipList').innerHTML = Object.entries(TYPES).map(([id, t]) => { const cost = SHIP_COST[id], unl = !cost || unlocked.has(id); return `<div class="ship hasico ${id === sel.t ? 'on' : ''}" data-t="${id}" data-pv="ship:${id}">${ic(id)}<div><b>${t.name}</b><small>${t.role}</small><small>${t.desc}</small>${unl ? '' : buyBtn(`data-unl="${id}"`, cost, 'ADQUIRIR')}</div></div>`; }).join('');
   $('slots').innerHTML = `<b>Mejoras ${used}/${tot}</b> ${'▮'.repeat(used)}${'▯'.repeat(tot - used)}`;
   $('addons').innerHTML = ADDONS.map((a, i) => { const lv = sel.a[i], cost = lv < a.max ? upgradeCost(i, lv) : null; return card(a.id, a.name, pips(lv, a.max), a.desc, cost ? buyBtn(`data-a="${i}"`, cost) : '<span class="max">MÁXIMO</span>', lv < a.max ? 'add:' + i : ''); }).join('');
@@ -42,6 +42,13 @@ function renderShip() {
     .map(([n, v, max, c, li, u = '']) => `<span>${n}</span>${bar(v, max, c)}<b>${v}${u}</b>${lvCell(li)}`).join('');
   $('pvlv').innerHTML = `<div><b>Nv ${L.lv}</b><div class="xbar"><i style="width:${need ? Math.min(100, L.xp / need * 100) : 100}%"></i></div><small>${need ? `${L.xp}/${need} XP` : 'NIVEL MÁX.'}</small><em style="visibility:${lvPts(L) > 0 ? 'visible' : 'hidden'}">${lvPts(L)} punto${lvPts(L) === 1 ? '' : 's'}</em></div>`; // nivel sobre la vista previa
   const key = JSON.stringify(shown); if (key !== PV.key) { PV.key = key; if (PV.obj) PV.pivot.remove(PV.obj); PV.obj = makeShip(shown); PV.obj.showShield = true; setThrust(PV.obj, 500, 0); updateShipFx(PV.obj, 0); PV.pivot.add(PV.obj); PV.cam.position.set(0.05, 0.032, 0.09); PV.cam.lookAt(0, 0, 0); }
+  renderSkins();
+}
+// skins: 6 pegatinas (casco / acento); cambiar solo en la base (fuera, atenuadas e inertes). Pasar el ratón las prueba en la vista previa; no cuestan nada.
+const hex6 = n => '#' + (n >>> 0).toString(16).padStart(6, '0');
+function renderSkins() {
+  const ok = atBase();
+  $('skins').innerHTML = SKINS.map((k, i) => `<button type="button" role="radio" aria-checked="${i === sel.sk}" aria-label="Skin ${k.name}" title="${k.name}" class="skchip${i === sel.sk ? ' on' : ''}" data-sk="${i}" data-pv="skin:${i}" style="background:linear-gradient(135deg,${hex6(k.hull)} 0 52%,${hex6(k.acc !== undefined ? k.acc : mySpec.c)} 52% 100%)"${ok ? '' : ' disabled'}></button>`).join('');
 }
 
 // ---------- BASE: modelo centrado con sus estadísticas, estilos de torreta y mejoras ----------
@@ -63,7 +70,7 @@ function renderBase() {
   $('bStats').innerHTML = `<div class="sgrid">${[['Vida', h.hp, s.hpMax, '#5dff8a'], ['Escudo', h.sh, s.shMax || 1, '#4db8ff'], ['Vida torretas', avg, s.twMax, '#ffb347']].map(([n, v, max, c]) => `<span>${n}</span>${bar(v, max, c)}<b>${n === 'Escudo' && !s.shMax ? '—' : Math.round(v) + '/' + Math.round(max)}</b>`).join('')}<span>Daño torretas</span>${bar(s.dmgMul, 2.6, '#ff8a3c')}<b>×${s.dmgMul.toFixed(1)}</b></div>`;
   const eff = { hp: () => `${h.st.hpMax} de vida`, sh: () => (h.st.shMax ? `${h.st.shMax} de escudo que absorbe las balas` : 'sin escudo'), tw: () => `${h.st.twMax} de vida por torreta`, td: () => `×${h.st.dmgMul.toFixed(1)} de daño de las torretas` };
   $('baseUp').innerHTML = Object.entries(BASE_UP).map(([k, u]) => { const lv = (h.up && h.up[k]) || 0, cost = lv < u.max ? u.cost(lv + 1) : null; return card(k, u.name, pips(lv, u.max), 'Ahora: ' + eff[k](), cost ? buyBtn(`data-base="${k}"`, cost) : '<span class="max">MÁXIMO</span>', lv < u.max ? 'up:' + k : ''); }).join('');
-  const tsShown = pvStyle ? [pvStyle, pvStyle, pvStyle, pvStyle] : (h.ts || ['plasma', 'plasma', 'plasma', 'plasma']), key = JSON.stringify([tsShown, h.tw && h.tw.map(v => v > 0), s.shMax > 0]); if (key !== BV.key) { BV.key = key; if (BV.obj) BV.pivot.remove(BV.obj); BV.obj = baseModel(tsShown, h.tw || [1, 1, 1, 1], s.shMax > 0); BV.pivot.add(BV.obj); BV.cam.position.set(2.4, 1.6, 2.9); BV.cam.lookAt(0, 0.25, 0); }
+  const tsShown = pvStyle ? [pvStyle, pvStyle, pvStyle, pvStyle] : (h.ts || ['plasma', 'plasma', 'plasma', 'plasma']), key = JSON.stringify([tsShown, h.tw && h.tw.map(v => v > 0), s.shMax > 0]); if (key !== BV.key) { BV.key = key; if (BV.obj) { BV.pivot.remove(BV.obj); BASE.dispose(BV.obj); } BV.obj = baseModel(tsShown, h.tw || [1, 1, 1, 1], s.shMax > 0); BV.pivot.add(BV.obj); BV.cam.position.set(2.4, 1.6, 2.9); BV.cam.lookAt(0, 0.25, 0); }
 }
 function renderTools() {
   if (typeof TOOL_UP === 'undefined') return;
@@ -79,8 +86,9 @@ document.addEventListener('mouseover', e => { // vista previa al pasar el ratón
 });
 document.addEventListener('click', e => {
   const bb = e.target.closest('#hg .buy'); if (bb) { if (!bb.disabled) buyNow(bb); return; } // COMPRAR / ADQUIRIR
-  const tb = e.target.closest('#hg .tabs button'), t = e.target.closest('#hg [data-t]'), eq = e.target.closest('[data-equip]'), sl = e.target.closest('[data-slot]'), lb = e.target.closest('#hg [data-lv]');
+  const sk = e.target.closest('#hg [data-sk]'), tb = e.target.closest('#hg .tabs button'), t = e.target.closest('#hg [data-t]'), eq = e.target.closest('[data-equip]'), sl = e.target.closest('[data-slot]'), lb = e.target.closest('#hg [data-lv]');
   if (tb) return setTab(tb.dataset.tab);
+  if (sk) { if (!atBase()) return; setSkin(+sk.dataset.sk); sel.sk = mySpec.sk; pvs = null; refresh(); return; } // skin: solo aspecto (no reinicia vida ni munición)
   if (lb) { // «+»: asigna un punto de nivel (+2 %) a esa característica de la nave actual
     const L = lvlOf(mySpec.t), i = +lb.dataset.lv; if (lvPts(L) <= 0) return say('Sin puntos: sube de nivel derribando naves'); if (L.a[i] >= LV_PTMAX) return;
     L.a[i]++; saveLv(); pvs = null; sel.t = mySpec.t; sel.a = mySpec.a.slice(); applyNow(); return;
@@ -104,9 +112,9 @@ $('go').onclick = () => {
 };
 let sig = '', fitLast = '';
 function hangarFrame(now) { // llamado desde el bucle principal mientras el menú está abierto
-  const h = typeof BASE !== 'undefined' ? BASE.mine() : null, sg = JSON.stringify([typeof INV !== 'undefined' && INV, typeof TOOLS !== 'undefined' && TOOLS, h && [h.up, Math.round(h.hp), Math.round(h.sh), h.tw, h.ts], [...unlocked], [...towersUnlocked], mySpec.a, mySpec.t, lvlOf(mySpec.t), atBase(), tab, typeof WAR !== 'undefined' && WAR.sig()]);
+  const h = typeof BASE !== 'undefined' ? BASE.mine() : null, sg = JSON.stringify([typeof INV !== 'undefined' && INV, typeof TOOLS !== 'undefined' && TOOLS, h && [h.up, Math.round(h.hp), Math.round(h.sh), h.tw, h.ts], [...unlocked], [...towersUnlocked], mySpec.a, mySpec.t, mySpec.sk, lvlOf(mySpec.t), atBase(), tab, typeof WAR !== 'undefined' && WAR.sig()]);
   if (fitLast !== ov.style.display + innerWidth + 'x' + innerHeight) { fitLast = ov.style.display + innerWidth + 'x' + innerHeight; fitMenu(); }
-  if (sg !== sig) { sig = sg; sel.a = mySpec.a.slice(); sel.t = mySpec.t; refresh(); } // los recursos y la base cambian mientras juegas
+  if (sg !== sig) { sig = sg; sel.a = mySpec.a.slice(); sel.t = mySpec.t; sel.sk = mySpec.sk; refresh(); } // los recursos y la base cambian mientras juegas
   const P_ = tab === 'ship' ? PV : tab === 'base' ? BV : tab === 'fleet' ? FV : null;
   if (P_ && P_.obj) {
     P_.pivot.rotation.y = now / 2500; if (P_ === PV) { setThrust(PV.obj, 500, now); updateShipFx(PV.obj, now); }

@@ -21,15 +21,26 @@ const ADDONS = [
   { id: 'ammo',     name: 'Munición', max: 3, desc: '+60 plasma y +1 misil de capacidad máxima' },
 ];
 const ACCENTS = [0x4db8ff, 0xff6a3c, 0x5dff8a, 0xffd23f, 0xd06bff, 0xf2f2f2];
+// Skins (solo aspecto): tinte del casco, factor del vientre, acento (undefined = el color c de la nave), color del blindaje, metal/rugosidad del casco y patrón de franjas pintadas (pat / pc: color de la pintura).
+// Se aplican con colores por material sobre la textura de casco compartida: cero texturas nuevas. spec.sk = índice 0-5.
+const SKINS = [
+  { name: 'Militar',         hull: 0xaeb8c3, bel: 0.58, ar: 0x59616b, m: 0.3,  r: 0.52 },
+  { name: 'Desierto',        hull: 0xc7a56a, bel: 0.62, acc: 0x7a4a1f, ar: 0x7d6a45, m: 0.2,  r: 0.64, pat: 'bands',   pc: 0x5b4527 },
+  { name: 'Ártico',          hull: 0xdbe6ee, bel: 0.72, acc: 0xff7a1a, ar: 0x8fa1b3, m: 0.25, r: 0.5,  pat: 'tips',    pc: 0xff7a1a },
+  { name: 'Carbono',         hull: 0x30343b, bel: 0.55, acc: 0x22d3ee, ar: 0x1c1f24, m: 0.65, r: 0.34, pat: 'stripe',  pc: 0x22d3ee },
+  { name: 'Rojo de combate', hull: 0xb5261d, bel: 0.5,  acc: 0xf4f4f4, ar: 0x3b3f45, m: 0.35, r: 0.42, pat: 'stripe',  pc: 0xf4f4f4 },
+  { name: 'Dorado',          hull: 0xd6a92e, bel: 0.6,  acc: 0xfff0b8, ar: 0x9c7a1c, m: 0.85, r: 0.28, pat: 'chevron', pc: 0xfff0b8 },
+];
+const skinOf = v => Math.max(0, Math.min(SKINS.length - 1, Math.round(Number(v)) || 0));
 
 function validSpec(s) {
   const t = TYPES[s && s.t] ? s.t : 'halcon', T = TYPES[t];
   const a = ADDONS.map((d, i) => Math.max(0, Math.min(d.max, Math.round(Number(s && s.a && s.a[i]) || 0))));
-  return { t, a, c: Number.isFinite(s && s.c) ? (s.c >>> 0) & 0xffffff : 0x4db8ff };
+  return { t, a, c: Number.isFinite(s && s.c) ? (s.c >>> 0) & 0xffffff : 0x4db8ff, sk: skinOf(s && s.sk) };
 }
 function statsOf(spec, lvA) { // lvA: puntos de nivel asignados a cada característica de LV_STATS (cada punto = +2 % del valor BASE del chasis)
   const T = TYPES[spec.t], [ar, sh, pl, mi, en, am = 0] = spec.a, [bv = 0, bh = 0, bs = 0, bd = 0, ba = 0, br = 0, bp = 0, bw = 0] = lvA || [];
-  return { hp: T.hp + 30 * ar + Math.round(T.hp * LV_K * bh), sh: T.sh + 40 * sh + Math.round(T.sh * LV_K * bs), plasma: T.plasma + 60 * am + Math.round(T.plasma * LV_K * bp), pdmg: Math.round((CH_DMG * (1 + LV_K * bd) + 2 * pl) * 10) / 10, missiles: T.missiles + 2 * mi + am, flameMul: 1 + 0.3 * en, pitch: 1 - 0.1 * en, agil: Math.round(T.agil * (1 + LV_K * ba) * 100) / 100, vmax: Math.min(1500, Math.round(T.speed * (1 + 0.1 * en))) + Math.round(T.speed * LV_K * bv), warp: Math.round(T.warp * (1 + 0.5 * en)) + Math.round(T.warp * LV_K * bw), regen: CH_REGEN / (1 + LV_K * br) }; // regen: segundos por unidad de plasma recargada
+  return { sk: skinOf(spec.sk), hp: T.hp + 30 * ar + Math.round(T.hp * LV_K * bh), sh: T.sh + 40 * sh + Math.round(T.sh * LV_K * bs), plasma: T.plasma + 60 * am + Math.round(T.plasma * LV_K * bp), pdmg: Math.round((CH_DMG * (1 + LV_K * bd) + 2 * pl) * 10) / 10, missiles: T.missiles + 2 * mi + am, flameMul: 1 + 0.3 * en, pitch: 1 - 0.1 * en, agil: Math.round(T.agil * (1 + LV_K * ba) * 100) / 100, vmax: Math.min(1500, Math.round(T.speed * (1 + 0.1 * en))) + Math.round(T.speed * LV_K * bv), warp: Math.round(T.warp * (1 + 0.5 * en)) + Math.round(T.warp * LV_K * bw), regen: CH_REGEN / (1 + LV_K * br) }; // regen: segundos por unidad de plasma recargada
 }
 // ---------- niveles por nave: cada chasis tiene su propio nivel (0-20) y experiencia, independientes ----------
 // XP para pasar del nivel n-1 al n: need(n) = 10 + 15(n-1) + 5(n-1)(n-2)/2 → 10, 25, 45, 70, 100, 135… (la barra muestra la XP dentro del nivel actual)
@@ -48,9 +59,9 @@ const hexSvg = (n, fill = '#ffd23f', s = 40) => `<svg width="${s}" height="${Mat
 const UPGRADE_COST = [n => ({ piedra: 6 * n, agua: 4 * n }), n => ({ cobre: 4 * n, piedra: 3 * n }), n => ({ plata: 3 * n, cobre: 3 * n }), n => ({ oro: 2 * n, plata: 2 * n }), n => ({ diamante: n, oro: 2 * n }), n => ({ plata: 2 * n, madera: 3 * n })];
 const SHIP_COST = { halcon: null, saeta: { piedra: 12, cobre: 6 }, coloso: { plata: 12, oro: 6 }, nomada: { oro: 8, diamante: 3 } }; // cambiar de nave: se desbloquea una vez con recursos
 const upgradeCost = (i, lv) => UPGRADE_COST[i](lv + 1);
-const basicSpec = c => ({ t: 'halcon', a: [0, 0, 0, 0, 0, 0], c: Number.isFinite(c) ? c : 0x4db8ff }); // todos empiezan con una nave básica
+const basicSpec = (c, sk) => ({ t: 'halcon', a: [0, 0, 0, 0, 0, 0], c: Number.isFinite(c) ? c : 0x4db8ff, sk: skinOf(sk) }); // todos empiezan con una nave básica
 function loadSpec() { try { return validSpec(JSON.parse(localStorage.getItem('spec'))); } catch { return validSpec(null); } }
-function saveSpec(s) { try { localStorage.setItem('spec', JSON.stringify(s)); } catch {} }
+function saveSpec(s) { try { localStorage.setItem('spec', JSON.stringify(validSpec(s))); } catch {} }
 
 // ---------- utilidades compartidas con base.js (kit de piezas fusionadas por material) ----------
 const stdMat = (c, ei = 0.3, m = 0.2, r = 0.5) => new THREE.MeshStandardMaterial({ color: c, metalness: m, roughness: r, emissive: c, emissiveIntensity: ei, side: THREE.DoubleSide }); // emisivo = visible en la sombra
@@ -61,23 +72,27 @@ const ball3 = r => new THREE.SphereGeometry(r, 8, 6);
 const nav = c => new THREE.MeshBasicMaterial({ color: c });
 // Fusión de geometrías: cada nave acumula sus piezas por material y las une en UN mesh por material (unos 8 meshes por casco en vez de cientos).
 const FLIPX = new THREE.Matrix4().makeScale(-1, 1, 1);
-function mergeGeos(list) { // list: [[geometría, matriz]]; los espejos invierten el orden de los triángulos para conservar las caras
+function mergeGeos(list, tile = 0) { // list: [[geometría, matriz]]; los espejos invierten el orden de los triángulos para conservar las caras · tile > 0: añade UVs por eje dominante (1 vuelta de textura = tile km)
   const parts = list.map(([g, m]) => { const x = g.index ? g.toNonIndexed() : g.clone(); x.applyMatrix4(m); return [x, m.determinant() < 0]; });
   let n = 0; for (const [x] of parts) n += x.attributes.position.count;
-  const P = new Float32Array(n * 3), N = new Float32Array(n * 3); let o = 0;
+  const P = new Float32Array(n * 3), N = new Float32Array(n * 3), U = tile > 0 ? new Float32Array(n * 2) : null; let o = 0;
   for (const [x, fl] of parts) {
     const pa = x.attributes.position.array, na = x.attributes.normal.array; P.set(pa, o * 3); N.set(na, o * 3);
     if (fl) for (let t = 0; t < pa.length / 9; t++) { const b = o * 3 + t * 9; for (let k = 0; k < 3; k++) { let a = P[b + 3 + k]; P[b + 3 + k] = P[b + 6 + k]; P[b + 6 + k] = a; a = N[b + 3 + k]; N[b + 3 + k] = N[b + 6 + k]; N[b + 6 + k] = a; } }
+    if (U) for (let t = 0; t < pa.length / 9; t++) { // proyección por el eje dominante de la cara (paneles alineados al modelo)
+      const b = o * 3 + t * 9, bu = (o + t * 3) * 2, ax = Math.abs(N[b] + N[b + 3] + N[b + 6]), ay = Math.abs(N[b + 1] + N[b + 4] + N[b + 7]), az = Math.abs(N[b + 2] + N[b + 5] + N[b + 8]);
+      for (let k = 0; k < 3; k++) { const px = P[b + k * 3], py = P[b + k * 3 + 1], pz = P[b + k * 3 + 2], X = fl ? -px : px; if (ax >= ay && ax >= az) { U[bu + k * 2] = pz / tile; U[bu + k * 2 + 1] = py / tile; } else if (ay >= az) { U[bu + k * 2] = X / tile; U[bu + k * 2 + 1] = pz / tile; } else { U[bu + k * 2] = X / tile; U[bu + k * 2 + 1] = py / tile; } }
+    }
     o += x.attributes.position.count; x.dispose();
   }
-  const out = new THREE.BufferGeometry(); out.setAttribute('position', new THREE.BufferAttribute(P, 3)); out.setAttribute('normal', new THREE.BufferAttribute(N, 3)); return out;
+  const out = new THREE.BufferGeometry(); out.setAttribute('position', new THREE.BufferAttribute(P, 3)); out.setAttribute('normal', new THREE.BufferAttribute(N, 3)); if (U) out.setAttribute('uv', new THREE.BufferAttribute(U, 2)); return out;
 }
-function kit() { // add(mat, geo, pos, rot, scale) · mir(...) añade también la copia espejada en x
+function kit(tile = 0) { // add(mat, geo, pos, rot, scale) · mir(...) añade también la copia espejada en x
   const map = new Map(), put = (mat, g, p, r, s, f) => { const m4 = new THREE.Matrix4().compose(new THREE.Vector3(...p), new THREE.Quaternion().setFromEuler(new THREE.Euler(...r)), new THREE.Vector3(...s)); if (f) m4.premultiply(FLIPX); if (!map.has(mat)) map.set(mat, []); map.get(mat).push([g, m4]); };
   return {
     add: (mat, g, p = [0, 0, 0], r = [0, 0, 0], s = [1, 1, 1]) => put(mat, g, p, r, s, false),
     mir: (mat, g, p = [0, 0, 0], r = [0, 0, 0], s = [1, 1, 1]) => { put(mat, g, p, r, s, false); put(mat, g, p, r, s, true); },
-    parts: () => [...map].map(([mat, list]) => [mat, mergeGeos(list)]),
+    parts: () => [...map].map(([mat, list]) => [mat, mergeGeos(list, tile && (mat.map || mat.emissiveMap) ? tile : 0)]),
     build(parent) { for (const [mat, geo] of this.parts()) parent.add(new THREE.Mesh(geo, mat)); },
   };
 }
@@ -178,33 +193,51 @@ const SHIPGFX = (() => {
     for (const [x, y, r, col] of [[W * 0.3, H * 0.32, H * 0.34, '255,246,232'], [W * 0.78, H * 0.6, H * 0.4, '120,170,255'], [W * 0.05, H * 0.5, H * 0.3, '200,220,255']]) { const rg = g.createRadialGradient(x, y, 0, x, y, r); rg.addColorStop(0, `rgba(${col},0.95)`); rg.addColorStop(0.4, `rgba(${col},0.4)`); rg.addColorStop(1, `rgba(${col},0)`); g.fillStyle = rg; g.fillRect(0, 0, W, H); }
     return c;
   }
-  const TX = {}, tx = k => TX[k] || (TX[k] = k === 'hull' ? mkTex(hullCanvas()) : k === 'metal' ? mkTex(metalCanvas()) : k === 'glass' ? mkTex(glassCanvas(), false) : k === 'pv' ? mkTex(pvCanvas(), false) : (() => { const t = new THREE.CanvasTexture(envCanvas()); t.mapping = THREE.EquirectangularReflectionMapping; t.generateMipmaps = false; t.minFilter = THREE.LinearFilter; return t; })());
+  function groundCanvas() { // roca y tierra (mosaico continuo): manchas, guijarros con luz y sombra, grietas y grano; se tiñe por material (hormigón, tierra, roca)
+    const S = 256, c = cvs(S, S), g = c.getContext('2d'), R = rndOf(4242), rr = (a, b) => a + R() * (b - a);
+    g.fillStyle = '#8c887f'; g.fillRect(0, 0, S, S);
+    const wr = fn => { for (const dx of [-S, 0, S]) for (const dy of [-S, 0, S]) { g.save(); g.translate(dx, dy); fn(); g.restore(); } };
+    const blobs = Array.from({ length: 70 }, () => ({ x: R() * S, y: R() * S, r: rr(14, 46), v: R() < 0.5 ? 0 : 255, a: rr(0.05, 0.13) }));
+    wr(() => { for (const b of blobs) { const gr = g.createRadialGradient(b.x, b.y, 0, b.x, b.y, b.r); gr.addColorStop(0, `rgba(${b.v},${b.v},${b.v},${b.a})`); gr.addColorStop(1, `rgba(${b.v},${b.v},${b.v},0)`); g.fillStyle = gr; g.fillRect(b.x - b.r, b.y - b.r, b.r * 2, b.r * 2); } });
+    const peb = Array.from({ length: 150 }, () => ({ x: R() * S, y: R() * S, rx: rr(2, 7), ry: rr(1.5, 5), a: R() * 3.14, v: rr(105, 175) | 0 }));
+    wr(() => { for (const p of peb) { g.fillStyle = 'rgba(20,18,16,0.32)'; g.beginPath(); g.ellipse(p.x + 1.3, p.y + 1.5, p.rx, p.ry, p.a, 0, 7); g.fill(); g.fillStyle = `rgb(${p.v},${p.v - 4},${p.v - 10})`; g.beginPath(); g.ellipse(p.x, p.y, p.rx, p.ry, p.a, 0, 7); g.fill(); g.fillStyle = 'rgba(255,255,255,0.22)'; g.beginPath(); g.ellipse(p.x - p.rx * 0.25, p.y - p.ry * 0.3, p.rx * 0.5, p.ry * 0.4, p.a, 0, 7); g.fill(); } });
+    g.lineCap = 'round'; wr(() => { for (let i = 0; i < 9; i++) { let x = R() * S, y = R() * S, a = R() * 6.28; g.strokeStyle = 'rgba(25,22,20,0.5)'; g.lineWidth = rr(0.8, 1.8); g.beginPath(); g.moveTo(x, y); for (let k = 0; k < 6; k++) { a += (R() - 0.5) * 1.2; x += Math.cos(a) * rr(8, 18); y += Math.sin(a) * rr(8, 18); g.lineTo(x, y); } g.stroke(); } });
+    grain(g, S, 22); return c;
+  }
+  function winCanvas() { // ventanas de una superestructura: rejilla de celdas con ventanas cálidas encendidas y filas de pasillo iluminadas (mapa emisivo)
+    const W = 128, H = 64, c = cvs(W, H), g = c.getContext('2d'), R = rndOf(777); g.fillStyle = '#0a0f17'; g.fillRect(0, 0, W, H);
+    const WARM = ['#ffe9b0', '#ffd27a', '#fff6d8', '#bfe6ff'];
+    for (let j = 0; j < 8; j++) { const lit = R() < 0.22; for (let i = 0; i < 16; i++) { const x = i * 8 + 1, y = j * 8 + 2, on = lit || R() < 0.42; g.fillStyle = lit ? WARM[0] : on ? WARM[R() * WARM.length | 0] : '#131b27'; g.fillRect(x, y, 6, 4); if (on) { g.fillStyle = 'rgba(255,255,255,0.35)'; g.fillRect(x, y, 6, 1); } } }
+    return c;
+  }
+  const TX = {}, tx = k => TX[k] || (TX[k] = k === 'hull' ? mkTex(hullCanvas()) : k === 'metal' ? mkTex(metalCanvas()) : k === 'glass' ? mkTex(glassCanvas(), false) : k === 'pv' ? mkTex(pvCanvas(), false) : k === 'pvr' ? (() => { const t = tx('pv').clone(); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.needsUpdate = true; return t; })() : k === 'ground' ? mkTex(groundCanvas()) : k === 'win' ? mkTex(winCanvas()) : (() => { const t = new THREE.CanvasTexture(envCanvas()); t.mapping = THREE.EquirectangularReflectionMapping; t.generateMipmaps = false; t.minFilter = THREE.LinearFilter; return t; })());
 
   // ---------- materiales compartidos (caché por color de casco y de acento) ----------
   const LIGHTS = new THREE.MeshBasicMaterial({ vertexColors: true }), GLW = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false });
   const MATS = new Map();
-  function getMats(hullC, accC) {
-    const key = hullC + '|' + accC, hit = MATS.get(key); if (hit) return hit; if (MATS.size > 40) MATS.clear();
-    const hc = new THREE.Color(hullC).multiplyScalar(1.14), ac = new THREE.Color(accC), HT = tx('hull'), MX = tx('metal'), env = tx('env');
+  function getMats(hullC, accC, sk = -1) { // sk >= 0: skin del jugador (tinte, acento, metal/rugosidad y pintura) · sk = -1: casco fijo (naves neutrales, cascos a la deriva)
+    const key = hullC + '|' + accC + '|' + sk, hit = MATS.get(key); if (hit) return hit; if (MATS.size > 40) MATS.clear();
+    const SK = sk >= 0 ? SKINS[sk] : null, hc = new THREE.Color(hullC).multiplyScalar(1.14), ac = new THREE.Color(SK && SK.acc !== undefined ? SK.acc : accC), HT = tx('hull'), MX = tx('metal'), env = tx('env');
     const std = o => new THREE.MeshStandardMaterial({ side: THREE.DoubleSide, envMap: env, ...o });
-    const hull = (c, ei = 0.12) => std({ color: c, map: HT, metalness: 0.3, roughness: 0.52, emissive: c, emissiveIntensity: ei, envMapIntensity: 0.9 });
-    const d = new THREE.Color(0x232830), mt = new THREE.Color(0x8b949e);
+    const hull = (c, ei = 0.12) => std({ color: c, map: HT, metalness: SK ? SK.m : 0.3, roughness: SK ? SK.r : 0.52, emissive: c, emissiveIntensity: ei, envMapIntensity: 0.9 });
+    const d = new THREE.Color(0x232830), mt = new THREE.Color(0x8b949e), arc = SK ? SK.ar : 0x59616b;
     const out = {
-      H: hull(hc), H2: hull(hc.clone().multiplyScalar(0.58), 0.1),
+      H: hull(hc), H2: hull(hc.clone().multiplyScalar(SK ? SK.bel : 0.58), 0.1),
       A: std({ color: ac, map: HT, metalness: 0.3, roughness: 0.42, emissive: ac, emissiveIntensity: 0.34, envMapIntensity: 0.7 }),
       D: std({ color: d, map: MX, metalness: 0.65, roughness: 0.55, emissive: d, emissiveIntensity: 0.1, envMapIntensity: 0.6 }),
       MT: std({ color: mt, map: MX, metalness: 0.9, roughness: 0.34, emissive: mt, emissiveIntensity: 0.07, envMapIntensity: 1.0 }),
-      AR: std({ color: 0x59616b, map: HT, metalness: 0.5, roughness: 0.5, emissive: 0x59616b, emissiveIntensity: 0.1, envMapIntensity: 0.8 }),
+      AR: std({ color: arc, map: HT, metalness: 0.5, roughness: 0.5, emissive: arc, emissiveIntensity: 0.1, envMapIntensity: 0.8 }),
       G: std({ color: 0xd8f2ff, map: tx('glass'), transparent: true, opacity: 0.8, metalness: 0.55, roughness: 0.07, emissive: 0x0a4560, emissiveIntensity: 0.55, envMapIntensity: 1.7 }),
       PV: std({ color: 0xffffff, map: tx('pv'), metalness: 0.6, roughness: 0.3, emissive: 0x143070, emissiveIntensity: 0.4, envMapIntensity: 1.3 }),
       LIGHTS, GLW,
     };
+    if (SK && SK.pat) out.P = std({ color: SK.pc, map: HT, metalness: 0.3, roughness: 0.45, emissive: SK.pc, emissiveIntensity: 0.16, envMapIntensity: 0.7 }); // pintura de franjas (mismo mapa de casco)
     MATS.set(key, out); return out;
   }
 
   // ---------- fusión de geometría con UVs proyectadas y colores por vértice ----------
-  const UV_ROLES = new Set(['H', 'H2', 'A', 'D', 'MT', 'AR', 'G', 'PV']);
-  function merge(list, wantUv) { // list: [[geo, matriz, color|null, modo uv]]; los espejos invierten el orden de los triángulos
+  const UV_ROLES = new Set(['H', 'H2', 'A', 'D', 'MT', 'AR', 'G', 'PV', 'P']);
+  function merge(list, wantUv, tile = TILE) { // list: [[geo, matriz, color|null, modo uv]]; los espejos invierten el orden de los triángulos
     const parts = list.map(([g, m, col, uvm]) => { const x = g.index ? g.toNonIndexed() : g.clone(); x.applyMatrix4(m); return { x, fl: m.determinant() < 0, col, uvm, cg: !!g.attributes.color }; });
     let n = 0, useC = false; for (const p of parts) { n += p.x.attributes.position.count; if (p.col || p.cg) useC = true; }
     const P = new Float32Array(n * 3), N = new Float32Array(n * 3), U = wantUv ? new Float32Array(n * 2) : null, C = useC ? new Float32Array(n * 3) : null; let o = 0;
@@ -220,8 +253,8 @@ const SHIPGFX = (() => {
           const ax = Math.abs(N[b] + N[b + 3] + N[b + 6]), ay = Math.abs(N[b + 1] + N[b + 4] + N[b + 7]), az = Math.abs(N[b + 2] + N[b + 5] + N[b + 8]);
           for (let k = 0; k < 3; k++) {
             const px = P[b + k * 3], py = P[b + k * 3 + 1], pz = P[b + k * 3 + 2], X = fl ? -px : px; let u, v;
-            if (p.uvm === 'cyl') { u = Math.atan2(py, px) * UV_R; v = pz / TILE; }
-            else if (ax >= ay && ax >= az) { u = pz / TILE; v = py / TILE; } else if (ay >= az) { u = X / TILE; v = pz / TILE; } else { u = X / TILE; v = py / TILE; }
+            if (p.uvm === 'cyl') { u = Math.atan2(py, px) * 0.005 / tile; v = pz / tile; }
+            else if (ax >= ay && ax >= az) { u = pz / tile; v = py / tile; } else if (ay >= az) { u = X / tile; v = pz / tile; } else { u = X / tile; v = py / tile; }
             U[bu + k * 2] = u; U[bu + k * 2 + 1] = v;
           }
         }
@@ -232,7 +265,7 @@ const SHIPGFX = (() => {
   }
   const CL = h => new THREE.Color(h);
   const ROLE_ALIAS = { LR: ['LIGHTS', CL(0xff3030)], LG: ['LIGHTS', CL(0x30ff60)], LW: ['LIGHTS', CL(0xf4fbff)], LY: ['LIGHTS', CL(0xffd23f)], LT: ['LIGHTS', CL(0x66ffd0)], LC: ['LIGHTS', CL(0x9fe8ff)], GL: ['GLW', CL(0x6fb8d6)], EG: ['GLW', CL(0x3a7fb0)] };
-  function skit() { // add(rol, geo, pos, rot, scale) · mir(...) añade también la copia espejada en x · addc(color, ...) piezas de un solo mesh con color por vértice
+  function skit(tile = TILE, extraUv = null) { // tile: km por vuelta de textura · extraUv: roles extra con UV · add(rol, geo, pos, rot, scale) · mir(...) añade también la copia espejada en x · addc(color, ...) piezas de un solo mesh con color por vértice
     const map = new Map(), put = (role, g, p, r, s, f, col) => {
       const al = ROLE_ALIAS[role]; if (al) { role = al[0]; col = al[1]; }
       const m4 = new THREE.Matrix4().compose(new THREE.Vector3(...p), new THREE.Quaternion().setFromEuler(new THREE.Euler(...r)), new THREE.Vector3(...s)); if (f) m4.premultiply(FLIPX);
@@ -242,7 +275,8 @@ const SHIPGFX = (() => {
       add: (role, g, p = [0, 0, 0], r = [0, 0, 0], s = [1, 1, 1]) => put(role, g, p, r, s, false),
       mir: (role, g, p = [0, 0, 0], r = [0, 0, 0], s = [1, 1, 1]) => { put(role, g, p, r, s, false); put(role, g, p, r, s, true); },
       addc: (col, g, p = [0, 0, 0], r = [0, 0, 0], s = [1, 1, 1]) => put('MSL', g, p, r, s, false, CL(col)),
-      parts: () => [...map].map(([role, list]) => [role, merge(list, UV_ROLES.has(role))]),
+      addr: (role, col, g, p = [0, 0, 0], r = [0, 0, 0], s = [1, 1, 1]) => put(role, g, p, r, s, false, CL(col)), // pieza de un rol con color por vértice explícito
+      parts: () => [...map].map(([role, list]) => [role, merge(list, UV_ROLES.has(role) || !!(extraUv && extraUv.has(role)), tile)]),
     };
   }
 
@@ -308,7 +342,8 @@ const BUILD = {
     dots(K, X.D, [0.0022, 0.0022, -0.0040], [0.0026, 0.0018, 0.0090], 6, 0.00028); mast(K, X, 0, 0.0038, 0.0140, 0.0032, 0.15, LW);
     hatch(K, X, 0.0110, 0.00080, 0.0060, 0.0030, 0.0022); hatch(K, X, 0.0170, 0.00080, 0.0100, 0.0022, 0.0018); rcs(K, X, 0.0023, 0.0003, -0.0165); rcs(K, X, 0.0206, 0.0012, 0.0128, 0.8); mast(K, X, 0.0170, 0.0008, 0.0130, 0.0022, 0.3, LG); K.add(X.H2, new THREE.SphereGeometry(0.0009, 8, 5, 0, PI * 2, 0, PI / 2), [0, -0.0026, -0.0110], [PI, 0, 0]); dots(K, X.D, [0.0058, 0.0009, 0.0010], [0.0170, 0.0009, 0.0122], 6, 0.00022); // escotillas, propulsores de actitud, antena y sensor ventral
     return { eng: [{ x: 0, y: 0, z: 0.0205, r: 0.0038 }], nose: [0, -0.0012, -0.0245], guns: [[-0.008, -0.0008, -0.001], [0.008, -0.0008, -0.001], [-0.014, -0.0008, 0.005], [0.014, -0.0008, 0.005]],
-      py: { x0: 0.005, dx: 0.003, y: -0.0026, z: 0.007 }, sh: { y: 0, z: -0.008, r: 0.030 }, ar: { w: 0.0043, y: 0.0033, z0: -0.012, z1: 0.016 } };
+      py: { x0: 0.005, dx: 0.003, y: -0.0026, z: 0.007 }, sh: { y: 0, z: -0.008, r: 0.030 }, ar: { w: 0.0043, y: 0.0033, z0: -0.012, z1: 0.016 },
+      dc: { wing: { pts: [[0.0035, -0.008], [0.021, 0.012], [0.021, 0.0155], [0.0035, 0.0125]], wy: 0.00075 }, ring: [0.0040, 0.0075], hp: { P, sx: 1, sy: 0.75 } } };
   },
   halcon(K, X) { // caza equilibrado: alas en delta con strakes y doble motor
     const P = [[0, -0.020], [0.0016, -0.0165], [0.0042, -0.009], [0.0060, 0], [0.0064, 0.008], [0.0056, 0.015], [0.0040, 0.019], [0, 0.019]];
@@ -328,7 +363,8 @@ const BUILD = {
     dots(K, X.D, [0.0026, 0.0038, -0.0090], [0.0034, 0.0034, 0.0080], 7, 0.0003); mast(K, X, 0.0018, 0.0048, 0.0130, 0.0030, 0.1, LW);
     hatch(K, X, 0.0170, 0.00110, 0.0095, 0.0040, 0.0032); hatch(K, X, 0.0235, 0.00110, 0.0110, 0.0030, 0.0026); rcs(K, X, 0.0031, 0.0005, -0.0135); rcs(K, X, 0.0276, 0.0016, 0.0066, 0.9); mast(K, X, 0.0210, 0.0010, 0.0155, 0.0024, 0.3, LR); mast(K, X, -0.0060, 0.0044, 0.0120, 0.0028, -0.2, LG); dots(K, X.D, [0.0100, 0.0011, 0.0040], [0.0250, 0.0011, 0.0118], 7, 0.00024); // escotillas, RCS y antenas
     return { eng: [-1, 1].map(s => ({ x: s * 0.0085, y: -0.0005, z: 0.0187, r: 0.0034 })), nose: [0, -0.0016, -0.0185], guns: [[-0.012, -0.0012, 0], [0.012, -0.0012, 0], [-0.019, -0.0012, 0.006], [0.019, -0.0012, 0.006]],
-      py: { x0: 0.008, dx: 0.0038, y: -0.0032, z: 0.006 }, sh: { y: 0, z: -0.004, r: 0.032 }, ar: { w: 0.0064, y: 0.0046, z0: -0.010, z1: 0.016 } };
+      py: { x0: 0.008, dx: 0.0038, y: -0.0032, z: 0.006 }, sh: { y: 0, z: -0.004, r: 0.032 }, ar: { w: 0.0064, y: 0.0046, z0: -0.010, z1: 0.016 },
+      dc: { wing: { pts: [[0.004, -0.006], [0.028, 0.013], [0.028, 0.017], [0.004, 0.014]], wy: 0.0010 }, ring: [0.0040, 0.0068], hp: { P, sx: 1, sy: 0.72 } } };
   },
   coloso(K, X) { // cañonera pesada: casco grueso con placas, puente, torreta dorsal y triple motor
     const P = [[0, -0.021], [0.0035, -0.0195], [0.0068, -0.013], [0.0080, -0.004], [0.0082, 0.008], [0.0072, 0.016], [0.0050, 0.021], [0, 0.021]];
@@ -342,8 +378,8 @@ const BUILD = {
     for (const sx of [-1, 1]) { K.add(X.MT, cylZ(0.00045, 0.00045, 0.0090, 8), [sx * 0.0011, 0.0092, -0.0035]); K.add(X.D, cylZ(0.00075, 0.00075, 0.0012, 8), [sx * 0.0011, 0.0092, -0.0016]); K.add(X.D, cylZ(0.00068, 0.00068, 0.0009, 8), [sx * 0.0011, 0.0092, -0.0075]); }
     K.add(X.MT, bx(0.0006, 0.0011, 0.0032), [0, 0.0085, -0.0006]); // manguito común de los cañones
     wing(K, X.H, [[0.008, -0.004], [0.023, 0.003], [0.023, 0.011], [0.008, 0.013]], 0.0026, 0, 0.0005);
-    strip(K, X.A, [0.0090, -0.0032], [0.0225, 0.0034], 0.0012, 0.0016); strip(K, X.H2, [0.0090, 0.0102], [0.0225, 0.0098], 0.0030, 0.0016); strip(K, X.D, [0.0120, 0.0070], [0.0120, 0.0122], 0.00016, 0.0016); strip(K, X.D, [0.0175, 0.0070], [0.0175, 0.0114], 0.00016, 0.0016); // franja, flaps y juntas
-    dots(K, X.D, [0.0100, 0.0016, -0.0010], [0.0220, 0.0016, 0.0010], 5, 0.00034); dots(K, X.D, [0.0100, 0.0016, 0.0126], [0.0220, 0.0016, 0.0108], 5, 0.00034);
+    strip(K, X.A, [0.0090, -0.0032], [0.0225, 0.0034], 0.0012, 0.0019); strip(K, X.H2, [0.0090, 0.0102], [0.0225, 0.0098], 0.0030, 0.0019); strip(K, X.D, [0.0120, 0.0070], [0.0120, 0.0122], 0.00016, 0.0019); strip(K, X.D, [0.0175, 0.0070], [0.0175, 0.0114], 0.00016, 0.0019); // franja, flaps y juntas
+    dots(K, X.D, [0.0100, 0.0019, -0.0010], [0.0220, 0.0019, 0.0010], 5, 0.00034); dots(K, X.D, [0.0100, 0.0019, 0.0126], [0.0220, 0.0019, 0.0108], 5, 0.00034);
     K.mir(X.H2, bx(0.0022, 0.0030, 0.0100), [0.0232, 0, 0.0070]); K.mir(X.A, bx(0.0023, 0.0016, 0.0030), [0.0232, 0.0006, 0.0000]); K.mir(X.D, bx(0.0024, 0.0005, 0.0060), [0.0232, 0.0018, 0.0075]); K.add(LR, ball3(0.0007), [-0.0232, 0.0018, 0.0035]); K.add(LG, ball3(0.0007), [0.0232, 0.0018, 0.0035]); // vainas de punta de ala
     K.mir(X.H2, cylZ(0.0033, 0.0038, 0.016), [0.0125, -0.001, 0.0125]); K.mir(X.A, new THREE.TorusGeometry(0.0036, 0.00025, 4, 18), [0.0125, -0.001, 0.0070]); K.mir(X.D, new THREE.TorusGeometry(0.0035, 0.00018, 4, 18), [0.0125, -0.001, 0.0140]); K.mir(X.D, cylZ(0.0026, 0.0026, 0.0006, 12), [0.0125, -0.001, 0.0044]);
     K.mir(X.MT, bx(0.0012, 0.0050, 0.0140), [0.0104, 0, 0.0030]); // puntales de las góndolas
@@ -352,7 +388,8 @@ const BUILD = {
     hatch(K, X, 0.0150, 0.00190, 0.0098, 0.0044, 0.0034); hatch(K, X, 0.0190, 0.00190, 0.0060, 0.0030, 0.0026); rcs(K, X, 0.0061, 0.0008, -0.0175, 1.2); radiator(K, X, 0.0060, 0.0072, 0.0100, 0.0022, 0.0060, 6); mast(K, X, 0.0130, 0.0018, 0.0128, 0.0030, 0.3, LR); mast(K, X, -0.0130, 0.0018, -0.0010, 0.0034, -0.2, LW); // escotillas, RCS, radiadores dorsales y balizas
     return { eng: [{ x: 0, y: 0, z: 0.0215, r: 0.0046 }, { x: -0.0125, y: -0.001, z: 0.0198, r: 0.0033 }, { x: 0.0125, y: -0.001, z: 0.0198, r: 0.0033 }],
       nose: [0, -0.0030, -0.0205], guns: [[-0.011, -0.0013, -0.001], [0.011, -0.0013, -0.001], [-0.018, -0.0013, 0.004], [0.018, -0.0013, 0.004]],
-      py: { x0: 0.009, dx: 0.0028, y: -0.0038, z: 0.006 }, sh: { y: 0, z: -0.004, r: 0.036 }, ar: { w: 0.0100, y: 0.0062, z0: -0.012, z1: 0.016 } };
+      py: { x0: 0.009, dx: 0.0028, y: -0.0038, z: 0.006 }, sh: { y: 0, z: -0.004, r: 0.036 }, ar: { w: 0.0100, y: 0.0062, z0: -0.012, z1: 0.016 },
+      dc: { wing: { pts: [[0.008, -0.004], [0.023, 0.003], [0.023, 0.011], [0.008, 0.013]], wy: 0.0018 }, ring: [0.0088, 0.0112], hp: { P, sx: 1.35, sy: 0.78 } } };
   },
   nomada(K, X) { // explorador: plato sensor, cúpula panorámica, botes laterales y paneles solares plegables
     const P = [[0, -0.024], [0.0018, -0.0215], [0.0034, -0.012], [0.0038, 0], [0.0036, 0.012], [0.0030, 0.020], [0, 0.022]];
@@ -376,9 +413,28 @@ const BUILD = {
     dots(K, X.D, [0.0018, 0.0031, -0.0060], [0.0020, 0.0032, 0.0090], 6, 0.0003);
     radiator(K, X, 0.0070, 0.0, 0.0170, 0.0050, 0.0070, 7); radiator(K, X, 0.0072, 0.0, -0.0040, 0.0044, 0.0050, 5); dish(K, X, -0.0030, 0.0046, 0.0060, 0.0014, [0.5, 0, 0.3]); rcs(K, X, 0.0029, 0.0010, -0.0170, 1.0); rcs(K, X, 0.0290, 0.0004, 0.0128, 0.8); hatch(K, X, 0.0020, 0.0038, 0.0022, 0.0018, 0.0026, false); mast(K, X, 0.0140, 0.0020, 0.0230, 0.0030, 0.2, LR); // radiadores, antena parabólica y RCS
     return { eng: [-1, 1].map(s => ({ x: s * 0.012, y: 0, z: 0.0234, r: 0.0026 })), nose: [0, -0.0015, -0.0215], guns: [[-0.012, -0.0015, -0.004], [0.012, -0.0015, -0.004], [-0.022, -0.0015, 0.002], [0.022, -0.0015, 0.002]],
-      py: { x0: 0.0075, dx: 0.0033, y: -0.0026, z: 0.008 }, sh: { y: 0, z: -0.010, r: 0.032 }, ar: { w: 0.0038, y: 0.0034, z0: -0.012, z1: 0.016 } };
+      py: { x0: 0.0075, dx: 0.0033, y: -0.0026, z: 0.008 }, sh: { y: 0, z: -0.010, r: 0.032 }, ar: { w: 0.0038, y: 0.0034, z0: -0.012, z1: 0.016 },
+      dc: { wing: null, ring: [0.0060, 0.0090], hp: { P, sx: 1, sy: 0.9 } } };
   },
 };
+
+  // ---------- pintura de las skins: franjas (rol P) sobre las alas y anillos en el fuselaje según el patrón; cada chasis aporta sus anclajes en dc ----------
+  const PATS = { // w: [tramo de envergadura 0-1 (inicio, fin), tramo de cuerda 0-1 (borde de ataque → fuga)] · r: tramos (0-1) del segmento libre del fuselaje
+    bands: { w: [[0.40, 0.56, 0, 1]], r: [[0, 0.45]] },
+    tips: { w: [[0.78, 1, 0, 1]], r: [[0.55, 1]] },
+    stripe: { w: [[0.06, 1, 0.10, 0.26]], r: [[0.35, 0.6]] },
+    chevron: { w: [[0.30, 0.40, 0, 1], [0.55, 0.65, 0, 1]], r: [[0, 0.3], [0.6, 0.9]] },
+  };
+  const PAINT = new Map(); // (chasis + patrón) → [['P', geometría]]: unos 40-100 triángulos por chasis; se comparte entre todas las naves con esa skin
+  function paintParts(t, pat, dc) {
+    const key = t + '|' + pat, hit = PAINT.get(key); if (hit) return hit;
+    const K = skit(), Pt = PATS[pat], lerp = (a, b, k) => [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k];
+    if (dc.wing) { const [p0, p1, p2, p3] = dc.wing.pts, at = (k, c) => lerp(lerp(p0, p1, k), lerp(p3, p2, k), c); // borde de ataque p0→p1 y de fuga p3→p2
+      for (const [t0, t1, c0, c1] of Pt.w) wing(K, 'P', [at(t0, c0), at(t1, c0), at(t1, c1), at(t0, c1)], 0.0001, dc.wing.wy + 0.00006, 0.00003); }
+    const { P, sx, sy } = dc.hp, zr = f => dc.ring[0] + (dc.ring[1] - dc.ring[0]) * f;
+    for (const [f0, f1] of Pt.r) { const z0 = zr(f0), z1 = zr(f1), zm = (z0 + z1) / 2; K.add('P', latheG([[radAt(P, z0) * 1.014, z0], [radAt(P, zm) * 1.014, zm], [radAt(P, z1) * 1.014, z1]], sx, sy, 22)); }
+    const out = K.parts(); PAINT.set(key, out); return out;
+  }
 
   // ---------- ensamblado: geometría en caché por (tipo + mejoras); cada nave solo añade meshes, llamas y materiales propios ----------
   const fade = (g, len, pw) => { const p = g.attributes.position, c = new Float32Array(p.count * 3); for (let i = 0; i < p.count; i++) { const k = Math.pow(Math.max(0, 1 - p.getZ(i) / len), pw); c[i * 3] = c[i * 3 + 1] = c[i * 3 + 2] = k; } g.setAttribute('color', new THREE.BufferAttribute(c, 3)); return g; }; // degradado de la llama: brillante en la tobera, se apaga en la punta
@@ -423,19 +479,20 @@ const BUILD = {
       K.add('D', bx(0.0005, 0.0018, 0.005), [x, y + 0.0011, z]); K.add('MT', bx(0.0011, 0.0003, 0.0060), [x, y + 0.0001, z - 0.0002]); K.add('A', bx(0.00055, 0.0004, 0.0012), [x, y + 0.0018, z - 0.0018]); K.add('D', bx(0.0002, 0.0006, 0.0012), [x, y + 0.0004, z + 0.0018]); pyl.push([x, y - 0.0006, z]);
     }
     if (sh > 0) K.add('MT', new THREE.CylinderGeometry(0.0011, 0.0019, 0.0010, 10).rotateX(PI / 2), [d.nose[0], d.nose[1] - 0.0012, d.nose[2] + 0.0040]); // emisor del escudo (el resplandor solo aparece al recibir daño)
-    const out = { parts: K.parts(), muz, pyl, eng }; GEO.set(key, out);
+    const out = { parts: K.parts(), muz, pyl, eng, dc: d.dc }; GEO.set(key, out);
     if (GEO.size > 36) { const [k0, v0] = GEO.entries().next().value; GEO.delete(k0); v0.parts.forEach(([, g]) => g.dispose()); } // caché limitada: al expulsar una entrada se libera su geometría en GPU (si vuelve a usarse se re-sube sola)
     return out;
   }
   function make(spec, hullOverride) {
     spec = validSpec(spec);
-    const T = TYPES[spec.t], st = statsOf(spec), sh = spec.a[1], root = new THREE.Group(), m = new THREE.Group(), B = build(spec), MX = getMats(hullOverride ?? 0xaeb8c3, spec.c);
+    const T = TYPES[spec.t], st = statsOf(spec), sh = spec.a[1], root = new THREE.Group(), m = new THREE.Group(), B = build(spec), SKN = hullOverride === undefined ? SKINS[spec.sk] : null, MX = getMats(hullOverride ?? SKINS[spec.sk].hull, spec.c, SKN ? spec.sk : -1);
     m.scale.setScalar(T.size); root.add(m);
     const at = ([x, y, z]) => new THREE.Vector3(x, y, z).multiplyScalar(T.size);
     Object.assign(root, { muzzles: B.muz.map(at), pylons: B.pyl.map(at), missiles: [], flames: [], shieldFx: [], flameMul: st.flameMul });
     const fx = { stw: new THREE.MeshBasicMaterial({ color: 0xffffff }), str: new THREE.MeshBasicMaterial({ color: 0xff3030 }), nz: new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide }), ph: Math.random() * 1500, msl: null, idle: hullOverride === undefined ? 0.3 : 0.08 }; // idle: brillo del interior de la tobera con el motor parado (casco a la deriva: apagado)
     const PM = { STW: fx.stw, STR: fx.str, NZ: fx.nz }, hullMs = [];
     for (const [role, geo] of B.parts) { const ms = new THREE.Mesh(geo, PM[role] || MX[role]); m.add(ms); hullMs.push(ms); } // ~10 meshes por casco
+    if (SKN && SKN.pat && B.dc) for (const [, geo] of paintParts(spec.t, SKN.pat, B.dc)) m.add(new THREE.Mesh(geo, MX.P)); // pintura de la skin: 1 mesh más (no entra en la malla del escudo)
     const f1 = glowMat(0x4fb4ff, 0.55), f2 = glowMat(0xffffff, 0.95);
     B.eng.forEach(e => { const L = e.r * 7.6, fl = new THREE.Group(), a = new THREE.Mesh(FL1, f1), b = new THREE.Mesh(FL2, f2); a.scale.set(e.r, e.r, L); b.scale.set(e.r, e.r, L); fl.position.set(e.x, e.y, e.z + 0.0011); fl.add(a, b); m.add(fl); root.flames.push(fl); }); // motores: llama doble
     if (B.pyl.length) { const im = new THREE.InstancedMesh(MSLG, mslMat(), B.pyl.length); B.pyl.forEach((p, i) => { im.setMatrixAt(i, new THREE.Matrix4().makeTranslation(p[0], p[1], p[2])); root.missiles.push({ visible: true }); }); im.frustumCulled = false; m.add(im); fx.msl = im; } // todos los misiles = 1 draw call
@@ -448,7 +505,7 @@ const BUILD = {
   }
   const FL_BLUE = new THREE.Color(0x4fb4ff), FL_YEL = new THREE.Color(0xffa41a), IN_W = new THREE.Color(0xffffff), IN_Y = new THREE.Color(0xffe58a);
   return {
-    make,
+    make, tex: tx, skit, LIGHTS, // tex/skit/LIGHTS: texturas procedurales y utilidades compartidas con models.js y base.js
     setThrust(sh, v, t) { // llama proporcional a la velocidad, con parpadeo; el interior de la tobera se enciende con el empuje
       const on = v > 0.05; if (sh.fx) sh.fx.nz.color.setScalar(on ? Math.min(1.25, 0.6 + 0.35 * Math.log10(1 + v)) : sh.fx.idle); sh.flames.forEach(f => f.visible = on); if (!on) return;
       const k = (0.5 + Math.min(2.2, Math.log10(1 + v) / 2.3)) * sh.flameMul;

@@ -454,6 +454,7 @@ applyLoadout(mySpec, false);
 const targetSpeed = t => t.k === 'p' ? (t.id === myId ? S.ve : remotes.get(t.id)?.v || (typeof BOT !== 'undefined' ? BOT.speed(t.id) : 0)) : t.k === 'n' && typeof NEU !== 'undefined' ? NEU.speed(t.id) : 0;
 function targetPos(t) { if (t.k === 'h') return typeof BASE !== 'undefined' ? BASE.targetPos(t.id) : null; if (t.k === 'p') return t.id === myId ? S.pos : remotes.get(t.id)?.apos || (typeof BOT !== 'undefined' ? BOT.pos(t.id) : null); if (t.k === 'n') return typeof NEU !== 'undefined' ? NEU.pos(t.id) : null; if (t.k === 'W' || t.k === 'S' || t.k === 'F') return typeof WAR !== 'undefined' ? WAR.pos(t.k, t.id) : null; const w = wrecks[t.id]; return w && !dead.has(w.i) ? w.pos : null; }
 
+function setSkin(sk) { mySpec = validSpec({ ...mySpec, sk }); saveSpec(mySpec); scene.remove(ship); ship = makeShip(mySpec); scene.add(ship); } // skin: solo cambia el aspecto del modelo (no toca vida, escudo ni munición)
 function applyLoadout(spec, reset = true) {
   mySpec = spec; const st = statsOf(spec, lvlOf(spec.t).a); scene.remove(ship); ship = makeShip(spec); scene.add(ship); // con los puntos de nivel de ESTA nave
   Object.assign(MAXA, { plasma: st.plasma, missiles: st.missiles }); WPN.p.dmg = st.pdmg;

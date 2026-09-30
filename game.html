@@ -102,6 +102,12 @@
   #sb .sbav{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;border:3px solid #050f1c;color:#050f1c;font-weight:900}#sb .sbb{width:90px;height:8px;background:#050f1c;border-radius:4px;overflow:hidden}#sb .sbb i{display:block;height:100%}#sb .sbn{color:#6f8a9c}
   #sb td.ok{color:#5dff8a}#sb td.rs{color:#ffd23f}#sb td.ko{color:#ff5a4a}#sb td svg{display:block}
   /* fuera de la base: botones atenuados y sin acción (sin mensajes) */
+  /* skins de la nave: pegatinas redondas sobre el borde inferior de la vista previa (no ocupan sitio: el panel no se reajusta) */
+  .pvc{position:relative}#skins{position:absolute;left:0;right:0;bottom:9px;display:flex;justify-content:center;gap:14px;pointer-events:none}
+  #skins .skchip{pointer-events:auto;width:30px;height:30px;padding:0;border-radius:50%;border:3px solid #050f1c;box-shadow:2px 2px 0 #050f1c;cursor:pointer;transition:transform .12s}
+  #skins .skchip:hover:not(:disabled){transform:translateY(-2px)}#skins .skchip.on{box-shadow:0 0 0 3px #ffd23f,0 0 0 6px #050f1c,3px 3px 0 6px #050f1c}
+  #skins .skchip:focus-visible{outline:3px solid #fff;outline-offset:3px}#skins .skchip:disabled{cursor:default}#hg.nob #skins .skchip{opacity:.4;filter:grayscale(.5)}
+  @media (prefers-reduced-motion:reduce){#skins .skchip{transition:none}}
   #hg.nob .kbuy,#hg.nob [data-wdep],#hg.nob [data-equip],#hg.nob #slotsRow button,#hg.nob #shipList .ship:not(.on){opacity:.4;pointer-events:none;cursor:default;filter:grayscale(.5)}
   #tv .hx{z-index:3}#pvlv .lvtag{display:inline-block;background:#ffd23f;color:#050f1c;border:3px solid #050f1c;border-radius:9px;padding:0 8px;font-weight:900}
   #hg .ship small+small,#hg .upc small{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden} /* descripción en 1-2 líneas: la fila coste + botón siempre cabe */
@@ -125,7 +131,7 @@
   <div id="tab-ship" class="tab">
     <div class="cols">
       <div class="panel sc"><div class="in"><div id="shipList" class="lst"></div></div></div>
-      <div class="panel pvw"><canvas id="pv" width="460" height="320"></canvas><div id="pvlv"></div><div id="stats"></div></div>
+      <div class="panel pvw"><div class="pvc"><canvas id="pv" width="460" height="320"></canvas><div id="skins" role="radiogroup" aria-label="Skin de la nave"></div></div><div id="pvlv"></div><div id="stats"></div></div>
       <div class="panel sc"><div class="in"><div id="slots" style="margin-bottom:8px"></div><div id="addons" class="lst"></div></div></div>
     </div>
   </div>
@@ -184,7 +190,7 @@
 <script>
 // Carga por etapas: la pantalla de arranque se pinta primero y avanza con cada módulo; al terminar se generan las texturas de los planetas (BOOT_DONE, en base.js)
 (function () {
-  const L = [['ships.js', 'Naves'], ['space.js', 'Asteroides'], ['planets.js', 'Terreno'], ['seed.js?token=' + encodeURIComponent((() => { try { return sessionStorage.getItem('token') || ''; } catch { return ''; } })()), 'Semilla del sistema'], ['sysgen.js', 'Generador de sistemas'], ['game.js', 'Generando el sistema solar'], ['base.js', 'Bases y salas'], ['bot.js', 'Bots'], ['neutral.js', 'Naves neutrales'],['icons.js', 'Iconos'], ['hangar.js', 'Menú'], ['tview.js', 'Radar'], ['foot.js', 'Personaje'], ['map.js', 'Mapas'], ['war.js', 'Flota y zonas de control']];
+  const L = [['ships.js', 'Naves'], ['space.js', 'Asteroides'], ['planets.js', 'Terreno'], ['seed.js?token=' + encodeURIComponent((() => { try { return sessionStorage.getItem('token') || ''; } catch { return ''; } })()), 'Semilla del sistema'], ['sysgen.js', 'Generador de sistemas'], ['game.js', 'Generando el sistema solar'], ['base.js', 'Bases y salas'], ['bot.js', 'Bots'], ['neutral.js', 'Naves neutrales'],['icons.js', 'Iconos'], ['hangar.js', 'Menú'], ['tview.js', 'Radar'], ['foot.js', 'Personaje'], ['map.js', 'Mapas'], ['models.js', 'Modelos 3D'], ['war.js', 'Flota y zonas de control']];
   const bar = document.querySelector('#boot .bb i'), st = document.querySelector('#boot .bs'); let i = 0;
   function next() {
     if (i >= L.length) { if (window.BOOT_DONE) window.BOOT_DONE(); return; }
