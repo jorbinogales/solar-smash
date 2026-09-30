@@ -620,11 +620,10 @@ function ammoPanel(W, now) {
   g2.fillStyle = 'rgba(0,10,20,0.5)'; g2.beginPath(); g2.roundRect(W - 268, 12, 252, 262, 14); g2.fill();
   g2.textAlign = 'left'; g2.shadowColor = '#000'; g2.shadowBlur = 4;
   // plasma
-  cellIcon(W - 232, 74, 1.05, P.plasma > 0 ? '#3fe6b0' : '#555');
+  cellIcon(W - 232, 74, 1.05, '#3fe6b0');
   g2.fillStyle = '#9fe'; g2.font = `11px ${MONO}`; g2.fillText('PLASMA', W - 196, 38);
-  g2.fillStyle = empty(P.plasma); g2.font = `bold 42px ${MONO}`; g2.fillText(P.plasma, W - 196, 82);
-  g2.fillStyle = '#9fe'; g2.font = `14px ${MONO}`; g2.fillText('/' + MAXA.plasma, W - 196 + 26 * String(P.plasma).length, 82);
-  g2.shadowBlur = 0; g2.fillStyle = 'rgba(255,255,255,0.15)'; g2.fillRect(W - 196, 94, 170, 6); g2.fillStyle = '#3fe6b0'; g2.fillRect(W - 196, 94, 170 * P.plasma / MAXA.plasma, 6);
+  g2.fillStyle = '#3fe6b0'; g2.font = `bold 42px ${MONO}`; g2.fillText('∞', W - 196, 82); // el plasma de las naves es infinito
+    g2.shadowBlur = 0; g2.fillStyle = 'rgba(255,255,255,0.15)'; g2.fillRect(W - 196, 94, 170, 6); g2.fillStyle = '#3fe6b0'; g2.fillRect(W - 196, 94, 170, 6);
   // misiles
   { const n = MAXA.missiles, sp = Math.min(58, 214 / n), k = Math.min(1.15, sp / 40); for (let i = 0; i < n; i++) missileIcon(W - 246 + sp / 2 + i * sp, 184, k, i < P.missiles); }
   g2.shadowBlur = 4; g2.fillStyle = '#ffd9a0'; g2.font = `11px ${MONO}`; g2.fillText('MISILES', W - 254, 128);
@@ -846,7 +845,7 @@ function countdownHud(W, H, now) { // cuenta atrás del salto: luces de salida t
   g2.save(); g2.textAlign = 'center'; g2.font = `bold 16px ${MONO}`; g2.fillStyle = '#fff'; g2.fillText(go ? 'SALTO A VELOCIDAD LUZ' : `PREPARANDO SALTO A ${(warpTarget() || { n: '?' }).n.toUpperCase()} — NAVE BLOQUEADA · Shift o G para cancelar`, W / 2, H * 0.62); g2.restore();
 }
 function drawHud(fwd, now, targets) {
-  const W = hc.width = innerWidth, H = hc.height = innerHeight, lowAmmo = P.plasma < 40 || P.missiles === 0;
+  const W = hc.width = innerWidth, H = hc.height = innerHeight, lowAmmo = P.missiles === 0;
   g2.lineWidth = 2; g2.font = '12px ui-monospace,Consolas,monospace'; g2.textAlign = 'center';
   if (P.flash > 0) { // la pantalla parpadea en rojo al recibir daño
     const al = P.flash * (Math.sin(now / 45) > 0 ? 0.85 : 0.4), gr = g2.createRadialGradient(W / 2, H / 2, H * 0.25, W / 2, H / 2, H * 0.8);
@@ -932,7 +931,7 @@ function drawHud(fwd, now, targets) {
   else if (lockT) { g2.fillStyle = '#ffee55'; g2.fillText(lockT.kind === 'n' ? `NAVE ${lockT.hostile ? 'HOSTIL' : 'NEUTRAL'} FIJADA — disparos guiados` : 'CASCO FIJADO — misil listo', W / 2, 70); }
   g2.fillStyle = '#ffd23f';
   if (P.hp <= 0) { g2.fillText('DESTRUIDO', W / 2, H / 2 - 80); if (P.cause) { g2.font = `16px ${MONO}`; g2.fillText(P.cause, W / 2, H / 2 - 52); } }
-  else if (P.plasma <= 0 && P.missiles <= 0) g2.fillText('SIN MUNICIÓN — destruye cascos a la deriva', W / 2, 105);
+  
   if (now - (P.dodgeT || 0) < 700) { const k = 1 - (now - P.dodgeT) / 700; g2.save(); g2.fillStyle = `rgba(120,255,200,${0.18 * k})`; g2.fillRect(0, 0, W, H); g2.font = `900 30px ${MONO}`; g2.lineWidth = 6; g2.strokeStyle = '#050f1c'; g2.fillStyle = '#5dffb0'; g2.strokeText('¡ESQUIVADO!', W / 2, H / 2 - 120); g2.fillText('¡ESQUIVADO!', W / 2, H / 2 - 120); g2.restore(); } // esquiva con Q/E: destello y texto (sin notificación)
   if (now - (P.nlT || 0) < 1200 && P.hp > 0) { g2.save(); g2.font = `bold 14px ${MONO}`; g2.lineWidth = 4; g2.strokeStyle = '#000'; g2.fillStyle = '#ffb347'; const tx = 'SIN BLOQUEO: daño reducido · mantén la mira sobre la nave'; g2.strokeText(tx, W / 2, H / 2 + 72); g2.fillText(tx, W / 2, H / 2 + 72); g2.restore(); }
   if (now < P.msgT) g2.fillText(P.msg, W / 2, H - 90);
@@ -1095,7 +1094,7 @@ function frame(now) {
   P.sf = Math.max(0, P.sf - dt * 2.5); P.shake = Math.max(0, P.shake - dt * 2.5); setShieldFlash(ship, P.sf);
   if (alive && P.hp < 40 && (P.smoke -= dt) <= 0) { P.smoke = 0.06; puff(S.pos.map((c, j) => c - fwd.getComponent(j) * 0.03 + (Math.random() - 0.5) * 0.01), 0.012, 0xff7a30, 1.4, 0.004); } // casco dañado: humo
   if (alive && P.plasma < MAXA.plasma && now - (P.fireT || 0) > 1500) { P.pAcc = (P.pAcc || 0) + dt; const rg = P.regen || 1.4; if (P.pAcc >= rg) { P.pAcc -= rg; P.plasma++; } } // la munición de plasma se recarga muy lentamente (1 cada 1,4 s; menos con puntos de nivel en Recarga) si no disparas
-  if (alive && firing && !S.warp.on && !S.foot.on && S.warp.cd <= 0 && P.cdP <= 0 && P.plasma > 0) { P.fireT = now; P.plasma--; P.cdP = weaponCd(WEAPONS.plasma, P, WPN.p.cd); shoot('p', lockOn ? { k: lockT.kind, id: lockT.id } : null); }
+  if (alive && firing && !S.warp.on && !S.foot.on && S.warp.cd <= 0 && P.cdP <= 0) { P.fireT = now; P.cdP = weaponCd(WEAPONS.plasma, P, WPN.p.cd); shoot('p', lockOn ? { k: lockT.kind, id: lockT.id } : null); }
   if (now - lastSend > 66) { lastSend = now; send({ t: 's', rb: S.refB, rp: S.refB >= 0 ? sub(S.foot.on ? S.shipPos : S.pos, bodies[S.refB].pos) : null, name: myName, pos: S.foot.on ? S.shipPos : S.pos, q: S.q.toArray(), v: alive ? vEff : 0, hp: P.hp / P.hpMax * 100, sh: P.sh / P.shMax * 100, sp: mySpec, lv: lvlOf(mySpec.t).lv, k: P.kills, d: P.deaths || 0, ms: P.missiles, pk: S.park.on ? 1 : 0, wp: S.warp.on || S.warp.cd > 0 ? 1 : 0, bt: Math.round(S.boost * 100) / 100 }); }
   S.ve = alive ? vEff : 0; engine(S.ve, (keys.KeyW && alive) || S.warp.on || S.boost > 0.05);
   const targets = [];
