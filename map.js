@@ -242,7 +242,7 @@ const MAP = (() => {
     g.save(); g.lineJoin = 'round';
     WAR.CZ.forEach((z, zi) => { const sp = projPoly(czPoly(z)); if (sp.length >= 3) P.push({ zi, sp, L: WAR.look(zi), hi: zi === hz || zi === sz }); });
     const path = sp => { g.beginPath(); sp.forEach(([x, y], k) => { if (k) g.lineTo(x, y); else g.moveTo(x, y); }); g.closePath(); };
-    for (const q of P) { path(q.sp); g.globalAlpha = q.hi ? 0.3 : q.L.cap ? 0.2 + 0.08 * Math.sin(now / 250) : q.L.sun ? 0.1 : 0.11; g.fillStyle = pl && q.zi === hz ? (plOk ? '#5dff8a' : '#ff3b30') : q.L.col; g.fill(); // en colocación, la zona bajo el cursor: verde válida / roja inválida g.globalAlpha = 1; g.lineWidth = 6; g.strokeStyle = '#050f1c'; g.stroke(); // 1.ª pasada: relleno y borde negro
+    for (const q of P) { path(q.sp); g.globalAlpha = q.hi ? 0.3 : q.L.cap ? 0.2 + 0.08 * Math.sin(now / 250) : q.L.sun ? 0.1 : 0.11; g.fillStyle = pl && q.zi === hz ? (plOk ? '#5dff8a' : '#ff3b30') : q.L.col; g.fill(); g.globalAlpha = 1; g.lineWidth = 6; g.strokeStyle = '#050f1c'; g.stroke(); // 1.ª pasada: relleno y borde negro · en colocación, la zona bajo el cursor: verde válida / roja inválida
       if (q.L.sun) { g.save(); g.clip(); const xs = q.sp.map(p => p[0]), ys = q.sp.map(p => p[1]), x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys); g.strokeStyle = 'rgba(255,159,28,0.18)'; g.lineWidth = 6; g.beginPath(); for (let x = x0 - (y1 - y0); x < x1; x += 22) { g.moveTo(x, y1); g.lineTo(x + (y1 - y0), y0); } g.stroke(); g.restore(); } } // zona solar: franjas de peligro, no reclamable
     P.sort((x, y) => x.hi - y.hi); for (const q of P) { path(q.sp); g.lineWidth = q.hi ? 3.5 : 2; g.strokeStyle = q.L.col; if (q.L.cap) { g.setLineDash([12, 8]); g.lineDashOffset = -now / 30; } g.stroke(); g.setLineDash([]); } // 2.ª: borde de color (la resaltada encima)
     const ring = (Date.now() / 1000 % WARCFG.gain.every) / WARCFG.gain.every; // anillo de 10 s sincronizado con el reloj real (el servidor entrega al cambiar de franja)
@@ -258,17 +258,21 @@ const MAP = (() => {
       g.restore();
     }
     st.czHz = hz; // zona bajo el cursor: drawSys muestra solo a quién pertenece
-    for (const s of WAR.all()) { // buques (rombo grande) y satélites (pequeño) en su sitio real: están anclados a la estrella · azul míos, rojo ajenos
-      if (!s.w) continue; const q = projU(czV.set(s.w[0] * K, 0, s.w[2] * K)); if (!q) continue; const mine = s.o === myId, col = mine ? '#4db8ff' : '#ff3b30', r = s.k === 'W' ? 8 : 5;
-      g.beginPath(); g.moveTo(q[0], q[1] - r); g.lineTo(q[0] + r, q[1]); g.lineTo(q[0], q[1] + r); g.lineTo(q[0] - r, q[1]); g.closePath(); g.fillStyle = col; g.fill(); g.lineWidth = 3; g.strokeStyle = '#050f1c'; g.stroke();
-      Q(q[0], q[1], `${s.k === 'W' ? 'BUQUE' : 'SATÉLITE'} · ${mine ? 'TUYO' : WAR.nmOf(s.o)}`, mine ? '#9fd8ff' : '#ff8a7a', 6, { bold: true, size: 10 });
-      pts.push({ x: q[0], y: q[1], n: `${s.k === 'W' ? 'Buque' : 'Satélite'} de ${WAR.nmOf(s.o)}`, kind: s.k === 'W' ? 'buque de guerra' : 'satélite defensivo', pos: s.w });
+    for (const u of WAR.units()) { // toda la flota desplegada (buques, satélites y escuadrones de cazas) con el ICONO de la tienda: contorno azul la mía, rojo la ajena (junto a su planeta si está anclada a él)
+      const q = projU(entityPos(u.w, czV)); if (!q) continue; const mine = u.o === myId, col = mine ? '#4db8ff' : '#ff3b30', im = WAR.iconImg(u.k);
+      g.beginPath(); g.arc(q[0], q[1], 14, 0, 7); g.fillStyle = '#050f1c'; g.fill(); g.beginPath(); g.arc(q[0], q[1], 11.5, 0, 7); g.fillStyle = mine ? '#062a4a' : '#4a0a06'; g.fill(); g.lineWidth = 3; g.strokeStyle = col; g.stroke();
+      if (u.arr) g.globalAlpha = 0.5; if (im.complete && im.naturalWidth) g.drawImage(im, q[0] - 9, q[1] - 9, 18, 18); g.globalAlpha = 1;
+      if (u.arr) { g.lineWidth = 3; g.strokeStyle = '#9fe8ff'; g.beginPath(); g.arc(q[0], q[1], 17, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * u.ap); g.stroke(); } // llegando: anillo de progreso
+      if (u.bl && performance.now() - u.bl < 2500 && Math.floor(performance.now() / 180) % 2) { g.lineWidth = 3; g.strokeStyle = mine ? '#ffd23f' : '#ff3b30'; g.beginPath(); g.arc(q[0], q[1], 19, 0, 7); g.stroke(); } // alarma: parpadeo
+      const nm = `${u.k === 'W' ? 'BUQUE' : u.k === 'S' ? 'SATÉLITE' : 'CAZAS'} · ${mine ? 'TUYO' : WAR.nmOf(u.o)}`;
+      if (u.d < (u.k === 'W' ? LABEL_KM.buque : u.k === 'S' ? LABEL_KM.satelite : LABEL_KM.nave)) Q(q[0], q[1] + 8, nm, mine ? '#9fd8ff' : '#ff8a7a', 6, { bold: true, size: 10 }); // texto solo cerca
+      pts.push({ x: q[0], y: q[1], n: nm, kind: u.k === 'W' ? 'buque de guerra' : u.k === 'S' ? 'satélite defensivo' : 'escuadrón de cazas', pos: u.w });
     }
     st.ghost = null;
     if (pl) { // fantasma bajo el cursor: verde = válido, rojo = inválido (con el motivo); el clic lo confirma
       if (pd) { // la posición NO se elige: el buque/satélite va junto al cúmulo de la zona (sysgen.czDeployPoint); aquí se marca dónde caerá
         const col = plOk ? '#5dff8a' : '#ff3b30'; st.ghost = { zi: hz, why: pd.why, at };
-        const q = pd.off && projU(czV.set(pd.off[0] * K, 0, pd.off[2] * K));
+        const q = pd.abs && projU(entityPos(pd.abs, czV)); // posición real (junto al planeta si va anclada a él)
         if (q) { g.beginPath(); g.arc(q[0], q[1], 9 + 3 * Math.sin(now / 150), 0, 7); g.globalAlpha = 0.4; g.fillStyle = col; g.fill(); g.globalAlpha = 1; g.lineWidth = 5; g.strokeStyle = '#050f1c'; g.stroke(); g.lineWidth = 2; g.strokeStyle = col; g.stroke(); g.beginPath(); g.moveTo(q[0], q[1] - 6); g.lineTo(q[0] + 6, q[1]); g.lineTo(q[0], q[1] + 6); g.lineTo(q[0] - 6, q[1]); g.closePath(); g.fillStyle = col; g.fill(); g.setLineDash([5, 5]); g.beginPath(); g.moveTo(st.mx, st.my); g.lineTo(q[0], q[1]); g.stroke(); g.setLineDash([]); }
         g.textAlign = 'center'; g.font = `bold 12px ${MONO}`; g.lineWidth = 4; g.strokeStyle = '#000'; g.fillStyle = col; const tx = pd.why || `CLIC: ${pl.k === 'W' ? 'DESPLEGAR EL BUQUE' : pl.k === 'F' ? 'DESPLEGAR LOS CAZAS' : 'CONSTRUIR EL SATÉLITE'} JUNTO AL ${at === 'p' ? 'PLANETA' : 'CÚMULO'}`; g.strokeText(tx, st.mx, st.my + 30); g.fillText(tx, st.mx, st.my + 30);
       }

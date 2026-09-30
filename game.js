@@ -152,53 +152,28 @@ let myId = null, lastSend = 0, firing = false, lockT = null, lockOn = false, seq
 const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host);
 const send = o => ws.readyState === 1 && ws.send(JSON.stringify(o));
 
-// ---------- sonido (Web Audio, sin archivos) ----------
-let audio = null, noiseBuf = null;
-function ac() {
-  if (!audio) { audio = new AudioContext(); const n = audio.sampleRate; noiseBuf = audio.createBuffer(1, n, n); const d = noiseBuf.getChannelData(0); for (let i = 0; i < n; i++) d[i] = Math.random() * 2 - 1; }
-  if (audio.state === 'suspended') audio.resume();
-  return audio;
-}
+// ---------- sonido: el motor está en audio.js (AUDIO: maestro con compresor, audio ESPACIAL con radios por tipo y efectos sintetizados) ----------
+let audio = null, noiseBuf = null; // (compatibilidad) contexto y ruido compartidos: los crea AUDIO
+function ac() { audio = AUDIO.ctx(); noiseBuf = AUDIO.noise(); return audio; }
 ['mousedown', 'keydown', 'click'].forEach(t => addEventListener(t, ac));
-function tone(type, f0, f1, dur, vol) {
-  const a = ac(), t = a.currentTime, o = a.createOscillator(), g = a.createGain();
-  o.type = type; o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(f1, t + dur);
-  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + dur);
-  o.connect(g).connect(a.destination); o.start(t); o.stop(t + dur);
-}
-function noise(dur, vol, f0, f1) {
-  const a = ac(), t = a.currentTime, s = a.createBufferSource(), f = a.createBiquadFilter(), g = a.createGain();
-  s.buffer = noiseBuf; f.type = 'lowpass'; f.frequency.setValueAtTime(f0, t); f.frequency.exponentialRampToValueAtTime(f1, t + dur);
-  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + dur);
-  s.connect(f).connect(g).connect(a.destination); s.start(t); s.stop(t + dur);
-}
+function tone(type, f0, f1, dur, vol) { AUDIO.tone(type, f0, f1, dur, vol); } // avisos de interfaz (siempre al 100 %)
+function noise(dur, vol, f0, f1) { AUDIO.noiseUI(dur, vol, f0, f1); }
+function sfx(kind, pos, o) { AUDIO.sfx(kind, pos, o); } // pos: null = mío/interfaz · [x, y, z] = punto del mundo (fuera de su radio no suena)
+const sfxWarpOut = pos => AUDIO.sfx('warpSalida', pos), sfxWarshipAlarm = (pos, enemy) => AUDIO.alarm(pos, enemy);
 let eng = null;
-function engine(v, thrusting) { // zumbido continuo: tono y volumen suben con la velocidad; más fuerte al acelerar (W)
+function engine(v, thrusting) { // zumbido continuo de MI nave: tono y volumen suben con la velocidad; más fuerte al acelerar (W)
   if (!audio) return;
   if (!eng) {
     const a = audio, o1 = a.createOscillator(), o2 = a.createOscillator(), n = a.createBufferSource(), nf = a.createBiquadFilter(), lp = a.createBiquadFilter(), g = a.createGain();
     const gA = a.createGain(), gB = a.createGain(), gC = a.createGain(); gA.gain.value = 0.5; gB.gain.value = 0.25; gC.gain.value = 0.6;
     o1.type = 'sawtooth'; o2.type = 'square'; n.buffer = noiseBuf; n.loop = true; nf.type = 'lowpass'; lp.type = 'lowpass'; g.gain.value = 0;
-    o1.connect(gA).connect(lp); o2.connect(gB).connect(lp); n.connect(nf).connect(gC).connect(lp); lp.connect(g).connect(a.destination);
+    o1.connect(gA).connect(lp); o2.connect(gB).connect(lp); n.connect(nf).connect(gC).connect(lp); lp.connect(g).connect(AUDIO.master());
     o1.start(); o2.start(); n.start(); eng = { o1, o2, nf, lp, g };
   }
   const t = audio.currentTime, s = Math.log10(1 + v), on = v > 0.05 && ov.style.display === 'none' && !document.hidden, f = (45 + 14 * s + (thrusting ? 12 : 0)) * P.engMul;
   eng.g.gain.setTargetAtTime(on ? 0.05 + 0.012 * Math.min(s, 6) + (thrusting ? 0.03 : 0) : 0, t, 0.15);
   eng.o1.frequency.setTargetAtTime(f, t, 0.1); eng.o2.frequency.setTargetAtTime(f * 1.5, t, 0.1);
   eng.nf.frequency.setTargetAtTime(300 + 250 * s, t, 0.2); eng.lp.frequency.setTargetAtTime(500 + 300 * s, t, 0.2);
-}
-function sfx(kind, dist = 0) { // el volumen cae con la distancia
-  const v = 1 / (1 + dist / 3000);
-  if (kind === 'p') tone('square', 1400, 200, 0.12, 0.05 * v);
-  else if (kind === 'm') { noise(0.9, 0.14 * v, 2500, 300); tone('sawtooth', 140, 50, 0.6, 0.07 * v); }
-  else if (kind === 'boom') { noise(1.1, 0.3 * v, 1200, 50); tone('sine', 90, 28, 0.8, 0.25 * v); }
-  else if (kind === 'hit') { noise(0.15, 0.12 * v, 3000, 400); tone('square', 220, 60, 0.15, 0.08 * v); }
-  else if (kind === 'shield') tone('sine', 700, 1800, 0.22, 0.09 * v);
-  else if (kind === 'empty') tone('square', 150, 140, 0.08, 0.05);
-  else if (kind === 'tick') tone('square', 520 + dist * 110, 520 + dist * 110, 0.12, 0.08);
-  else if (kind === 'warp') { tone('sawtooth', 70, 1200, 0.9, 0.12); noise(0.9, 0.15, 400, 5000); }
-  else if (kind === 'vent') { noise(1.5, 0.24, 7500, 450); setTimeout(() => noise(1.0, 0.16, 5500, 350), 380); tone('sine', 75, 38, 1.3, 0.12); tone('sawtooth', 200, 60, 0.5, 0.04); } // expulsión de gases al despegar
-  else if (kind === 'warpEnd') { tone('sawtooth', 900, 60, 0.6, 0.1); noise(0.5, 0.12, 4000, 200); }
 }
 
 // ---------- combate ----------
@@ -268,7 +243,7 @@ function gainXp(n, why) { // XP para la nave que pilotas ahora; cada nivel da 1 
   while (L.lv < LV_MAX && L.xp >= lvNeed(L.lv + 1)) { L.xp -= lvNeed(L.lv + 1); L.lv++; up++; }
   if (L.lv >= LV_MAX) L.xp = 0; saveLv(); P.xpT = performance.now(); P.xpAdd = n; if (up) P.lvUpT = P.xpT; // indicador de nivel temporal (lvBadge)
   RB.xp.push({ n, why }); if (!RB.tm) RB.tm = setTimeout(lootFlush, RES_WIN); // en la misma tarjeta que el botín si llega a la vez
-  if (up) { notifyEl(`<i class="ico">★</i><span><b>¡Nivel ${L.lv}!</b> Ve a tu base para mejorar</span>`, 9000, 'xp'); [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => tone('square', f, f * 1.01, 0.18, 0.06), i * 110)); } // aviso normal (sin banner) y sonido
+  if (up) { notifyEl(`<i class="ico">★</i><span><b>¡Nivel ${L.lv}!</b> Ve a tu base para mejorar</span>`, 9000, 'xp'); sfx('level'); } // aviso normal (sin banner) y sonido
 }
 // ---------- Tab mantenida: estadísticas por jugador (humanos primero y luego bots; por nivel y bajas) sin soltar el ratón ----------
 const sbEl = document.createElement('div'); sbEl.id = 'sb'; document.body.append(sbEl); let sbOn = false, sbT = 0;
@@ -348,7 +323,7 @@ function dustTick(dt) { // emisión continua cerca del suelo (motores) y actuali
     q.m.position.set(q.p[0] - S.pos[0], q.p[1] - S.pos[1], q.p[2] - S.pos[2]); q.m.scale.setScalar(q.size * (1 + 3.5 * u)); q.m.material.opacity = 0.32 * (1 - u) * Math.min(1, u * 12);
   }
 }
-function boom(pos, size) { puff(pos, size, size >= 20 ? 0xffb060 : 0xffe0a0, 0.9, size >= 20 ? 0.012 : 0.004); sfx(size >= 20 ? 'boom' : 'hit', len(sub(pos, S.pos))); }
+function boom(pos, size) { puff(pos, size, size >= 20 ? 0xffb060 : 0xffe0a0, 0.9, size >= 20 ? 0.012 : 0.004); sfx(size >= 100 ? 'explosionGrande' : size >= 20 ? 'explosionNave' : 'impacto', pos, { size }); }
 function segDist(a, b, c) {
   const ab = sub(b, a), ac = sub(c, a), l2 = ab[0] ** 2 + ab[1] ** 2 + ab[2] ** 2 || 1e-9;
   const t = Math.max(0, Math.min(1, (ab[0] * ac[0] + ab[1] * ac[1] + ab[2] * ac[2]) / l2));
@@ -368,7 +343,7 @@ function shoot(kind, tgt) {
   const f = new THREE.Vector3(0, 0, -1).applyQuaternion(S.q), dir = [f.x, f.y, f.z];
   const o = kind === 'p' ? ship.muzzles[muz++ % ship.muzzles.length] : ship.pylons[P.missiles] || ship.pylons[0]; // cañón alterno / pilón del misil que sale
   const off = o.clone().applyQuaternion(S.q), pos = S.pos.map((c, i) => c + off.getComponent(i)), dmg = WPN[kind].dmg;
-  const key = `${myId ?? 0}:${++seq}`; spawnProj(myId, key, kind, pos, dir, tgt, dmg, { nl: !tgt }); sfx(kind); // nl: sin bloqueo (en naves solo cuenta el 45 % de los impactos)
+  const key = `${myId ?? 0}:${++seq}`; spawnProj(myId, key, kind, pos, dir, tgt, dmg, { nl: !tgt }); sfx(kind === 'm' ? 'misil' : 'plasma', null); // mis armas: 100 % // nl: sin bloqueo (en naves solo cuenta el 45 % de los impactos)
   if (!tgt && (needLock(lockT) || (aimT && (aimT.type === 'p' || aimT.type === 'n')))) P.nlT = performance.now(); // aviso: disparas a una nave sin bloqueo
   send({ t: 'fire', key, kind, pos, dir, tgt, dmg, nl: tgt ? 0 : 1, rb: S.refB, rp: S.refB >= 0 ? sub(pos, bodies[S.refB].pos) : null });
 }
@@ -377,7 +352,7 @@ function togglePark() { if (S.foot.on) return; // T cerca del suelo: despliega l
   const pk = S.park; if (pk.on) { if (pk.water || pk.leaving) return; Object.assign(pk, { leaving: true, t: 0, h0: pk.h }); sfx('vent'); dustBurst(5, 0.5); P.shake = Math.max(P.shake, 0.15); return say('Despegando…'); }
   if (!S.canPark) return;
   const info = planets.info, b = bodies.find(x => x.n === info.name), d = sub(S.pos, b.pos), l = len(d);
-  Object.assign(pk, { on: true, b, dir: d.map(c => c / l), h: Math.max(ship.gearH, info.ground), water: !!info.water, upT: null, leaving: false, dustT: 1.0 }); if (!info.water) { dustBurst(22, 0.6); noise(0.5, 0.08, 3000, 300); } S.v = 0; say(info.water ? 'Nave sobre el agua: flota con las olas · W para despegar' : 'Ruedas desplegadas · nave estacionada');
+  Object.assign(pk, { on: true, b, dir: d.map(c => c / l), h: Math.max(ship.gearH, info.ground), water: !!info.water, upT: null, leaving: false, dustT: 1.0 }); if (!info.water) { dustBurst(22, 0.6); sfx('land'); } S.v = 0; say(info.water ? 'Nave sobre el agua: flota con las olas · W para despegar' : 'Ruedas desplegadas · nave estacionada');
 }
 function parkStep(dt) { // en tierra: desciende sobre las ruedas y sigue el terreno; en el agua: se hunde un poco y flota cabeceando con las olas
   const pk = S.park, b = pk.b, R = b.R, dR = pk.dir.map(c => c * R);
@@ -399,7 +374,7 @@ function burn(dmg, now) { // daño por calor (sin destello): el escudo primero, 
 }
 
 // ---------- velocidad luz: 5 c en línea recta, con barra de motor; se corta a 5000 km de cualquier cuerpo ----------
-function endWarp(msg) { const w = S.warp; if (!w.on) return; w.on = false; w.tb = null; w.ex = null; S.lockB = null; S.v = Math.min(P.vmax, 400); if (msg) say(msg); sfx('warpEnd'); }
+function endWarp(msg) { const w = S.warp; if (!w.on) return; w.on = false; w.tb = null; w.ex = null; S.lockB = null; S.v = Math.min(P.vmax, 400); if (msg) say(msg); sfx('warpSalida', null); w.outT = performance.now(); } // salida: estampido + destello (drawHud)
 const inCombat = now => now - P.lastCombat < 10000 || [...remotes.values()].some(r => r.hp > 0 && r.dist < 30000); // combate: disparos o daño recientes, o un enemigo cerca
 function warpBlock() { // null = se puede saltar; si no, el cuerpo que lo impide. Cerca de un planeta se permite si ya saliste de su exosfera y tanto tu nave como el rumbo miran hacia fuera de él (llena S.warp.ex con los que se dejan atrás)
   const f = new THREE.Vector3(0, 0, -1).applyQuaternion(S.q), tb = warpTarget(), ex = new Set();
@@ -436,7 +411,7 @@ function warpTarget() { // destino del salto: el rumbo fijado con G, el elegido 
   for (const b of bodies) { const d = sub(b.pos, S.pos), l = len(d); if (l - b.R < 5000) continue; const a = Math.acos(Math.max(-1, Math.min(1, (f.x * d[0] + f.y * d[1] + f.z * d[2]) / l))); if (a < ba) { ba = a; best = b; } }
   return best;
 }
-function startWarp() { const w = S.warp, tb = w.pick || warpTarget(); w.pick = null; if (!tb) { w.cd = 0; return say('Sin destino para el salto'); } { const blk = warpBlock(); if (blk) { w.cd = 0; return say(`Cerca de ${blk.n}: mira hacia fuera del planeta para saltar`); } } w.tb = tb; const dd = nrm(sub(tb.pos, S.pos)); w.on = true; w.dir = dd; w.v = Math.max(S.v, 1000); w.goT = performance.now(); sfx('warp'); }
+function startWarp() { const w = S.warp, tb = w.pick || warpTarget(); w.pick = null; if (!tb) { w.cd = 0; return say('Sin destino para el salto'); } { const blk = warpBlock(); if (blk) { w.cd = 0; return say(`Cerca de ${blk.n}: mira hacia fuera del planeta para saltar`); } } w.tb = tb; const dd = nrm(sub(tb.pos, S.pos)); w.on = true; w.dir = dd; w.v = Math.max(S.v, 1000); w.goT = performance.now(); sfx('warpEntrada', null); }
 function warpStep(dt) { // avanza en tramos de 2500 km para no saltarse un planeta a 1,5 millones de km/s
   const w = S.warp; let left = w.v * dt; if (w.tb) w.dir = nrm(sub(w.tb.pos, S.pos)); // la trayectoria sigue al destino (los planetas orbitan)
   while (left > 0) {
@@ -488,15 +463,16 @@ ws.onmessage = ev => {
   }
   if (m.ev) {
     const e = m.ev;
-    if (e.t === 'fire') { if (e.rb >= 0 && e.rp) e.pos = bodies[e.rb].pos.map((c, i) => c + e.rp[i]); spawnProj(e.ow ?? e.id, e.key, e.kind, e.pos, e.dir, e.tgt, e.dmg, e.tw ? { spd: e.spd || 1, col: 0xff5040, life: 30 } : { nl: !!e.nl }); if (e.tw) { const q = projs.get(e.key); if (q) q.vis = true; } const de = len(sub(e.pos, S.pos)); sfx(e.kind, de); if (de < 40000) P.lastCombat = performance.now(); if (!e.tw && P.hp > 0 && de < 30000 && de > 0 && (S.pos[0] - e.pos[0]) * e.dir[0] / de + (S.pos[1] - e.pos[1]) * e.dir[1] / de + (S.pos[2] - e.pos[2]) * e.dir[2] / de > 0.985) attackAlert('p', ownerName(e.ow ?? e.id), e.pos); } // disparo de otra nave que apunta hacia mí
+    if (e.t === 'fire') { if (e.rb >= 0 && e.rp) e.pos = bodies[e.rb].pos.map((c, i) => c + e.rp[i]); spawnProj(e.ow ?? e.id, e.key, e.kind, e.pos, e.dir, e.tgt, e.dmg, e.tw ? { spd: e.spd || 1, col: 0xff5040, life: 30 } : { nl: !!e.nl }); if (e.tw) { const q = projs.get(e.key); if (q) q.vis = true; } const de = len(sub(e.pos, S.pos)); sfx(e.kind === 'm' ? 'misil' : e.tw ? 'torreta' : 'plasma', e.pos); if (de < 40000) P.lastCombat = performance.now(); if (!e.tw && P.hp > 0 && de < 30000 && de > 0 && (S.pos[0] - e.pos[0]) * e.dir[0] / de + (S.pos[1] - e.pos[1]) * e.dir[1] / de + (S.pos[2] - e.pos[2]) * e.dir[2] / de > 0.985) attackAlert('p', ownerName(e.ow ?? e.id), e.pos); } // disparo de otra nave que apunta hacia mí
     else if (e.t === 'hit') {
       killProj(e.key); const vid = e.v ?? e.id, r = remotes.get(vid); puff(e.pos, 0.02, 0xffd070, 0.5, 0.012); // vid: la víctima (un bot si lo envía el anfitrión)
-      if (e.sh > 0 && r) { r.fl = 1; sfx('shield', len(sub(e.pos, S.pos))); } else boom(e.pos, e.dead ? 60 : e.dmg > 20 ? 25 : 6);
+      if (e.sh > 0 && r) { r.fl = 1; sfx('escudo', e.pos); } else boom(e.pos, e.dead ? 60 : e.dmg > 20 ? 25 : 6);
       if (e.dead && e.by === myId) { P.kills++; say('¡BAJA CONFIRMADA!'); if (vid >= 2000) gainXp(5, 'Bot enemigo derribado'); else gainXp(8 + 4 * ((r && r.lv) || 0), `${(r && r.name) || 'Piloto'} derribado`); } } // XP: bots 5; jugadores 8 + 4 × su nivel
     else if (e.t === 'nhit' && typeof NEU !== 'undefined') NEU.onHit(e);
     else if (e.t === 'wreck' && e.by !== myId) boom(wrecks[e.w].pos, 80);
     else if ((e.t === 'hdead' || e.t === 'hgone') && typeof BASE !== 'undefined') BASE.onEvent(e);
     else if (e.t === 'wdead' && typeof WAR !== 'undefined') WAR.onEvent(e);
+    else if (e.t === 'walarm' && typeof WAR !== 'undefined') WAR.onAlarm(e); // alarma de un buque de guerra
     return;
   }
   if (m.hg && typeof BASE !== 'undefined') BASE.sync(m.hg);
@@ -515,6 +491,7 @@ ws.onmessage = ev => {
     if (!r) { r = { id: p.id, q: new THREE.Quaternion() }; remotes.set(p.id, r); }
     const spk = JSON.stringify(p.sp); // el rival cambió de nave o de mejoras: reconstruir su modelo
     if (r.spk !== spk) { if (r.grp) scene.remove(r.grp); r.grp = makeShip(p.sp); r.grp.visible = false; scene.add(r.grp); r.spk = spk; } // oculta hasta que el cuadro la coloque (si no, asomaría un instante sobre mi nave)
+    if ((r.v || 0) > 20000 && p.v < 5000 && r.apos) sfx('warpSalida', r.apos); // un rival sale del viaje de luz
     Object.assign(r, { rb: p.rb ?? -1, rp: p.rp, bt: p.bt || 0, name: p.name, pos: p.pos, v: p.v, hp: p.hp, sh: p.sh, ms: p.ms, pk: p.pk, lv: p.lv || 0, st: p.sp && p.sp.t, k: p.k || 0, d: p.d || 0, t: Date.now() }); r.q.fromArray(p.q); // lv/st: nivel y tipo de su nave · k/d: bajas y muertes
   }
   for (const [id, r] of remotes) if (!seen.has(id)) { scene.remove(r.grp); remotes.delete(id); }
@@ -654,7 +631,7 @@ function gauge(H) { // medidor curvo: arco azul = escudo (exterior), arco verde 
 }
 function hurt(dmg, dir, now) { // el escudo absorbe primero; lo que sobra va al casco
   const over = dmg - P.sh, had = P.sh > 0; P.sh = Math.max(0, P.sh - dmg); if (over > 0) P.hp -= over;
-  P.shT = now; P.lastCombat = now; P.flash = 1; P.shake = dmg > 20 ? 1 : 0.5; if (had) P.sf = 1; impact(dir, dmg > 20); sfx(over > 0 ? 'hit' : 'shield');
+  P.shT = now; P.lastCombat = now; P.flash = 1; P.shake = dmg > 20 ? 1 : 0.5; if (had) P.sf = 1; impact(dir, dmg > 20); AUDIO.hitMe(dmg, over > 0); // impacto en MI nave: metálico (o zumbido del escudo)
   if (P.hp <= 0) { P.deaths = (P.deaths || 0) + 1; P.deadUntil = now + 10000; S.v = 0; boom(S.pos, 60); } // muertes: se ven en la tabla de Tab
 }
 function impact(dir, big) { // fogonazo y chispas sobre mi nave, del lado de donde vino el proyectil
@@ -780,11 +757,20 @@ function drawHud(fwd, now, targets) {
   }
   if (S.warp.cd > 0 || now - S.warp.goT < 700) countdownHud(W, H, now);
   const wf = S.warp.fx;
-  if (wf > 0.02) { // estelas de estrellas
-    g2.strokeStyle = `rgba(170,215,255,${0.25 + 0.35 * wf})`; g2.lineWidth = 1.5;
-    for (let i = 0; i < 110; i++) { const a = Math.random() * 6.283, r0 = (0.12 + Math.random() * 0.5) * H * (1 - 0.3 * wf), l = (0.05 + Math.random() * 0.35) * H * wf; g2.beginPath(); g2.moveTo(W / 2 + Math.cos(a) * r0, H / 2 + Math.sin(a) * r0); g2.lineTo(W / 2 + Math.cos(a) * (r0 + l), H / 2 + Math.sin(a) * (r0 + l)); g2.stroke(); }
-    g2.lineWidth = 2;
+  if (wf > 0.02) { // VIAJE DE LUZ: líneas de velocidad hacia los BORDES y esquinas (más, más largas cuanto más lejos del centro) y distorsión lateral tipo lente
+    const Rm = Math.hypot(W, H) / 2, cols = ['255,255,255', '200,232,255', '143,216,255', '111,240,255'];
+    { const e = W * 0.3; for (const [x0, x1] of [[0, e], [W, W - e]]) { const gr = g2.createLinearGradient(x0, 0, x1, 0); gr.addColorStop(0, `rgba(160,215,255,${0.38 * wf})`); gr.addColorStop(0.45, `rgba(120,190,255,${0.12 * wf})`); gr.addColorStop(1, 'rgba(120,190,255,0)'); g2.fillStyle = gr; g2.fillRect(Math.min(x0, x1), 0, e, H); } } // viñeta lateral
+    g2.lineCap = 'round';
+    for (let i = 0; i < 240; i++) { // tope por rendimiento
+      const a = Math.random() * 6.283, u = Math.sqrt(Math.random()), r0 = Rm * (0.34 + 0.72 * u), l = Rm * wf * (0.12 + 0.55 * Math.random()) * (r0 / Rm) * (0.6 + 0.4 * Math.abs(Math.cos(a))); // más lejos del centro (y hacia los lados) = más largas
+      const x = W / 2 + Math.cos(a) * r0, y = H / 2 + Math.sin(a) * r0, cx = Math.cos(a), cy = Math.sin(a), cl = cols[i & 3];
+      g2.strokeStyle = `rgba(${cl},${0.12 * wf})`; g2.lineWidth = 0.8 + 1.6 * u; g2.beginPath(); g2.moveTo(x, y); g2.lineTo(x + cx * l, y + cy * l); g2.stroke(); // cola tenue
+      g2.strokeStyle = `rgba(${cl},${(0.35 + 0.5 * u) * wf})`; g2.lineWidth = 1 + 1.8 * u; g2.beginPath(); g2.moveTo(x + cx * l * 0.72, y + cy * l * 0.72); g2.lineTo(x + cx * l, y + cy * l); g2.stroke(); // cabeza brillante
+    }
+    g2.strokeStyle = `rgba(190,230,255,${0.16 * wf})`; g2.lineWidth = 2; for (const sgn of [-1, 1]) for (let k = 1; k <= 3; k++) { const x = W / 2 + sgn * W * (0.36 + 0.045 * k); g2.beginPath(); g2.moveTo(x, 0); g2.quadraticCurveTo(x + sgn * W * 0.05 * k, H / 2, x, H); g2.stroke(); } // arcos de la lente en los lados
+    g2.lineCap = 'butt'; g2.lineWidth = 2;
   }
+  if (now - (S.warp.outT || -1e9) < 600) { const k = 1 - (now - S.warp.outT) / 600; g2.fillStyle = `rgba(210,240,255,${0.55 * k * k})`; g2.fillRect(0, 0, W, H); } // destello de salida (coincide con sfxWarpOut)
   if (P.heat > 8) { // fricción atmosférica: resplandor naranja en los bordes y barra de temperatura
     const hf = P.heat / 100, gr = g2.createRadialGradient(W / 2, H / 2, H * 0.3, W / 2, H / 2, H * 0.85);
     gr.addColorStop(0, 'rgba(255,120,20,0)'); gr.addColorStop(1, `rgba(255,${Math.round(130 - 80 * hf)},20,${0.12 + 0.5 * hf})`); g2.fillStyle = gr; g2.fillRect(0, 0, W, H);
@@ -921,7 +907,7 @@ function frame(now) {
   if (warp.cd > 0) { // cuenta atrás: 5…1 con un pitido cada número y sacudida; se cancela si hay combate
     warp.cd -= dt;
     if (P.hp <= 0 || S.foot.on || S.park.on || inCombat(now)) { warp.cd = 0; say('Cuenta atrás cancelada'); }
-    else { const n = Math.ceil(warp.cd); if (n !== warp.n) { warp.n = n; if (n >= 1) { sfx('tick', 5 - n); P.shake = Math.max(P.shake, 0.3); } } if (warp.cd <= 0) { warp.cd = 0; startWarp(); } }
+    else { const n = Math.ceil(warp.cd); if (n !== warp.n) { warp.n = n; if (n >= 1) { sfx('tick', null, { n: 5 - n }); P.shake = Math.max(P.shake, 0.3); } } if (warp.cd <= 0) { warp.cd = 0; startWarp(); } }
   }
   if (warp.on && P.hp <= 0) endWarp('');
   if (warp.on) { // gasta la barra y acelera hacia 5 c
@@ -963,6 +949,7 @@ function frame(now) {
     hurt(10 + Math.min(60, vEff / 25), n.map(c => -c), now); S.v *= 0.1;
   }
 
+  if (typeof WAR !== 'undefined' && !warp.on && P.hp > 0 && !S.park.on && !S.foot.on) WAR.collide(oldPos, vEff, now); // buques y satélites son sólidos: te puedes estrellar
   { // turbulencia y calentamiento por fricción al entrar en una atmósfera: demasiada velocidad con aire denso desintegra la nave
     const dn = S.rhoB ? sstep(0.2, 0.8, ((fwd.x * (S.rhoB.pos[0] - S.pos[0]) + fwd.y * (S.rhoB.pos[1] - S.pos[1]) + fwd.z * (S.rhoB.pos[2] - S.pos[2])) / Math.hypot(S.rhoB.pos[0] - S.pos[0], S.rhoB.pos[1] - S.pos[1], S.rhoB.pos[2] - S.pos[2])) ) : 0; // la fricción solo actúa al descender: al salir o alejarse no hay
     const sun0 = bodies[0], xs = len(sub(S.pos, sun0.pos)) / sun0.R, ss = sstep(16, 1.5, xs), Tst = warp.on ? 0 : 1.5 * ss * ss, hs = 90 * sstep(3.6, 1.4, xs); // ESTRELLA: turbulencia desde 16 radios solares (siempre, sin importar la velocidad) y radiación letal bajo ~3 radios, mucho antes de su atmósfera
@@ -972,7 +959,7 @@ function frame(now) {
     P.heat = Math.max(0, Math.min(100, P.heat + (220 * Math.pow(Math.max(0, (vEff / bk - 12) / 48), 1.3) * rh + hs - (vEff < 12 ? 18 : 4)) * dt));
     if (P.hp > 0 && P.heat > 50) burn(0.6 * (P.heat - 50) * dt, now);
     if (P.hp > 0 && P.heat >= 100) { P.cause = P.heatStar ? 'la radiación de la estrella destruyó la nave' : 'te desintegraste al entrar a la atmósfera a demasiada velocidad'; burn(P.hp + P.sh + 1, now); }
-    if (P.turb > 0.05 && audio && now - lastRumble > 90) { lastRumble = now; noise(0.14, 0.03 + 0.07 * Math.min(1, P.turb), 500, 90); } // retumbar
+    if (P.turb > 0.05 && audio && now - lastRumble > 90) { lastRumble = now; sfx('rumble', null, { k: P.turb }); } // retumbar
   }
 
   { // PELIGRO DE LA ESTRELLA: en su zona letal corre una cuenta atrás de destrucción (más corta cuanto más cerca; escudo y casco no la paran); fuera se cancela tras WARCFG.starKill.reset s. También en velocidad luz
@@ -1081,7 +1068,7 @@ function frame(now) {
     const gi = planets.impact(old, p.pos); if (gi) { killProj(key); if (len(sub(gi, S.pos)) < 200) boom(gi, p.kind === 'm' ? 0.06 : 0.012); FOOT.splash(gi, p.kind); continue; } // el proyectil golpea el suelo: explosión y daño de área a los objetos
     if (p.owner !== myId && p.owner !== -myId && !(p.owner >= 7000 && p.owner < 8000 && typeof WAR !== 'undefined' && WAR.fOwner(p.owner) === myId) && !p.vis && alive && segDist(old, p.pos, S.pos) < (p.hr ?? (p.spd !== undefined || ak > 0.02 ? 0.04 : HIT_R))) { // en el aire y los disparos de torreta: radio real de la nave (40 m); en el espacio, el radio grande de siempre // el impacto lo decide la víctima
       if (p.nl && Math.random() >= NOLOCK_HIT) { killProj(key); puff(p.pos, 0.01, 0xffd070, 0.3, 0.006); continue; } // disparo sin bloqueo: roza (solo cuenta el 45 %)
-      if (dodging() && Math.random() < dodgeP()) { killProj(key); P.dodgeT = now; tone('sine', 700, 1600, 0.12, 0.06); continue; } // esquiva con Q/E (lo decide la víctima: yo)
+      if (dodging() && Math.random() < dodgeP()) { killProj(key); P.dodgeT = now; sfx('dodge'); continue; } // esquiva con Q/E (lo decide la víctima: yo)
       killProj(key); if (p.owner < 0 && typeof BASE !== 'undefined') { const th = BASE.HG.get(-p.owner); attackAlert(p.sn ? 's' : 't', p.sn || (th ? th.nm : 'un enemigo'), th && !p.sn ? BASE.worldOf(th) : ATK.pos); } else if (p.owner !== myId) attackAlert('p', ownerName(p.owner), ownerPos(p.owner)); hurt(p.dmg, p.dir, now); send({ t: 'hit', by: p.owner, key, dmg: p.dmg, pos: S.pos, dead: P.hp <= 0, sh: P.sh });
       continue;
     }
@@ -1128,7 +1115,7 @@ function frame(now) {
     camera.position.add(new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).multiplyScalar(0.015 * tb));
     camera.quaternion.multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler((Math.random() - 0.5) * 0.012 * tb, (Math.random() - 0.5) * 0.012 * tb, (Math.random() - 0.5) * 0.03 * tb)));
   }
-  const tr = tb > 0.02 ? `translate(${(Math.random() - 0.5) * 9 * tb}px,${(Math.random() - 0.5) * 9 * tb}px) scale(1.03)` : ''; renderer.domElement.style.transform = hc.style.transform = tr;
+  const tr = tb > 0.02 ? `translate(${(Math.random() - 0.5) * 9 * tb}px,${(Math.random() - 0.5) * 9 * tb}px) scale(1.03)` : ''; renderer.domElement.style.transform = tr + (S.warp.fx > 0.02 ? ` scale(${1 + 0.06 * S.warp.fx},${1 - 0.012 * S.warp.fx})` : ''); hc.style.transform = tr; // viaje de luz: estiramiento lateral barato (lente)
   camera.updateMatrixWorld(); _fr.setFromProjectionMatrix(_pm.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
   fields.render(S.pos, now, _fr); planets.cull(_fr); // solo se genera y se dibuja lo que está dentro del campo de visión
   SKY.follow(camera.position);

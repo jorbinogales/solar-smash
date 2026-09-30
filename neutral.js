@@ -62,7 +62,7 @@ const NEU = (() => {
   }
   function fire(n, pos, dir) {
     const key = `${myId ?? 0}:n${n.id}_${++seq}`, rb = n.a > 0 ? n.a : -1;
-    spawnProj(n.id, key, 'p', pos, dir, null, n.st.dmg); sfx('p', dist(pos, S.pos));
+    spawnProj(n.id, key, 'p', pos, dir, null, n.st.dmg); sfx('plasma', pos);
     send({ t: 'fire', key, kind: 'p', pos, dir, tgt: null, dmg: n.st.dmg, rb, rp: rb >= 0 ? sub(pos, bodies[rb].pos) : null, ow: n.id });
   }
   function step(n, gr, F, dt) {
@@ -138,7 +138,7 @@ const NEU = (() => {
   function onHit(e) { // evento de impacto (del anfitrión, o local si lo soy)
     killProj(e.key);
     if (e.dead) { boom(e.pos, 40); if (!wasHost) drop(e.n); if (e.win === myId) reward(e); }
-    else if (e.sh) { sfx('shield', dist(e.pos, S.pos)); puff(e.pos, 0.02, 0x55c8ff, 0.4, 0.012); }
+    else if (e.sh) { sfx('escudo', e.pos); puff(e.pos, 0.02, 0x55c8ff, 0.4, 0.012); }
     else boom(e.pos, 6);
   }
   function reward(e) { // derribo propio: recursos (fuera del presupuesto de las zonas), munición y misiles llenos, y experiencia

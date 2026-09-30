@@ -9,7 +9,7 @@ const BOT = (() => {
   function respawn(B, h) { const w = BASE.worldOf(h); B.pos = w.map((c, i) => c + h.dir[i] * 0.5); B.v = 0; B.hp = HP; B.sh = SH; B.dead = 0; B.q.copy(lookQ(nrm([h.dir[2], 0, -h.dir[0]]))); }
   function fire(B, idx, dir) {
     const key = `${myId ?? 0}:k${idx}_${++seq}`, n = nearest(B.pos), rb = n.b && n.alt < n.b.R * 30 ? n.b.i : -1;
-    spawnProj(2000 + idx, key, 'p', B.pos.slice(), dir, null, DMG, { bot: idx }); sfx('p', dist(B.pos, S.pos));
+    spawnProj(2000 + idx, key, 'p', B.pos.slice(), dir, null, DMG, { bot: idx }); sfx('plasma', B.pos);
     send({ t: 'fire', key, kind: 'p', pos: B.pos, dir, tgt: null, dmg: DMG, rb, rp: rb >= 0 ? sub(B.pos, bodies[rb].pos) : null, ow: 2000 + idx }); // ow: el disparo es del bot, no del anfitrión
   }
   function frame(dt, now) {

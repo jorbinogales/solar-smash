@@ -357,7 +357,7 @@ const BASE = (() => {
         const dir = [ap[0] - mp[0], ap[1] - mp[1], ap[2] - mp[2]], l = Math.hypot(...dir); if (l < 0.01) continue; dir[0] /= l; dir[1] /= l; dir[2] /= l;
         if (dir[0] * h.dir[0] + dir[1] * h.dir[1] + dir[2] * h.dir[2] < 0.03 || !clearShot(bb, mp, ap)) { t.cd = 0.25; continue; } // solo disparan hacia arriba y nunca a través del terreno o del planeta
         const sty = TOWER_STYLES[h.ts[ti]] || TOWER_STYLES.plasma, dmg = sty.dmg * h.st.dmgMul, key = `${myId ?? 0}:t${++seq}`, life = Math.min(40, l / sty.spd * 1.4 + 2), kind = sty.homing ? 'm' : 'p', tg = sty.homing ? { k: tid >= 3000 ? 'n' : 'p', id: tid } : null; t.cd = sty.cd * (0.8 + 0.4 * Math.random());
-        const mz = mp.map((c, i) => c + dir[i] * (MUZ[h.ts[ti]] ?? 0.012) * BK); spawnProj(-h.o, key, kind, mz, dir, tg, dmg, { spd: sty.spd, col: sty.col, life }); send({ t: 'fire', key, kind, pos: mz, dir, tgt: tg, dmg, tw: 1, spd: sty.spd, rb: S.refB, rp: S.refB >= 0 ? sub(mz, bodies[S.refB].pos) : null }); sfx(kind, l); puff(mz, 0.014 * BK, sty.col, 0.22, 0.012); puff(mz, 0.006 * BK, 0xffffff, 0.12, 0.008); // resplandor en la boca del cañón
+        const mz = mp.map((c, i) => c + dir[i] * (MUZ[h.ts[ti]] ?? 0.012) * BK); spawnProj(-h.o, key, kind, mz, dir, tg, dmg, { spd: sty.spd, col: sty.col, life }); send({ t: 'fire', key, kind, pos: mz, dir, tgt: tg, dmg, tw: 1, spd: sty.spd, rb: S.refB, rp: S.refB >= 0 ? sub(mz, bodies[S.refB].pos) : null }); sfx('torreta', mz); puff(mz, 0.014 * BK, sty.col, 0.22, 0.012); puff(mz, 0.006 * BK, 0xffffff, 0.12, 0.008); // resplandor en la boca del cañón
         if (tid === myId && typeof attackAlert === 'function') attackAlert('t', h.nm, w); // esta torreta me apunta a mí
       }
     }

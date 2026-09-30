@@ -78,13 +78,25 @@ function renderTools() {
 }
 const fitMenu = () => { if (ov.style.display !== 'none') fitBox($('hg'), 1100); };
 addEventListener('resize', fitMenu);
-function refresh() { $('hg').classList.toggle('nob', !atBase()); renderRes(); if (tab === 'ship') renderShip(); else if (tab === 'base') renderBase(); else if (tab === 'tools') renderTools(); else if (tab === 'fleet' && typeof WAR !== 'undefined') WAR.menu(); }
+const PG = {}; // página actual de cada lista del menú (sin scroll: paginación con ▲ ▼)
+function paginate() { // reparte las tarjetas de cada lista visible en páginas que caben enteras; la barra ▲ n/m ▼ ocupa siempre su hueco (el menú no cambia de tamaño)
+  document.querySelectorAll('#hg .lst').forEach(l => {
+    if (!l.id || !l.offsetParent) return; let nav = l.nextElementSibling; if (!nav || !nav.classList.contains('pgnav')) { nav = document.createElement('div'); nav.className = 'pgnav off'; l.after(nav); }
+    const kids = [...l.children]; kids.forEach(k => k.style.display = ''); const H = l.clientHeight, pages = [[]]; let h = 0;
+    for (const k of kids) { const kh = k.offsetHeight; if (pages[pages.length - 1].length && h + kh > H + 1) { pages.push([]); h = 0; } pages[pages.length - 1].push(k); h += kh + 5; }
+    const n = pages.length, p = PG[l.id] = Math.max(0, Math.min(n - 1, PG[l.id] || 0));
+    kids.forEach(k => { if (!pages[p].includes(k)) k.style.display = 'none'; });
+    nav.classList.toggle('off', n < 2); nav.innerHTML = `<button class="pgb" data-pg="${l.id}" data-d="-1"${p ? '' : ' disabled'}>▲</button><span>${p + 1}/${n}</span><button class="pgb" data-pg="${l.id}" data-d="1"${p < n - 1 ? '' : ' disabled'}>▼</button>`;
+  });
+}
+function refresh() { $('hg').classList.toggle('nob', !atBase()); renderRes(); if (tab === 'ship') renderShip(); else if (tab === 'base') renderBase(); else if (tab === 'tools') renderTools(); else if (tab === 'fleet' && typeof WAR !== 'undefined') WAR.menu(); paginate(); }
 function setTab(t) { tab = t; document.querySelectorAll('#hg .tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === t)); document.querySelectorAll('#hg .tab').forEach(x => x.style.display = x.id === 'tab-' + t ? '' : 'none'); refresh(); setTimeout(fitMenu, 0); } // el zoom del menú solo se recalcula al cambiar de pestaña o de tamaño de ventana
 
 document.addEventListener('mouseover', e => { // vista previa al pasar el ratón
   const el = e.target.closest && e.target.closest('#hg [data-pv]'), v = el && el.dataset.pv ? el.dataset.pv : null; if (v !== pvs) { pvs = v; refresh(); }
 });
 document.addEventListener('click', e => {
+  const pg = e.target.closest('#hg .pgb'); if (pg) { if (!pg.disabled) { PG[pg.dataset.pg] = (PG[pg.dataset.pg] || 0) + +pg.dataset.d; paginate(); } return; } // ▲ ▼: cambiar de página
   const bb = e.target.closest('#hg .buy'); if (bb) { if (!bb.disabled) buyNow(bb); return; } // COMPRAR / ADQUIRIR
   const sk = e.target.closest('#hg [data-sk]'), tb = e.target.closest('#hg .tabs button'), t = e.target.closest('#hg [data-t]'), eq = e.target.closest('[data-equip]'), sl = e.target.closest('[data-slot]'), lb = e.target.closest('#hg [data-lv]');
   if (tb) return setTab(tb.dataset.tab);
@@ -99,6 +111,7 @@ document.addEventListener('click', e => {
 });
 function buyNow(b) { // botón COMPRAR / ADQUIRIR: compra al momento (solo en la base)
   if (!atBase()) return; // fuera de la base los botones están atenuados y no hacen nada
+  if (typeof sfx === 'function') sfx('buy'); // compra: sonido suave
   if (b.dataset.unl) { const id = b.dataset.unl, cost = SHIP_COST[id]; if (!cost || unlocked.has(id)) return; if (!canPay(cost)) return say('Faltan recursos'); if (!FOOT.spend(cost)) return; unlocked.add(id); saveSets(); sel.t = id; applyNow(); return; }
   if (b.dataset.a !== undefined) { const i = +b.dataset.a, cost = upgradeCost(i, sel.a[i]); if (!canPay(cost)) return say('Faltan recursos'); if (FOOT.spend(cost)) { sel.a[i]++; applyNow(); } }
   else if (b.dataset.base) { const k = b.dataset.base, h = BASE.mine(); if (!h) return; const cost = BASE_UP[k].cost(((h.up && h.up[k]) || 0) + 1); if (!canPay(cost)) return say('Faltan recursos'); if (FOOT.spend(cost)) send({ t: 'bup', k }); }
@@ -113,7 +126,7 @@ $('go').onclick = () => {
 let sig = '', fitLast = '';
 function hangarFrame(now) { // llamado desde el bucle principal mientras el menú está abierto
   const h = typeof BASE !== 'undefined' ? BASE.mine() : null, sg = JSON.stringify([typeof INV !== 'undefined' && INV, typeof TOOLS !== 'undefined' && TOOLS, h && [h.up, Math.round(h.hp), Math.round(h.sh), h.tw, h.ts], [...unlocked], [...towersUnlocked], mySpec.a, mySpec.t, mySpec.sk, lvlOf(mySpec.t), atBase(), tab, typeof WAR !== 'undefined' && WAR.sig()]);
-  if (fitLast !== ov.style.display + innerWidth + 'x' + innerHeight) { fitLast = ov.style.display + innerWidth + 'x' + innerHeight; fitMenu(); }
+  if (fitLast !== ov.style.display + innerWidth + 'x' + innerHeight) { fitLast = ov.style.display + innerWidth + 'x' + innerHeight; fitMenu(); paginate(); }
   if (sg !== sig) { sig = sg; sel.a = mySpec.a.slice(); sel.t = mySpec.t; sel.sk = mySpec.sk; refresh(); } // los recursos y la base cambian mientras juegas
   const P_ = tab === 'ship' ? PV : tab === 'base' ? BV : tab === 'fleet' ? FV : null;
   if (P_ && P_.obj) {

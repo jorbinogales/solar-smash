@@ -119,13 +119,14 @@
     starClear: 1000000, orbitClear: 80000, // no se despliega a menos de esto de la estrella ni de la órbita de un planeta principal (sus lunas quedan dentro de ese margen)
     sectors: [4, 4, 5, 5, 6, 6, 6, 6], outerSectors: 6,
     starKill: { k: 3, tMax: 8, tMin: 1.5, reset: 1 }, // ZONA LETAL de la estrella: radio = máx(R★·(1+k), radio del Núcleo estelar); cuenta atrás clamp(tMax·d_superficie/(R_letal−R★), tMin, tMax) s; fuera se cancela tras `reset` s
+    arrive: 6, alarmCd: 20, // s que tarda en LLEGAR una unidad desplegada (sale del viaje de luz) · s mínimos entre dos alarmas de un mismo buque
     gain: { n: 1, every: 10 }, // recursos pasivos: cada zona reclamada da a su dueño n unidades de su recurso cada `every` s (no salen de los cúmulos) // sectores de cada anillo de planeta (de dentro afuera) y de los Confines
     // buque de guerra (modelo de 3,46 km × scale = ~14 km); near: km junto a él que cuentan como «en base». Es la unidad de MÁS alcance del juego (cubre grandes espacios):
     // range 6000 km de detección y disparo (satélite 1200, cazas 3000, torres de base mucho menos) · spd 300 km/s (el servidor admite hasta 500) → a 6000 km tarda 20 s y el
     // proyectil vive l/spd·1,5 + 3 s (≤ 60) · hr 0,25 km: radio de espoleta de proximidad del proyectil (las demás torretas, 0,04-0,05) · cd 1,1 s entre disparos del buque,
     // que alternan entre las 3 torretas gemelas del costado que mira al blanco (cada torreta dispara cada 3,3 s, cañón izquierdo y derecho por turnos)
     ws: { max: 2, hp: 3000, sh: 1000, scale: 4, near: 32, range: 6000, dmg: 6, cd: 1.1, spd: 300, hr: 0.25, cost: { oro: 40, diamante: 8, plata: 60, cobre: 100, piedra: 150 } },
-    ftr: { max: 2, n: 3, hp: 60, dmg: 4, cd: 0.8, range: 3000, engage: 8000, patrol: 6000, vmax: 400, cost: { plata: 15, cobre: 30, piedra: 30 } }, // escuadrón de CAZAS: n cazas de hp cada uno, plasma ligero; patrullan patrol km en torno a su punto y atacan hasta engage km de él
+    ftr: { max: 30, n: 3, hp: 60, dmg: 4, cd: 0.8, range: 3000, engage: 8000, patrol: 6000, vmax: 400, cost: { plata: 15, cobre: 30, piedra: 30 } }, // escuadrón de CAZAS: n cazas de hp cada uno, plasma ligero; patrullan patrol km en torno a su punto y atacan hasta engage km de él
     sat: { maxZone: 3, hp: 800, range: 1200, dmg: 20, cd: 4, spd: 50, radar: 1500000, cost: { oro: 8, plata: 20, cobre: 40, piedra: 60 } }, // satélite defensivo (~1 km): misiles guiados de largo alcance
   };
   const TAU = Math.PI * 2;
@@ -160,28 +161,43 @@
     return best;
   }
   const czCenter = z => { const rm = z.n === 1 ? 0 : z.r1 === Infinity ? z.r0 * 1.25 : (z.r0 + z.r1) / 2, am = z.a0 + z.da / 2; return [rm * Math.cos(am), 0, rm * Math.sin(am)]; }; // punto representativo (etiqueta, distancias)
-  function czDeployPoint(sys, czs, zones, zi, idx, at, t) { // at: 'p' junto al planeta de la zona (si lo hay en el instante t) · 'c' (defecto) junto a su cúmulo // punto AUTOMÁTICO de despliegue en la zona zi (lo usan el mapa y el servidor): junto a su cúmulo, fuera de la nube (1,4 × radio + 2500 km), en abanico por idx para no solaparse
-    const z = czs[zi]; if (!z || z.noClaim) return null; const j = idx % 8, sg = (j % 2 ? 1 : -1) * Math.ceil(j / 2);
-    if (at === 'p') { const bi = sys.bodies.findIndex((b, i) => b.k !== 'sun' && !b.parent && czAt(sys, czs, bodyPosAt(sys, i, t || 0)) === zi); if (bi >= 0) { // junto al planeta: hacia fuera de su órbita, más allá del margen de órbita (sus lunas quedan dentro), en fila tangencial
-      const P = bodyPosAt(sys, bi, t || 0), rr = Math.hypot(P[0], P[2]) || 1, ux = P[0] / rr, uz = P[2] / rr, D = WARCFG.orbitClear + 20000 + Math.floor(idx / 8) * 6000, L = sg * 6000;
-      return [Math.round(P[0] + ux * D - uz * L), 0, Math.round(P[2] + uz * D + ux * L)]; } }
+  const cross3 = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]], nrm3 = a => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0] / l, a[1] / l, a[2] / l]; };
+  // Punto AUTOMÁTICO de despliegue (lo usan el mapa y el servidor) -> { a: cuerpo ancla, off: posición relativa a él, abs: posición absoluta en el instante t } o null.
+  // at 'p': junto al planeta de la zona. Si el planeta tiene bases, sobre la vertical de la base (la mía; si solo hay rivales, la rival; con ambas, la más cercana a myPos),
+  //   al borde de la exosfera (6·H + 30 km; sin atmósfera, 30 % del radio + 30 km), ANCLADO AL PLANETA (viaja con él), en abanico de 60 km (> 3 × los 14 km del buque).
+  //   Sin bases: hacia fuera de su órbita (anclado a la estrella). · at 'c' (defecto): junto al cúmulo de la zona (anclado a la estrella).
+  function czDeployPoint(sys, czs, zones, zi, idx, at, t, bases, me, myPos) {
+    const z = czs[zi]; if (!z || z.noClaim) return null; const j = idx % 8, sg = (j % 2 ? 1 : -1) * Math.ceil(j / 2); t = t || 0;
+    if (at === 'p') { const bi = sys.bodies.findIndex((b, i) => b.k !== 'sun' && !b.parent && czAt(sys, czs, bodyPosAt(sys, i, t)) === zi); if (bi >= 0) {
+      const b = sys.bodies[bi], P = bodyPosAt(sys, bi, t), hs = (bases || []).filter(h => h.b === b.n && Number.isFinite(h.la) && Number.isFinite(h.lo));
+      if (hs.length) {
+        const dirOf = h => [Math.cos(h.la) * Math.cos(h.lo), Math.sin(h.la), Math.cos(h.la) * Math.sin(h.lo)], mine = hs.filter(h => h.o === me), riv = hs.filter(h => h.o !== me), q = myPos || P;
+        const h = mine.length && !riv.length ? mine[0] : riv.length && !mine.length ? riv[0] : hs.reduce((a, x) => d3(q, add3(P, dirOf(x).map(v => v * b.R))) < d3(q, add3(P, dirOf(a).map(v => v * b.R))) ? x : a);
+        const u = dirOf(h), H = sys.atmo[b.n] ? sys.atmo[b.n].H : 0, rr = b.R + (H ? 6 * H : 0.3 * b.R) + 30, e1 = nrm3(cross3(u, Math.abs(u[1]) < 0.9 ? [0, 1, 0] : [1, 0, 0])), e2 = cross3(u, e1);
+        const ring = idx ? Math.ceil(idx / 6) : 0, th = (idx - 1) * Math.PI / 3 + ring * 0.5, sp = 60 * ring; // abanico alrededor de la vertical de la base
+        const pt = [0, 1, 2].map(i => u[i] * rr + (idx ? (e1[i] * Math.cos(th) + e2[i] * Math.sin(th)) * sp : 0)), L = Math.hypot(pt[0], pt[1], pt[2]), off = pt.map(v => Math.round(v / L * rr * 10) / 10);
+        return { a: bi, off, abs: add3(P, off) };
+      }
+      const rr = Math.hypot(P[0], P[2]) || 1, ux = P[0] / rr, uz = P[2] / rr, D = WARCFG.orbitClear + 20000 + Math.floor(idx / 8) * 6000, L = sg * 6000, o = [Math.round(P[0] + ux * D - uz * L), 0, Math.round(P[2] + uz * D + ux * L)];
+      return { a: 0, off: o, abs: o }; } }
     const cl = zones.find(q => q.cz === zi), cc = cl ? cl.off : czCenter(z), rad = cl ? cl.radius : 0;
-    const a = Math.atan2(-cc[2], -cc[0]) + sg * 0.8, d = rad * 1.4 + 2500 + Math.floor(idx / 8) * 3000; // del lado de la estrella y abriéndose a ambos lados
-    return [Math.round(cc[0] + Math.cos(a) * d), 0, Math.round(cc[2] + Math.sin(a) * d)];
+    const a = Math.atan2(-cc[2], -cc[0]) + sg * 0.8, d = rad * 1.4 + 2500 + Math.floor(idx / 8) * 3000, o = [Math.round(cc[0] + Math.cos(a) * d), 0, Math.round(cc[2] + Math.sin(a) * d)]; // del lado de la estrella y abriéndose a ambos lados
+    return { a: 0, off: o, abs: o };
   }
-  function czDanger(sys, zs, zi, me, hangars, ships, t) { // '' = segura; si no, por qué es ZONA ROJA. hangars: [{ o, b (nombre del planeta) }] · ships: [{ o, a, off }]
+  function czDanger(sys, zs, zi, me, hangars, ships, t, skipB) { // skipB: cuerpo cuyos hangares no cuentan (despliegue sobre la base rival para atacarla) // '' = segura; si no, por qué es ZONA ROJA. hangars: [{ o, b (nombre del planeta) }] · ships: [{ o, a, off }]
     const z = zs[zi];
-    for (const h of hangars) if (h.o !== me) { const bi = sys.bodies.findIndex(x => x.n === h.b); if (bi >= 0 && czDist(z, bodyPosAt(sys, bi, t)) < WARCFG.exclHg) return 'ZONA ROJA: hangar enemigo en esta zona o junto a ella'; }
+    for (const h of hangars) if (h.o !== me) { const bi = sys.bodies.findIndex(x => x.n === h.b); if (bi >= 0 && bi !== skipB && czDist(z, bodyPosAt(sys, bi, t)) < WARCFG.exclHg) return 'ZONA ROJA: hangar enemigo en esta zona o junto a ella'; }
     for (const s of ships) if (s.o !== me && czDist(z, add3(bodyPosAt(sys, s.a, t), s.off)) < WARCFG.exclWs) return 'ZONA ROJA: buque de guerra enemigo en esta zona o junto a ella';
     return '';
   }
   // ¿Se puede desplegar en la zona zi en el punto off (km, ABSOLUTO respecto a la estrella, en el plano orbital)? '' = sí; si no, el motivo
-  function czCheck(sys, zs, zi, off, me, owner, hangars, ships, t) {
+  function czCheck(sys, zs, zi, off, me, owner, hangars, ships, t, anch) { // off: posición ABSOLUTA · anch > 0: desplegado junto a ese planeta (anclado a él): sin la regla de órbita, fuera de su atmósfera
     const z = zs[zi]; if (!z || !Array.isArray(off) || off.length !== 3 || !off.every(Number.isFinite) || Math.abs(off[1]) > 5000) return 'Zona no válida';
     if (z.noClaim) return 'Zona solar: no se puede desplegar';
     if (owner !== me) return 'Zona no reclamada por ti: reclámala primero (permanece dentro)';
     if (czAt(sys, zs, off) !== zi) return 'Fuera de la zona';
     const rr = Math.hypot(off[0], off[2]); if (rr < WARCFG.starClear) return 'Demasiado cerca de la estrella';
+    if (anch > 0) { const b = sys.bodies[anch], H = sys.atmo[b.n] ? sys.atmo[b.n].H : 0; if (d3(off, bodyPosAt(sys, anch, t)) < b.R + 5.5 * H + 5) return 'Dentro de la atmósfera'; return czDanger(sys, zs, zi, me, hangars, ships, t, anch); }
     for (const b of sys.bodies) if (b.k !== 'sun' && !b.parent && Math.abs(rr - b.a * DS) < WARCFG.orbitClear) return `Demasiado cerca de la órbita de ${b.n}`;
     return czDanger(sys, zs, zi, me, hangars, ships, t);
   }

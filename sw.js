@@ -1,6 +1,6 @@
 // Service worker: la app corre entera en el navegador del cliente (render y lógica de juego); el servidor solo gestiona salas y retransmite estado.
 // Los archivos estáticos se guardan en caché (abre al instante y el menú funciona sin conexión); se actualizan en segundo plano.
-const V = 'ssp-v2'; // v2: models.js nuevo y ships.js/base.js/war.js cambiados a la vez (evita mezclar archivos viejos en caché con los nuevos)
+const V = 'ssp-v3'; // v2: models.js nuevo y ships.js/base.js/war.js cambiados a la vez (evita mezclar archivos viejos en caché con los nuevos)
 self.addEventListener('install', e => { self.skipWaiting(); e.waitUntil(caches.open(V).then(c => c.addAll(['/', '/three.min.js', '/blobatar.js', '/menu.js', '/sysgen.js', '/icons/icon-192.png']))); });
 self.addEventListener('activate', e => e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== V).map(k => caches.delete(k)))).then(() => self.clients.claim())));
 self.addEventListener('fetch', e => {
