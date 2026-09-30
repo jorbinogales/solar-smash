@@ -2,7 +2,7 @@
 // Mientras el hangar exista, al morir reapareces en él tras una cuenta atrás; si lo destruyen, quedas derrotado y debes elegir otro planeta.
 // El servidor solo guarda { dueño, planeta, lat, lon, vida }. Las torretas las simula la víctima (igual que el daño de los proyectiles), así no hay retardo.
 const BASE = (() => {
-  const HG = new Map(), BK = 3, PAD_R = 0.055, // BK: las bases se ven y miden 3 veces más que el modelo base (km)
+  const HG = new Map(), BK = 6, PAD_R = 0.055, // BK: las bases se ven y miden 6 veces más que el modelo base (km): el doble que antes
    TW_RANGE = 200, TW_RANGE_ATMO = 200, // las bases detectan y disparan a enemigos hasta 200 km (con o sin atmósfera)
    TW_CD = 0.9, TW_SPD = 1.0, TW_HP = 150, // las torretas disparan a 1 km/s (3 600 km/h): el proyectil viaja y tarda en llegar
    HG_R = 0.075, HG_HPMAX = 600, css = document.createElement('style');
@@ -43,12 +43,12 @@ const BASE = (() => {
     return { ok, range: mx - mn, top: mx + 0.0008 };
   }
   function findSite(b) {
-    let best = null;
+    let best = null, alt = null;
     for (let i = 0; i < 500; i++) {
       const la = Math.asin(Math.random() * 1.7 - 0.85), lo = Math.random() * 6.2832 - 3.1416, info = padInfo(b, dirOf(la, lo));
-      if (!info.ok) continue; if (!best || info.range < best.range) best = { la, lo, range: info.range }; if (info.range < 0.006) break;
+      if (!info.ok) { if (!alt || info.range < alt.range) alt = { la, lo, range: info.range }; continue; } if (!best || info.range < best.range) best = { la, lo, range: info.range }; if (info.range < 0.012) break;
     }
-    return best;
+    return best || alt; // con la plataforma el doble de grande puede no haber sitio perfecto: se usa el más llano (la plataforma cubre el resto)
   }
 
   // ---------- modelo 3D ----------
@@ -104,7 +104,7 @@ const BASE = (() => {
     });
     setHeads(h);
     h.dome = new THREE.Mesh(new THREE.SphereGeometry(0.095, 24, 16), new THREE.MeshBasicMaterial({ color: 0x66ccff, transparent: true, opacity: 0.12, depthWrite: false, side: THREE.DoubleSide })); h.dome.position.y = 0.01; h.dome.visible = false; g.add(h.dome);
-    h.beacon = new THREE.Sprite(new THREE.SpriteMaterial({ map: beaconTex(), color: h.o === myId ? 0x4db8ff : 0xff4030, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, sizeAttenuation: false })); h.beacon.scale.set(0.05, 0.05, 1); h.beacon.visible = false; scene.add(h.beacon);
+    h.beacon = new THREE.Sprite(new THREE.SpriteMaterial({ map: beaconTex(), color: h.o === myId ? 0x4db8ff : 0xff4030, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, sizeAttenuation: false })); h.beacon.scale.set(0.065, 0.065, 1); h.beacon.visible = false; scene.add(h.beacon);
     g.visible = false; scene.add(g); h.grp = g; h.q = new THREE.Quaternion().setFromUnitVectors(Y, new THREE.Vector3(...h.dir)); h.tcd = 0;
   }
   function model(ts, tw, shield, col) { // maqueta para el menú (pestaña BASE): mismo modelo que el del juego (unidades km), con las torretas apuntando hacia arriba y afuera
@@ -294,8 +294,8 @@ const BASE = (() => {
     const alive = P.hp > 0 && !S.warp.on && !loading;
     for (const h of HG.values()) {
       if (!h.grp) continue; const w = worldOf(h), d = Math.hypot(w[0] - S.pos[0], w[1] - S.pos[1], w[2] - S.pos[2]);
-      h.grp.visible = d < 300; h.d = d;
-      if (h.beacon) { const bw = [w[0] + h.dir[0] * 3, w[1] + h.dir[1] * 3, w[2] + h.dir[2] * 3], bv = view(bw); h.beacon.position.set(bv.x, bv.y, bv.z); h.beacon.visible = d > 6; } // a 3 km sobre la base: no la tapa el suelo
+      h.grp.visible = d < 600; h.d = d;
+      if (h.beacon) { const bw = [w[0] + h.dir[0] * 6, w[1] + h.dir[1] * 6, w[2] + h.dir[2] * 6], bv = view(bw); h.beacon.position.set(bv.x, bv.y, bv.z); h.beacon.visible = d > 12; } // a 6 km sobre la base: no la tapa el suelo
       if (h.grp.visible && h.dome) { h.dome.visible = h.sh > 0; h.dome.material.opacity = 0.09 + 0.05 * Math.sin(now / 400); }
       if (h.grp.visible) { const v = view(w); h.grp.position.set(v.x, v.y, v.z); h.grp.quaternion.copy(h.q); h.grp.scale.setScalar(v.s * BK); }
       if (h.grp.visible && h.towers) for (const [ti, t] of h.towers.entries()) idle(t, ti, h.o === myId ? null : h, now); // vigilancia: mientras no disparan, miran de un lado a otro
@@ -345,7 +345,7 @@ const BASE = (() => {
     let dx = c.x, dy = -c.y; if (Math.hypot(dx, dy) < 1e-6) { dx = 0; dy = 1; }
     const rx = W / 2 - 52, ry = H / 2 - 62, t = 1 / Math.hypot(dx / rx, dy / ry); return { x: W / 2 + dx * t, y: H / 2 + dy * t, edge: true, ang: Math.atan2(dy, dx) };
   }
-  function marker(k, w, dist, label, W, H, now, ally, sub) { // ally: marcador azul de mi propia base (siempre visible, también tras el planeta: indica la dirección) · sub: 3.ª línea (nave y nivel)
+  function marker(k, w, dist, label, W, H, now, ally, sub, lv) { // lv: nivel de la nave (hexágono en la esquina superior izquierda) // ally: marcador azul de mi propia base (siempre visible, también tras el planeta: indica la dirección) · sub: 3.ª línea (nave y nivel)
     const p = screenPos(w, W, H), sz = 34, y = p.edge ? p.y : p.y - 46;
     g2.save(); g2.textAlign = 'center'; const pulse = 0.5 + 0.5 * Math.sin(now / 260);
     if (p.edge) { g2.translate(p.x, p.y); g2.rotate(p.ang); g2.fillStyle = ally ? '#4db8ff' : '#ff3b30'; g2.beginPath(); g2.moveTo(sz / 2 + 14, 0); g2.lineTo(sz / 2 + 2, -8); g2.lineTo(sz / 2 + 2, 8); g2.closePath(); g2.fill(); g2.rotate(-p.ang); g2.translate(-p.x, -p.y); }
@@ -353,6 +353,7 @@ const BASE = (() => {
     const im = icon(k); if (im.complete && im.naturalWidth) { if (ally) g2.filter = 'hue-rotate(200deg) saturate(1.4)'; g2.drawImage(im, p.x - sz / 2, y - sz / 2, sz, sz); g2.filter = 'none'; }
     g2.font = `bold 10px ${MONO}`; g2.fillStyle = ally ? '#9fd8ff' : '#ff8a7a'; g2.strokeStyle = '#000'; g2.lineWidth = 3; g2.strokeText(label, p.x, y + sz / 2 + 17); g2.fillText(label, p.x, y + sz / 2 + 17);
     g2.font = `11px ${MONO}`; g2.fillStyle = ally ? '#d6eeff' : '#ffd7cf'; g2.strokeText(fD(dist), p.x, y + sz / 2 + 29); g2.fillText(fD(dist), p.x, y + sz / 2 + 29);
+    if (lv !== undefined && !p.edge && typeof hexImg === 'function') { const hi = hexImg(lv, ally ? '#4db8ff' : '#ff5a4a'); if (hi.complete && hi.naturalWidth) g2.drawImage(hi, p.x - sz / 2 - 16, y - sz / 2 - 16, 24, 26); }
     if (sub) { g2.font = `bold 10px ${MONO}`; g2.fillStyle = '#ffd23f'; g2.strokeText(sub, p.x, y + sz / 2 + 41); g2.fillText(sub, p.x, y + sz / 2 + 41); }
     g2.restore();
   }
@@ -369,10 +370,10 @@ const BASE = (() => {
     baseStatus();
     const W = hc.width, H = hc.height; g2.save(); g2.textAlign = 'center';
     if (P.hp > 0 && !S.foot.on) { // enemigos: hangares y naves siempre señalados en rojo; mi base, en azul
-      { const mh = HG.get(myId); if (mh && mh.grp) { const mw = worldOf(mh), md = Math.hypot(mw[0] - S.pos[0], mw[1] - S.pos[1], mw[2] - S.pos[2]); if (md > 0.6) marker('hangar', mw, md, 'TU BASE', W, H, now, true); } }
+      { const mh = HG.get(myId); if (mh && mh.grp) { const mw = worldOf(mh), md = Math.hypot(mw[0] - S.pos[0], mw[1] - S.pos[1], mw[2] - S.pos[2]); if (md > 1.2) marker('hangar', mw, md, 'TU BASE', W, H, now, true); } }
       for (const h of HG.values()) if (h.o !== myId && h.grp) { const w = worldOf(h), dd = w.map((c, i) => c - S.pos[i]), dl = Math.hypot(...dd); if (dl > 0 && !losBlocked({ kind: 'h', dir: dd.map(c => c / dl), dist: dl })) marker('hangar', w, dl, 'HANGAR ' + h.nm.toUpperCase(), W, H, now); } // sin planeta de por medio
-      for (const r of remotes.values()) if (r.hp > 0 && r.apos) { const dd = r.apos.map((c, i) => c - S.pos[i]), dl = r.dist ?? Math.hypot(...dd), hl = Math.hypot(...dd); if (hl > 0 && !losBlocked({ kind: 'p', dir: dd.map(c => c / hl), dist: hl })) marker('ship', r.apos, dl, (r.name || 'PILOTO').toUpperCase(), W, H, now, false, `${TYPES[r.st] ? TYPES[r.st].name.toUpperCase() : 'NAVE'} NV ${r.lv || 0}`); } // debajo: nave que usa y su nivel
-      if (typeof BOT !== 'undefined') for (const t of BOT.targets()) { const dd = t.pos.map((c, i) => c - S.pos[i]), hl = Math.hypot(...dd); if (hl > 0 && !losBlocked({ kind: 'p', dir: dd.map(c => c / hl), dist: hl })) marker('ship', t.pos, hl, t.name.toUpperCase(), W, H, now, false, `${TYPES[t.st].name.toUpperCase()} NV ${t.lv}`); } // anfitrión: sus bots no son remotos
+      for (const r of remotes.values()) if (r.hp > 0 && r.apos) { const dd = r.apos.map((c, i) => c - S.pos[i]), dl = r.dist ?? Math.hypot(...dd), hl = Math.hypot(...dd); if (hl > 0 && !losBlocked({ kind: 'p', dir: dd.map(c => c / hl), dist: hl })) marker('ship', r.apos, dl, (r.name || 'PILOTO').toUpperCase(), W, H, now, false, `${TYPES[r.st] ? TYPES[r.st].name.toUpperCase() : 'NAVE'} NV ${r.lv || 0}`, r.lv || 0); } // debajo: nave que usa y su nivel
+      if (typeof BOT !== 'undefined') for (const t of BOT.targets()) { const dd = t.pos.map((c, i) => c - S.pos[i]), hl = Math.hypot(...dd); if (hl > 0 && !losBlocked({ kind: 'p', dir: dd.map(c => c / hl), dist: hl })) marker('ship', t.pos, hl, t.name.toUpperCase(), W, H, now, false, `${TYPES[t.st].name.toUpperCase()} NV ${t.lv}`, t.lv); } // anfitrión: sus bots no son remotos
     }
     for (const h of HG.values()) { // barras de vida de las torretas de un hangar enemigo cercano
       if (h.o === myId || !h.tw || !h.towers || !h.grp.visible || h.d > 2.5 * BK) continue;
@@ -381,8 +382,8 @@ const BASE = (() => {
         g2.font = `9px ${MONO}`; g2.fillStyle = '#ffd7cf'; g2.fillText(f > 0 ? 'TORRETA' : 'DESTRUIDA', x, y - 8); });
     }
     for (const h of HG.values()) {
-      if (!h.d || h.d > 300 || !h.grp.visible) continue; const w = worldOf(h);
-      tv.set(w[0] - S.pos[0], w[1] - S.pos[1], w[2] - S.pos[2]).addScaledVector(new THREE.Vector3(...h.dir), 0.05).project(camera); if (tv.z >= 1 || Math.abs(tv.x) > 1.1 || Math.abs(tv.y) > 1.1) continue;
+      if (!h.d || h.d > 600 || !h.grp.visible) continue; const w = worldOf(h);
+      tv.set(w[0] - S.pos[0], w[1] - S.pos[1], w[2] - S.pos[2]).addScaledVector(new THREE.Vector3(...h.dir), 0.1).project(camera); if (tv.z >= 1 || Math.abs(tv.x) > 1.1 || Math.abs(tv.y) > 1.1) continue;
       const x = (tv.x * 0.5 + 0.5) * W, y = (-tv.y * 0.5 + 0.5) * H, mine = h.o === myId, f = Math.max(0, h.hp / h.st.hpMax);
       g2.fillStyle = 'rgba(0,10,20,0.6)'; g2.beginPath(); g2.roundRect(x - 70, y - 26, 140, 40, 7); g2.fill();
       g2.fillStyle = mine ? '#4db8ff' : '#ff8a6a'; g2.font = `bold 12px ${MONO}`; g2.fillText(`${mine ? 'TU HANGAR' : 'HANGAR · ' + h.nm}`, x, y - 11); g2.font = `11px ${MONO}`; g2.fillStyle = '#bfe8ff'; g2.fillText(fD(h.d), x, y + 2);
@@ -401,12 +402,12 @@ const BASE = (() => {
     }
     return out;
   }
-  function atBase() { // compras, mejoras y cambios de nave solo aquí: tengo hangar y estoy a menos de 1,5 km de él (la plataforma mide 3 veces el modelo, BK) o estacionado en ella
+  function atBase() { // compras, mejoras y cambios de nave solo aquí: tengo hangar y estoy a menos de 3 km de él (la plataforma mide 6 veces el modelo, BK) o estacionado en ella
     if (typeof WAR !== 'undefined' && WAR.near()) return true; // junto a uno de mis buques de guerra también se compra y mejora
     const h = HG.get(myId); if (!h || !h.info) return false; const w = worldOf(h), p = S.foot.on ? S.shipPos : S.pos;
     return Math.hypot(w[0] - p[0], w[1] - p[1], w[2] - p[2]) < AT_BASE_KM || (S.park.on && S.park.b && S.park.b.n === h.b && Math.hypot(S.park.dir[0] - h.dir[0], S.park.dir[1] - h.dir[1], S.park.dir[2] - h.dir[2]) * bodyBy(h.b).R < AT_BASE_KM);
   }
-  const AT_BASE_KM = 1.5;
+  const AT_BASE_KM = 3; // la plataforma mide el doble (BK 6)
   const targetPos = id => { const h = HG.get(id); if (!h || h.hp <= 0) return null; const w = worldOf(h); return [w[0] + h.dir[0] * 0.012, w[1] + h.dir[1] * 0.012, w[2] + h.dir[2] * 0.012]; };
   return { model, targets, targetPos, atBase, mine: () => HG.get(myId) || null, canRespawn: () => !!HG.get(myId) || (typeof WAR !== 'undefined' && WAR.mine().length > 0), sync, onEvent, onClaim, onLobby, LB, started: () => started, choose: show, spawnAt, frame, hit, hud, HG, worldOf, isHost: () => LB.adm === myId, booted: () => MM.booted, onWelcome, onRoomMsg, loading: () => loading };
 })();

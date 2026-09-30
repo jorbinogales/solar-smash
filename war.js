@@ -14,12 +14,14 @@ const WAR = (() => {
   // ---------- estado de las zonas visto por mí: AZUL mía · ROJO enemiga o peligrosa · ÁMBAR reclamándose · GRIS neutral ----------
   const dangerOf = zi => czDanger(SYS, CZ, zi, myId, [...BASE.HG.values()], [...WS.values()], simT); // ZONA ROJA: contiene (o roza) un planeta con hangar enemigo o un buque enemigo
   function look(zi) {
+    if (CZ[zi].noClaim) return { col: '#ff9f1c', txt: 'ZONA SOLAR', sun: true, p: 0 };
     const Z = CZS[zi], dg = dangerOf(zi);
     if (Z.c && Z.p > 0) return { col: '#ffb347', txt: `${Z.c === myId ? 'RECLAMANDO' : 'EN DISPUTA · ' + nmOf(Z.c).toUpperCase()} ${Z.p} %`, cap: true, p: Z.p };
     if (Z.o === myId) return { col: '#4db8ff', txt: dg ? 'TUYA · ZONA ROJA' : 'TUYA · SEGURA', p: 100 };
     if (Z.o) return { col: '#ff3b30', txt: 'ENEMIGA · ' + nmOf(Z.o).toUpperCase(), p: 100 };
     return dg ? { col: '#ff6a5a', txt: 'NEUTRAL · PELIGRO', p: 0 } : { col: '#dfe8ee', txt: 'NEUTRAL', p: 0 };
   }
+  const owner = zi => { const z = CZ[zi], Z = CZS[zi]; return z.noClaim ? 'Zona solar · no reclamable' : Z.c && Z.p > 0 ? (Z.c === myId ? `Reclamando (tú) · ${Z.p} %` : `En disputa · ${nmOf(Z.c)} ${Z.p} %`) : Z.o === myId ? 'Tuya' : Z.o ? nmOf(Z.o) : 'Sin dueño'; }; // a quién pertenece (lo único que se muestra al pasar el ratón por una zona)
   function check(k, zi, off) { // '' = se puede desplegar ahí (misma validación que el servidor: sysgen.czCheck)
     if (!stock[k]) return k === 'W' ? 'No tienes buques en reserva: cómpralos en la base' : 'No tienes satélites en reserva: cómpralos en la base';
     if (k === 'W' && mineW().length >= C.ws.max) return `Máximo ${C.ws.max} buques desplegados`;
@@ -72,7 +74,7 @@ const WAR = (() => {
   function sync(m) {
     if (Array.isArray(m.cz) && m.cz.length === CZ.length) m.cz.forEach((r, i) => {
       const Z = CZS[i], [o, c, p] = r;
-      if (synced && Z.o !== o) { if (o === myId) say(`¡Zona ${CZ[i].name} reclamada! Ya puedes desplegar buques y satélites en ella`); else if (Z.o === myId) say(`Has perdido la zona ${CZ[i].name}`); }
+      if (synced && Z.o !== o) { if (o === myId) say(`¡Zona reclamada! Da +${C.gain.n} ${CZ[i].res} cada ${C.gain.every} s y ya puedes desplegar en ella`); else if (Z.o === myId) say('Has perdido una zona de control'); }
       Z.o = o; Z.c = c; Z.p = p;
     });
     if (Array.isArray(m.wb)) upd(WS, m.wb, 'W'); if (Array.isArray(m.sa)) upd(SA, m.sa, 'S'); synced = BASE.started() && !BASE.loading();
@@ -142,11 +144,11 @@ const WAR = (() => {
     const z = CZ[zi], Z = CZS[zi], L = look(zi), x = W / 2 - 200, y = 200, p = Z.c ? Z.p / 100 : Z.o ? 1 : 0;
     g2.fillStyle = '#050f1c'; g2.beginPath(); g2.roundRect(x + 4, y + 4, 400, 58, 9); g2.fill(); g2.fillStyle = '#0b2233ee'; g2.beginPath(); g2.roundRect(x, y, 400, 58, 9); g2.fill(); g2.lineWidth = 3; g2.strokeStyle = '#050f1c'; g2.stroke();
     hexP(x + 30, y + 29, 19); g2.fillStyle = L.col; g2.fill(); g2.stroke(); if (Z.c) { hexP(x + 30, y + 29, 19 + 4 * Math.abs(Math.sin(now / 300))); g2.strokeStyle = L.col; g2.lineWidth = 2; g2.stroke(); }
-    g2.textAlign = 'left'; g2.font = `bold 11px ${MONO}`; g2.fillStyle = '#9fd4ee'; g2.fillText(`ZONA DE CONTROL · ${z.name.toUpperCase()}`, x + 58, y + 18);
-    g2.font = `bold 13px ${MONO}`; g2.fillStyle = L.col; g2.fillText(Z.c === myId ? `RECLAMANDO… ${Z.p} % · permanece dentro` : Z.o === myId && !Z.c ? 'RECLAMADA · despliega buques y satélites' : L.txt, x + 58, y + 35);
+    g2.textAlign = 'left'; g2.font = `bold 11px ${MONO}`; g2.fillStyle = '#9fd4ee'; g2.fillText('ZONA DE CONTROL', x + 58, y + 18);
+    g2.font = `bold 13px ${MONO}`; g2.fillStyle = L.col; g2.fillText(Z.c === myId ? `RECLAMANDO… ${Z.p} % · permanece dentro` : `EN DISPUTA · ${nmOf(Z.c).toUpperCase()} ${Z.p} %`, x + 58, y + 35);
     g2.fillStyle = '#050f1c'; g2.fillRect(x + 58, y + 42, 328, 9); g2.fillStyle = L.col; g2.fillRect(x + 59, y + 43, 326 * p, 7); g2.textAlign = 'center';
   }
-  function spawnOpts() { const o = []; if (BASE.mine()) o.push({ id: 'base', n: 'BASE' }); mineW().forEach((s, i) => o.push({ id: s.id, n: `BUQUE ${i + 1} · ${CZ[s.zi].name}` })); return o; }
+  function spawnOpts() { const o = []; if (BASE.mine()) o.push({ id: 'base', n: 'BASE' }); mineW().forEach((s, i) => o.push({ id: s.id, n: `BUQUE ${i + 1}` })); return o; }
   const curPref = () => { const o = spawnOpts(); return o.some(x => x.id === pref) ? pref : o[0] ? o[0].id : 'base'; };
   function hud(now) {
     if (!BASE.started() || BASE.loading()) return;
@@ -163,7 +165,7 @@ const WAR = (() => {
         g2.fillStyle = '#050f1c'; g2.fillRect(x - 27, y + r + 17, 54, 7); g2.fillStyle = f > 0.35 ? '#5dff8a' : '#ff5a4a'; g2.fillRect(x - 26, y + r + 18, 52 * f, 5);
         g2.font = `10px ${MONO}`; g2.fillStyle = '#dff4ff'; g2.strokeText(fD(dl), x, y + r + 36); g2.fillText(fD(dl), x, y + r + 36);
       }
-      const zi = czAt(SYS, CZ, S.pos, simT); if (zi >= 0) banner(zi, W, now);
+      const zi = czAt(SYS, CZ, S.pos, simT); if (CZS[zi].c && CZS[zi].p > 0) banner(zi, W, now); // solo mientras se reclama o se disputa (al llegar al 100 % desaparece: aviso puntual en #nt)
     }
     if (P.hp <= 0 && mineW().length) { // selector de reaparición: teclas 1-3
       const o = spawnOpts(), cur = curPref(), tx = 'REAPARECER EN:  ' + o.map((x, i) => `[${i + 1}] ${x.n}${x.id === cur ? ' ◀' : ''}`).join('   ');
@@ -180,22 +182,28 @@ const WAR = (() => {
   }
   const near = () => { const p = S.foot.on ? S.shipPos : S.pos; return mineW().some(s => s.w && len(sub(s.w, p)) < C.ws.near); }; // junto a mi buque cuenta como «en base»
 
-  // ---------- menú BASE: secciones BUQUES y SATÉLITES (doble clic = comprar; DESPLEGAR / CONSTRUIR abre el mapa en modo colocación) ----------
+  // ---------- pestaña FLOTA del menú: BUQUES y SATÉLITES (botón COMPRAR; DESPLEGAR / CONSTRUIR abre el mapa en modo colocación) ----------
   const SVG_W = '<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><path d="M3 38 12 31h28l4-9h8l2 9h7l-2 12H10z" fill="#8a96a3" stroke="#050f1c" stroke-width="3" stroke-linejoin="round"/><rect x="45" y="13" width="6" height="9" fill="#4db8ff" stroke="#050f1c" stroke-width="2.5"/><path d="M15 37h40" stroke="#4db8ff" stroke-width="3"/><circle cx="21" cy="30" r="2.6" fill="#050f1c"/><circle cx="31" cy="30" r="2.6" fill="#050f1c"/><path d="M59 34h3" stroke="#ffb347" stroke-width="3"/></svg>';
   const SVG_S = '<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><rect x="3" y="26" width="18" height="12" fill="#1d4a8a" stroke="#050f1c" stroke-width="3"/><rect x="43" y="26" width="18" height="12" fill="#1d4a8a" stroke="#050f1c" stroke-width="3"/><path d="M21 32h6M37 32h6" stroke="#050f1c" stroke-width="3"/><rect x="26" y="23" width="12" height="17" rx="2" fill="#8a96a3" stroke="#050f1c" stroke-width="3"/><path d="M23 19q9-11 18 0z" fill="#e8edf2" stroke="#050f1c" stroke-width="2.5"/><path d="M32 40v16" stroke="#050f1c" stroke-width="5"/><path d="M32 41v14" stroke="#9fe8ff" stroke-width="2"/></svg>';
-  const row = (n, f, g) => `<div style="display:grid;grid-template-columns:1fr 90px;gap:6px;align-items:center;font-size:11px;margin:3px 0;color:#cfe9f7"><span>${n}</span><div><div class="bar"><i style="width:${Math.max(0, Math.min(100, f * 100))}%;background:#5dff8a"></i></div>${g === undefined ? '' : `<div class="bar" style="margin-top:2px"><i style="width:${Math.max(0, Math.min(100, g * 100))}%;background:#4db8ff"></i></div>`}</div></div>`;
-  function menu() {
-    const eW = document.getElementById('warShips'), eS = document.getElementById('warSats'), eP = document.getElementById('warSpawn'); if (!eW) return;
-    const myS = [...SA.values()].filter(s => s.o === myId), nZ = CZS.filter(Z => Z.o === myId).length;
-    const card = (svg, title, small, k) => `<div class="upc"><i class="uico">${svg}</i><div><b>${title}</b><small>${small}</small><div class="ctl">${buyBtn(`data-war="${k}"`, k === 'W' ? C.ws.cost : C.sat.cost)}</div></div></div>`;
-    const dep = (k, label, extra) => `<div style="display:flex;gap:8px;align-items:center;margin:4px 0 6px;font-size:11px;color:#9fd4ee"><button class="up" data-wdep="${k}"${stock[k] ? '' : ' disabled'}><b>${label}</b></button><span>En reserva: <b style="color:#fff">${stock[k]}</b> · ${extra}</span></div>`;
-    eW.innerHTML = card(SVG_W, 'Buque de guerra', `Nave capital de ~3 km: ${C.ws.hp} de casco + ${C.ws.sh} de escudo, 6 torretas (${C.ws.range} km). Reapareces en su cubierta y junto a él (< ${C.ws.near} km) puedes comprar como en la base. Máx. ${C.ws.max}.`, 'W')
-      + dep('W', 'DESPLEGAR', `desplegados ${mineW().length}/${C.ws.max}`) + mineW().map((s, i) => row(`Buque ${i + 1} · ${CZ[s.zi].name}`, s.hp / C.ws.hp, s.sh / C.ws.sh)).join('');
-    eS.innerHTML = card(SVG_S, 'Satélite defensivo', `Base flotante estática de ~0,9 km: ${C.sat.hp} de vida, misiles guiados a ${C.sat.range} km. Solo en tus zonas reclamadas (máx. ${C.sat.maxZone} por zona); si pierdes la zona, se desactiva.`, 'S')
-      + dep('S', 'CONSTRUIR', `construidos ${myS.length} · zonas tuyas ${nZ}`) + myS.map(s => row(`Satélite · ${CZ[s.zi].name}${s.on ? '' : ' (inactivo)'}`, s.hp / C.sat.hp)).join('');
+  const row = (n, f, g) => `<div style="display:grid;grid-template-columns:1fr 110px;gap:6px;align-items:center;font-size:11px;margin:4px 0;color:#cfe9f7"><span>${n}</span><div><div class="bar"><i style="width:${Math.max(0, Math.min(100, f * 100))}%;background:#5dff8a"></i></div>${g === undefined ? '' : `<div class="bar" style="margin-top:2px"><i style="width:${Math.max(0, Math.min(100, g * 100))}%;background:#4db8ff"></i></div>`}</div></div>`;
+  function menu() { // pestaña FLOTA: tarjetas grandes con icono, estadísticas, coste, COMPRAR, cantidad y DESPLEGAR / CONSTRUIR
+    const eW = document.getElementById('warShips'), eS = document.getElementById('warSats'), eP = document.getElementById('warSpawn'), eZ = document.getElementById('warZones'); if (!eW) return;
+    const myS = [...SA.values()].filter(s => s.o === myId), myZ = CZ.filter((z, i) => CZS[i].o === myId), fullW = mineW().length + stock.W >= C.ws.max;
+    const st = rows => `<div class="fst">${rows.map(([k, v]) => `<span>${k}</span><b>${v}</b>`).join('')}</div>`;
+    const dep = (k, label, extra) => `<div class="fbuy"><button class="up" data-wdep="${k}"${stock[k] ? '' : ' disabled'}><b>${label}</b></button><span style="font-size:11px;color:#9fd4ee">En reserva: <b style="color:#fff">${stock[k]}</b> · ${extra}</span></div>`;
+    eW.innerHTML = `<div class="fhd"><i class="fico">${SVG_W}</i><div><b>BUQUE DE GUERRA</b><small>Nave capital de ~3,4 km. Reapareces en su cubierta y junto a él (&lt; ${C.ws.near} km) puedes comprar como en la base. Se despliega en una zona de control tuya y segura.</small></div></div>`
+      + st([['Casco', C.ws.hp], ['Escudo', C.ws.sh], ['Torretas', `6 × ${C.ws.dmg} daño`], ['Alcance', `${C.ws.range} km`], ['Cadencia', `${C.ws.cd} s`], ['Máximo', C.ws.max]])
+      + `<div class="fbuy">${fullW ? '<span class="max">MÁXIMO ALCANZADO</span>' : buyBtn('data-war="W"', C.ws.cost)}</div>`
+      + dep('W', 'DESPLEGAR', `desplegados ${mineW().length}/${C.ws.max}`) + mineW().map((s, i) => row(`Buque ${i + 1}`, s.hp / C.ws.hp, s.sh / C.ws.sh)).join('');
+    eS.innerHTML = `<div class="fhd"><i class="fico">${SVG_S}</i><div><b>SATÉLITE DEFENSIVO</b><small>Base flotante estática de ~1 km con misiles guiados de largo alcance. Solo en tus zonas reclamadas; si pierdes la zona, se desactiva.</small></div></div>`
+      + st([['Vida', C.sat.hp], ['Misiles', `${C.sat.dmg} daño`], ['Alcance', `${C.sat.range} km`], ['Cadencia', `${C.sat.cd} s`], ['Radar enemigo', '1,5 M km'], ['Por zona', C.sat.maxZone]])
+      + `<div class="fbuy">${buyBtn('data-war="S"', C.sat.cost)}</div>`
+      + dep('S', 'CONSTRUIR', `construidos ${myS.length}`) + myS.map((s, i) => row(`Satélite ${i + 1}${s.on ? '' : ' (inactivo)'}`, s.hp / C.sat.hp)).join('');
     const cur = curPref(); eP.innerHTML = spawnOpts().map(o => `<button class="up" data-wsp="${o.id}" style="margin:0 6px 6px 0;${o.id === cur ? 'border-color:#5dff8a;background:#123a2a' : ''}"><b>${o.n}</b></button>`).join('') || '<div class="empty">Sin base ni buques</div>';
+    const inc = {}; for (const z of myZ) inc[z.res] = (inc[z.res] || 0) + C.gain.n; // ingresos pasivos de mis zonas (icono + cantidad cada 10 s)
+    if (eZ) eZ.innerHTML = `<div class="fnote">Tuyas: <b style="color:#4db8ff">${myZ.length}</b> de ${CZ.length - 1}</div>` + (myZ.length ? `<div class="costs" style="margin-top:6px">${Object.entries(inc).map(([k, n]) => `<span class="cost"><i>${typeof ICONS !== 'undefined' ? ICONS[k] || '' : ''}</i>+${n}</span>`).join('')}</div><div class="fnote">cada ${C.gain.every} s</div>` : '<div class="fnote">Reclama una zona permaneciendo dentro de ella (mapa: M).</div>');
   }
-  function buy(k) { // doble clic en la tarjeta (hangar.js ya comprobó que estás en la base)
+  function buy(k) { // botón COMPRAR (hangar.js ya comprobó que estás en la base)
     const cost = k === 'W' ? C.ws.cost : C.sat.cost;
     if (k === 'W' && mineW().length + stock.W >= C.ws.max) return say(`Máximo ${C.ws.max} buques (desplegados + en reserva)`);
     if (!canPay(cost)) return say('Faltan recursos');
@@ -204,11 +212,11 @@ const WAR = (() => {
   document.addEventListener('click', e => {
     const sp = e.target.closest && e.target.closest('[data-wsp]'), d = e.target.closest && e.target.closest('[data-wdep]');
     if (sp) { pref = sp.dataset.wsp === 'base' ? 'base' : +sp.dataset.wsp; refresh(); return; }
-    if (!d || d.disabled) return;
+    if (!d || d.disabled || !atBase()) return; // fuera de la base: atenuado, sin mensaje
     if (!CZS.some(Z => Z.o === myId)) return say('Primero reclama una zona de control: permanece dentro de ella hasta el 100 %');
     ov.style.display = 'none'; MAP.place(d.dataset.wdep); // el mapa se abre en modo colocación
   });
   const sig = () => JSON.stringify([stock, pref, CZS.map(Z => Z.o), all().map(s => [s.id, s.o, s.hp, s.sh, s.on])]);
 
-  return { CZ, CZS, look, check, czPos, frame, sync, onEvent, onOk, hit, targets, pos: (k, id) => { const s = (k === 'W' ? WS : SA).get(id); return s && s.w ? s.w : null; }, hud, spawn, near, mine: mineW, menu, buy, sig, model, nmOf, all };
+  return { CZ, CZS, look, owner, check, czPos, frame, sync, onEvent, onOk, hit, targets, pos: (k, id) => { const s = (k === 'W' ? WS : SA).get(id); return s && s.w ? s.w : null; }, hud, spawn, near, mine: mineW, menu, buy, sig, model, nmOf, all };
 })();

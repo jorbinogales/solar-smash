@@ -10,16 +10,22 @@ const rooms = new Map(); // código -> sala: { code, name, seed, np, fillBots, p
 // zones: zonas de recursos de la semilla (sysgen.genZones); zr[z][k]: lo que queda del recurso dominante k de la zona z (el servidor es quien lo descuenta)
 const setSystem = (R, seed, np) => { R.seed = seed; R.np = np; R.SYS = genSystem(seed, np); R.SOLID = new Set(R.SYS.bodies.filter(b => b.k !== 'sun').map(b => b.n)); R.zones = genZones(R.SYS); R.zr = R.zones.map(z => z.dominant.map(d => d.budget)); R.czs = genControlZones(R.SYS); R.cz = R.czs.map(() => ({ o: 0, c: 0, p: 0 })); R.wships = new Map(); R.sats = new Map(); R.wn = 0; };
 // zonas de control: cz[i] = { o: dueño (id de jugador, 0 = nadie), c: quien la está reclamando, p: progreso 0-100 } · wships/sats: id -> { id, o, zi, a (cuerpo ancla), off, hp, sh, shT, on }
-const dropWar = (R, id) => { for (const M of [R.wships, R.sats]) for (const [k, s] of [...M]) if (s.o === id) M.delete(k); for (const Z of R.cz) { if (Z.o === id) Z.o = 0; if (Z.c === id) { Z.c = 0; Z.p = 0; } } }; // el jugador se fue: sus zonas quedan libres
+const dropWar = (R, id) => { if (R.czLast) R.czLast.delete(id); for (const M of [R.wships, R.sats]) for (const [k, s] of [...M]) if (s.o === id) M.delete(k); for (const Z of R.cz) { if (Z.o === id) Z.o = 0; if (Z.c === id) { Z.c = 0; Z.p = 0; } } }; // el jugador se fue: sus zonas quedan libres
 function czTick(R, now) { // captura: un único jugador (vivo) dentro de una zona que no es suya la reclama; con su buque dentro va 1,5× más rápido. Con otro jugador dentro baja a la mitad; sin nadie, a un tercio
-  const dt = Math.min(0.5, (now - (R.czT || now)) / 1000), t = now / 1000, base = 100 / WARCFG.capS, inZ = R.czs.map(() => new Map()); R.czT = now;
-  for (const p of R.players.values()) if (p.hp > 0 && R.lobby.has(p.id)) { const zi = czAt(R.SYS, R.czs, p.pos, t); if (zi >= 0) inZ[zi].set(p.id, 1); }
-  for (const s of R.wships.values()) { const m = inZ[s.zi]; if (m.has(s.o)) m.set(s.o, m.get(s.o) + 1); }
+  const dt = Math.min(0.5, (now - (R.czT || now)) / 1000), t = now / 1000, base = 100 / WARCFG.capS, share = R.czs.map(() => new Map()); R.czT = now; R.czLast = R.czLast || new Map();
+  for (const p of R.players.values()) if (p.hp > 0 && R.lobby.has(p.id)) { // se integra el TRAMO recorrido desde el tick anterior (4 muestras): a velocidad luz también suma, en proporción al tiempo dentro de cada zona
+    const a0 = R.czLast.get(p.id) || p.pos; R.czLast.set(p.id, p.pos);
+    for (let k = 1; k <= 4; k++) { const f = k / 4, zi = czAt(R.SYS, R.czs, [a0[0] + (p.pos[0] - a0[0]) * f, 0, a0[2] + (p.pos[2] - a0[2]) * f], t); share[zi].set(p.id, (share[zi].get(p.id) || 0) + 0.25); }
+  }
   R.cz.forEach((Z, zi) => {
-    const ids = [...inZ[zi].keys()];
-    if (ids.length === 1 && ids[0] !== Z.o) { if (Z.c !== ids[0]) { Z.c = ids[0]; Z.p = 0; } Z.p += base * (1 + 0.5 * (inZ[zi].get(ids[0]) - 1)) * dt; if (Z.p >= 100) { Z.o = Z.c; Z.c = 0; Z.p = 0; } }
+    if (R.czs[zi].noClaim) { Z.o = Z.c = Z.p = 0; return; } // zona solar: no reclamable
+    const ids = [...share[zi].keys()];
+    if (ids.length === 1 && ids[0] !== Z.o) { const id0 = ids[0], mult = 1 + 0.5 * [...R.wships.values()].filter(s => s.o === id0 && s.zi === zi).length; if (Z.c !== id0) { Z.c = id0; Z.p = 0; } Z.p += base * mult * dt * share[zi].get(id0); if (Z.p >= 100) { Z.o = Z.c; Z.c = 0; Z.p = 0; } } // con su buque dentro, 1,5× por buque
     else if (Z.c) { Z.p -= base * (ids.length > 1 ? 0.5 : ids.length ? 1 : 1 / 3) * dt; if (Z.p <= 0) { Z.c = 0; Z.p = 0; } }
   });
+  const slot = Math.floor(now / (WARCFG.gain.every * 1000)); // recursos pasivos: al cambiar de franja (cada 10 s de reloj real, igual en todos los clientes) cada dueño conectado recibe lo de sus zonas
+  if (R.czSlot !== undefined && slot !== R.czSlot) R.cz.forEach((Z, zi) => { const z = R.czs[zi]; if (!Z.o || z.noClaim || !z.res) return; for (const cl of wss.clients) if (cl.R === R && cl.pid === Z.o) send(cl, { zgain: 1, zi, type: z.res, n: WARCFG.gain.n }); });
+  R.czSlot = slot;
   for (const s of R.sats.values()) s.on = R.cz[s.zi].o === s.o ? 1 : 0; // si la zona cambia de dueño, sus satélites se desactivan (y vuelven si la recupera)
   for (const s of R.wships.values()) if (now - s.shT > 6000 && s.sh < WARCFG.ws.sh) s.sh = Math.min(WARCFG.ws.sh, s.sh + 25 * dt); // escudo del buque: se regenera sin recibir golpes
 }
@@ -117,7 +123,7 @@ wss.on('connection', ws => {
       else if (m.t === 'fire' && (m.kind === 'p' || m.kind === 'm') && num(m.pos, 3) && num(m.dir, 3) && typeof m.key === 'string') {
         const t = m.tgt && (m.tgt.k === 'p' || m.tgt.k === 'w' || m.tgt.k === 'h' || m.tgt.k === 'n' || m.tgt.k === 'W' || m.tgt.k === 'S') && Number.isInteger(m.tgt.id) ? { k: m.tgt.k, id: m.tgt.id } : null;
         const ow = id === admin(R) && Number.isInteger(m.ow) && m.ow >= 2000 && m.ow < 4000 ? m.ow : undefined; // disparo de un bot (2000+) o de una nave neutral (3000+): solo el anfitrión puede atribuirlo
-        relay(R, id, { t: 'fire', key: m.key.slice(0, 24), kind: m.kind, pos: m.pos, dir: m.dir, tgt: t, dmg: Number.isFinite(m.dmg) ? Math.max(1, Math.min(30, m.dmg)) : 8, tw: m.tw ? 1 : 0, spd: Number.isFinite(m.spd) ? Math.max(0.1, Math.min(50, m.spd)) : 0, rb: Number.isInteger(m.rb) ? m.rb : -1, rp: num(m.rp, 3) ? m.rp : null, ow });
+        relay(R, id, { t: 'fire', key: m.key.slice(0, 24), kind: m.kind, pos: m.pos, dir: m.dir, tgt: t, dmg: Number.isFinite(m.dmg) ? Math.max(1, Math.min(30, m.dmg)) : 8, tw: m.tw ? 1 : 0, spd: Number.isFinite(m.spd) ? Math.max(0.1, Math.min(50, m.spd)) : 0, nl: m.nl ? 1 : 0, rb: Number.isInteger(m.rb) ? m.rb : -1, rp: num(m.rp, 3) ? m.rp : null, ow });
       } else if (m.t === 'hit' && Number.isInteger(m.by) && num(m.pos, 3) && Number.isFinite(m.dmg) && typeof m.key === 'string')
         relay(R, id, { t: 'hit', by: m.by, key: m.key.slice(0, 24), dmg: m.dmg, pos: m.pos, dead: !!m.dead, sh: Number.isFinite(m.sh) ? m.sh : 0, v: Number.isInteger(m.v) ? m.v : undefined }); // v: víctima si no es quien envía (bots del anfitrión)
       else if (m.t === 'ns' && id === admin(R) && Array.isArray(m.l) && m.l.length <= 48) R.nv = m.l.map(e => neuRow(R, e)).filter(Boolean); // estado de las naves neutrales

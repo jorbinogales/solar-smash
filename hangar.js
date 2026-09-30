@@ -17,7 +17,7 @@ const ic = k => `<i class="uico">${(typeof UPI !== 'undefined' && UPI[k]) || ''}
 const costHtml = cost => `<span class="costs">${Object.entries(cost).map(([k, n]) => `<span class="cost${(inv()[k] || 0) >= n ? '' : ' no'}"><i>${icon(k)}</i>${n}</span>`).join('')}</span>`;
 const canPay = cost => Object.entries(cost).every(([k, n]) => (inv()[k] || 0) >= n);
 const pips = (lv, max) => Array.from({ length: max }, (_, k) => `<span class="pip ${k < lv ? 'on' : ''}" style="display:inline-block;margin-left:3px"></span>`).join('');
-const buyBtn = (attr, cost) => `<span class="buy" ${attr}>${costHtml(cost)}</span>`;
+const buyBtn = (attr, cost, label = 'COMPRAR') => { const ok = atBase(), pay = canPay(cost), txt = ok && !pay ? 'FALTAN RECURSOS' : label; return `<button class="buy kbuy" ${attr}${ok && pay ? '' : ' disabled'}>${costHtml(cost)}<b>${txt}</b></button>`; }; // botón naranja: compra con UN clic · gris si faltan recursos · fuera de la base, atenuado (sin mensajes)
 let pvs = null; // vista previa: al pasar el ratón sobre una mejora bloqueada se ve su efecto en el modelo sin comprarla ('style:x' | 'up:x' | 'ship:x' | 'add:i')
 const card = (iconKey, title, pipsHtml, small, ctl, pv = '') => `<div class="upc" data-pv="${pv}">${ic(iconKey)}<div><b>${title}<span>${pipsHtml}</span></b><small>${small}</small><div class="ctl">${ctl}</div></div></div>`;
 
@@ -33,14 +33,14 @@ function renderRes() {
 }
 function renderShip() {
   sel = validSpec(sel); const shown = (() => { if (!pvs) return sel; if (pvs.startsWith('ship:')) return validSpec({ ...sel, t: pvs.slice(5) }); if (pvs.startsWith('add:')) { const i = +pvs.slice(4), a = sel.a.slice(); a[i] = Math.min(ADDONS[i].max, a[i] + 1); return validSpec({ ...sel, a }); } return sel; })(), previewing = shown !== sel, st = statsOf(shown, lvA(shown.t)), used = sel.a.reduce((x, y) => x + y, 0), tot = ADDONS.reduce((x, d) => x + d.max, 0);
-  $('shipList').innerHTML = Object.entries(TYPES).map(([id, t]) => { const cost = SHIP_COST[id], unl = !cost || unlocked.has(id); return `<button class="ship hasico ${id === sel.t ? 'on' : ''}" data-t="${id}" data-pv="ship:${id}">${ic(id)}<div><b>${t.name}</b><small>${t.role}</small><small>${t.desc}</small>${unl ? '' : costHtml(cost)}</div></button>`; }).join('');
+  $('shipList').innerHTML = Object.entries(TYPES).map(([id, t]) => { const cost = SHIP_COST[id], unl = !cost || unlocked.has(id); return `<div class="ship hasico ${id === sel.t ? 'on' : ''}" data-t="${id}" data-pv="ship:${id}">${ic(id)}<div><b>${t.name}</b><small>${t.role}</small><small>${t.desc}</small>${unl ? '' : buyBtn(`data-unl="${id}"`, cost, 'ADQUIRIR')}</div></div>`; }).join('');
   $('slots').innerHTML = `<b>Mejoras ${used}/${tot}</b> ${'▮'.repeat(used)}${'▯'.repeat(tot - used)}`;
   $('addons').innerHTML = ADDONS.map((a, i) => { const lv = sel.a[i], cost = lv < a.max ? upgradeCost(i, lv) : null; return card(a.id, a.name, pips(lv, a.max), a.desc, cost ? buyBtn(`data-a="${i}"`, cost) : '<span class="max">MÁXIMO</span>', lv < a.max ? 'add:' + i : ''); }).join('');
   const L = lvlOf(shown.t), pts = shown.t === mySpec.t ? lvPts(L) : 0, ok = atBase(), need = L.lv < LV_MAX ? lvNeed(L.lv + 1) : 0; // nivel de la nave mostrada; los «+» solo para la nave actual
-  const lvCell = i => i < 0 ? '<span class="lvc"></span>' : `<span class="lvc">${L.a[i] ? `<em>+${L.a[i] * 2} %</em>` : ''}${pts > 0 ? `<span title="${ok ? `+2 % de ${LV_STATS[i].name.toLowerCase()} (1 punto)` : NOB}"><button class="kbp" data-lv="${i}" data-pv="lv:${i}"${ok ? '' : ' disabled'}>+</button></span>` : ''}</span>`; // + naranja: 1 punto = +2 % del valor base
+  const lvCell = i => i < 0 ? '<span class="lvc"></span>' : `<span class="lvc"><em>${L.a[i] ? `+${L.a[i] * 2} %` : ''}</em><button class="kbp" data-lv="${i}" data-pv="lv:${i}" title="+2 % de ${LV_STATS[i].name.toLowerCase()} (1 punto)" style="${pts > 0 ? '' : 'visibility:hidden'}"${pts > 0 ? '' : ' disabled'}>+</button></span>`; // el «+» ocupa SIEMPRE su hueco (el menú no cambia de tamaño) · los puntos de nivel se gastan en cualquier sitio // + naranja: 1 punto = +2 % del valor base
   $('stats').innerHTML = [['Casco', st.hp, 200, '#5dff8a', 1], ['Escudo', st.sh, 180, '#4db8ff', 2], ['Plasma', st.plasma, 380, '#3fe6b0', 6], ['Misiles', st.missiles, 12, '#ffb347', -1], ['Velocidad (km/s)', st.vmax, 1200, '#ffd23f', 0], ['Maniobra', Math.round(st.agil * 100), 100, '#f5a8ff', 4], ['Barra luz (s)', st.warp, 180, '#b48cff', 7], ['Daño plasma', st.pdmg, 12, '#3fe6b0', 3], ['Recarga plasma', +(1 / st.regen).toFixed(2), 1, '#c8ff5d', 5, '/s']] // máximos de las barras: los del chasis −30 % con todas las mejoras
     .map(([n, v, max, c, li, u = '']) => `<span>${n}</span>${bar(v, max, c)}<b>${v}${u}</b>${lvCell(li)}`).join('');
-  $('pvlv').innerHTML = `${hexSvg(L.lv, '#ffd23f', 38)}<div><b>Nv ${L.lv}</b><div class="xbar"><i style="width:${need ? Math.min(100, L.xp / need * 100) : 100}%"></i></div><small>${need ? `${L.xp}/${need} XP` : 'NIVEL MÁX.'}</small>${lvPts(L) > 0 ? `<em>${lvPts(L)} punto${lvPts(L) > 1 ? 's' : ''}</em>` : ''}</div>`; // nivel sobre la vista previa
+  $('pvlv').innerHTML = `<div><b>Nv ${L.lv}</b><div class="xbar"><i style="width:${need ? Math.min(100, L.xp / need * 100) : 100}%"></i></div><small>${need ? `${L.xp}/${need} XP` : 'NIVEL MÁX.'}</small><em style="visibility:${lvPts(L) > 0 ? 'visible' : 'hidden'}">${lvPts(L)} punto${lvPts(L) === 1 ? '' : 's'}</em></div>`; // nivel sobre la vista previa
   const key = JSON.stringify(shown); if (key !== PV.key) { PV.key = key; if (PV.obj) PV.pivot.remove(PV.obj); PV.obj = makeShip(shown); PV.obj.showShield = true; setThrust(PV.obj, 500, 0); updateShipFx(PV.obj, 0); PV.pivot.add(PV.obj); PV.cam.position.set(0.05, 0.032, 0.09); PV.cam.lookAt(0, 0, 0); }
 }
 
@@ -52,7 +52,6 @@ function baseModel(ts, tw, shield) { // maqueta del hangar: EL MISMO modelo que 
   return g;
 }
 function renderBase() {
-  if (typeof WAR !== 'undefined') WAR.menu(); // secciones BUQUES y SATÉLITES (también sin hangar)
   const h = typeof BASE !== 'undefined' ? BASE.mine() : null;
   if (!h) { for (const id of ['towerStyles', 'baseUp', 'bStats', 'slotsRow']) $(id).innerHTML = ''; $('baseUp').innerHTML = '<div class="empty">Aún no tienes base: elige un planeta de origen al iniciar la partida.</div>'; return; }
   const pk = pvs && pvs.startsWith('up:') ? pvs.slice(3) : null, s = pk ? baseStats({ ...h.up, [pk]: ((h.up && h.up[pk]) || 0) + 1 }) : h.st, pvStyle = pvs && pvs.startsWith('style:') ? pvs.slice(6) : null, avg = h.tw ? h.tw.reduce((x, y) => x + y, 0) / 4 : s.twMax; // s = estadísticas mostradas (con la mejora en vista previa)
@@ -72,34 +71,33 @@ function renderTools() {
 }
 const fitMenu = () => { if (ov.style.display !== 'none') fitBox($('hg'), 1100); };
 addEventListener('resize', fitMenu);
-function refresh() { $('hg').classList.toggle('nob', !atBase()); renderRes(); setTimeout(fitMenu, 0); if (tab === 'ship') renderShip(); else if (tab === 'base') renderBase(); else if (tab === 'tools') renderTools(); }
-function setTab(t) { tab = t; document.querySelectorAll('#hg .tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === t)); document.querySelectorAll('#hg .tab').forEach(x => x.style.display = x.id === 'tab-' + t ? '' : 'none'); refresh(); }
+function refresh() { $('hg').classList.toggle('nob', !atBase()); renderRes(); if (tab === 'ship') renderShip(); else if (tab === 'base') renderBase(); else if (tab === 'tools') renderTools(); else if (tab === 'fleet' && typeof WAR !== 'undefined') WAR.menu(); }
+function setTab(t) { tab = t; document.querySelectorAll('#hg .tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === t)); document.querySelectorAll('#hg .tab').forEach(x => x.style.display = x.id === 'tab-' + t ? '' : 'none'); refresh(); setTimeout(fitMenu, 0); } // el zoom del menú solo se recalcula al cambiar de pestaña o de tamaño de ventana
 
 document.addEventListener('mouseover', e => { // vista previa al pasar el ratón
   const el = e.target.closest && e.target.closest('#hg [data-pv]'), v = el && el.dataset.pv ? el.dataset.pv : null; if (v !== pvs) { pvs = v; refresh(); }
 });
 document.addEventListener('click', e => {
+  const bb = e.target.closest('#hg .buy'); if (bb) { if (!bb.disabled) buyNow(bb); return; } // COMPRAR / ADQUIRIR
   const tb = e.target.closest('#hg .tabs button'), t = e.target.closest('#hg [data-t]'), eq = e.target.closest('[data-equip]'), sl = e.target.closest('[data-slot]'), lb = e.target.closest('#hg [data-lv]');
   if (tb) return setTab(tb.dataset.tab);
   if (lb) { // «+»: asigna un punto de nivel (+2 %) a esa característica de la nave actual
-    if (!atBase()) return say(NOB); const L = lvlOf(mySpec.t), i = +lb.dataset.lv; if (lvPts(L) <= 0) return say('Sin puntos: sube de nivel derribando naves'); if (L.a[i] >= LV_PTMAX) return;
+    const L = lvlOf(mySpec.t), i = +lb.dataset.lv; if (lvPts(L) <= 0) return say('Sin puntos: sube de nivel derribando naves'); if (L.a[i] >= LV_PTMAX) return;
     L.a[i]++; saveLv(); pvs = null; sel.t = mySpec.t; sel.a = mySpec.a.slice(); applyNow(); return;
   }
-  if (t) { const id = t.dataset.t; if (id === mySpec.t) return; if (!atBase()) return say(NOB + ': vuelve para cambiar de nave'); if (SHIP_COST[id] && !unlocked.has(id)) return say('Doble clic en la nave para desbloquearla'); sel.t = id; applyNow(); }
-  else if (eq) { if (!atBase()) return say(NOB); const k = eq.dataset.equip; for (let i = 0; i < 4; i++) send({ t: 'bts', i, s: k }); }
-  else if (sl) { if (!atBase()) return say(NOB); const h = BASE.mine(), i = +sl.dataset.slot; if (!h) return; const list = [...towersUnlocked], n = list[(list.indexOf(h.ts[i]) + 1) % list.length]; send({ t: 'bts', i, s: n }); }
+  if (t) { const id = t.dataset.t; if (id === mySpec.t) return; if (!atBase()) return; if (SHIP_COST[id] && !unlocked.has(id)) return say('Pulsa ADQUIRIR para desbloquearla'); sel.t = id; applyNow(); }
+  else if (eq) { if (!atBase()) return; const k = eq.dataset.equip; for (let i = 0; i < 4; i++) send({ t: 'bts', i, s: k }); }
+  else if (sl) { if (!atBase()) return; const h = BASE.mine(), i = +sl.dataset.slot; if (!h) return; const list = [...towersUnlocked], n = list[(list.indexOf(h.ts[i]) + 1) % list.length]; send({ t: 'bts', i, s: n }); }
 });
-document.addEventListener('dblclick', e => { // comprar: doble clic en la tarjeta completa
-  const card = e.target.closest('#hg .upc, #hg .ship'); if (!card) return;
-  if (!atBase()) return say(NOB); // fuera de la base el menú solo muestra las estadísticas
-  if (card.dataset.t) { const id = card.dataset.t, cost = SHIP_COST[id]; if (cost && !unlocked.has(id)) { if (!canPay(cost)) return say('Faltan recursos'); if (!FOOT.spend(cost)) return; unlocked.add(id); saveSets(); sel.t = id; applyNow(); } return; }
-  const b = card.querySelector('.buy'); if (!b) return;
+function buyNow(b) { // botón COMPRAR / ADQUIRIR: compra al momento (solo en la base)
+  if (!atBase()) return; // fuera de la base los botones están atenuados y no hacen nada
+  if (b.dataset.unl) { const id = b.dataset.unl, cost = SHIP_COST[id]; if (!cost || unlocked.has(id)) return; if (!canPay(cost)) return say('Faltan recursos'); if (!FOOT.spend(cost)) return; unlocked.add(id); saveSets(); sel.t = id; applyNow(); return; }
   if (b.dataset.a !== undefined) { const i = +b.dataset.a, cost = upgradeCost(i, sel.a[i]); if (!canPay(cost)) return say('Faltan recursos'); if (FOOT.spend(cost)) { sel.a[i]++; applyNow(); } }
   else if (b.dataset.base) { const k = b.dataset.base, h = BASE.mine(); if (!h) return; const cost = BASE_UP[k].cost(((h.up && h.up[k]) || 0) + 1); if (!canPay(cost)) return say('Faltan recursos'); if (FOOT.spend(cost)) send({ t: 'bup', k }); }
   else if (b.dataset.buytw) { const k = b.dataset.buytw; if (!canPay(TOWER_STYLES[k].cost)) return say('Faltan recursos'); if (FOOT.spend(TOWER_STYLES[k].cost)) { towersUnlocked.add(k); saveSets(); refresh(); } }
   else if (b.dataset.tool) { if (FOOT.upTool(b.dataset.tool)) refresh(); }
   else if (b.dataset.war && typeof WAR !== 'undefined') WAR.buy(b.dataset.war); // buque de guerra o satélite defensivo
-});
+}
 $('go').onclick = () => {
   if (typeof BASE !== 'undefined' && !BASE.mine() && !(typeof WAR !== 'undefined' && WAR.mine().length)) return BASE.choose(); // sin hangar: primero elige planeta
   renderer.domElement.requestPointerLock();
@@ -128,15 +126,15 @@ const BUYS = () => {
 };
 let seen = null, sug = null; const nel = {};
 setInterval(() => {
-  if (typeof BASE === 'undefined' || !BASE.started() || BASE.loading()) return;
+  if (typeof BASE === 'undefined' || !BASE.started() || BASE.loading() || !atBase()) return; // los avisos «Ya puedes comprar» solo en la base
   const now = new Set(BUYS().filter(b => canPay(b.cost)).map(b => b.key)), first = seen === null;
-  if (!first) for (const b of BUYS()) if (now.has(b.key) && !seen.has(b.key)) { sug = b.key; nel[b.key] = notifyEl(`${ic(b.ik)}<span>${atBase() ? `Ya puedes comprar<br><b>${b.name}</b> — pulsa <kbd>F</kbd>` : `Ya te alcanza para<br><b>${b.name}</b> — vuelve a tu base para comprar`}</span>`, 9000, 'buy'); }
+  if (!first) for (const b of BUYS()) if (now.has(b.key) && !seen.has(b.key)) { sug = b.key; notifyQ(b.key, `${ic(b.ik)}<span>Ya puedes comprar<br><b>${b.name}</b> — pulsa <kbd>F</kbd></span>`, 9000, 'buy'); }
   seen = now;
 }, 700);
 addEventListener('keydown', e => {
   if (e.code !== 'KeyF' || e.repeat || !document.pointerLockElement) return;
-  if (!atBase()) return say('Vuelve a tu base para comprar');
+  if (!atBase()) return; // fuera de la base, F no hace nada
   const all = BUYS().filter(b => canPay(b.cost)), b = all.find(x => x.key === sug) || all[0];
   if (!b) return say('Aún no te alcanzan los recursos');
-  if (FOOT.spend(b.cost)) { b.go(); sug = null; const el = nel[b.key]; if (el && el.isConnected) { el.classList.add('done'); el.insertAdjacentHTML('beforeend', '<span class="ok">✔</span>'); setTimeout(() => el.classList.add('out'), 900); setTimeout(() => el.remove(), 1400); } }
+  if (FOOT.spend(b.cost)) { b.go(); sug = null; const el = nqEl(b.key); nqDone(b.key); if (el && el.isConnected) { el.classList.add('done'); el.insertAdjacentHTML('beforeend', '<span class="ok">✔</span>'); setTimeout(() => el.classList.add('out'), 900); setTimeout(() => el.remove(), 1400); } }
 });

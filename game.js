@@ -64,6 +64,7 @@ const bodies = DATA.map((d, i) => {
 });
 bodies.forEach(b => { if (b.parentName) b.parent = bodies.find(x => x.n === b.parentName); b.mesh.material.fog = false; }); // los astros del cielo no se pierden en la niebla del suelo
 
+const STAR_KILL_R = Math.max(bodies[0].R * (1 + WARCFG.starKill.k), genControlZones(SYS)[0].r1); // radio (desde el centro de la estrella) de su zona letal
 let simT = Date.now() / 1000; // reloj real compartido: todos ven los planetas en el mismo sitio
 function updateBodies() {
   for (const b of bodies) {
@@ -117,7 +118,8 @@ addEventListener('keydown', e => {
   if (e.code === 'KeyN' && !e.repeat) nextDest();
   if (e.code === 'KeyB' && !e.repeat) nextShip();
   if (e.code === 'KeyX') { S.v = 0; S.auto = false; }
-  if (e.code === 'KeyG' && !S.foot.on && !S.warp.on && P.hp > 0) { // G: fija el rumbo (y el salto luz) hacia el planeta o el cúmulo bajo la mira (otra vez: libera)
+  if (e.code === 'KeyG' && S.warp.cd > 0) { S.warp.cd = 0; say('Cuenta atrás cancelada'); }
+  else if (e.code === 'KeyG' && !S.foot.on && !S.warp.on && P.hp > 0) { // G: fija el rumbo (y el salto luz) hacia el planeta o el cúmulo bajo la mira (otra vez: libera)
     if (S.lockB != null) { S.lockB = null; say('Vuelo directo cancelado'); }
     else if (aimT && (aimT.type === 'b' || aimT.type === 'z')) { S.lockB = aimT.type === 'b' ? aimT.b.i : bodies.length + aimT.z.zi; S.tgt = S.lockB; say(`Vuelo directo hacia ${lockObj().n}: solo W/S`); }
   }
@@ -146,7 +148,7 @@ const fV = v => v < C * 0.1 ? v.toFixed(v < 10 ? 2 : 0) + ' km/s' : (v / C).toFi
 // ---------- red ----------
 let myName = 'Piloto'; try { myName = (localStorage.getItem('pname') || 'Piloto').slice(0, 16); } catch {} const remotes = new Map();
 const _fr = new THREE.Frustum(), _pm = new THREE.Matrix4();
-let myId = null, lastSend = 0, firing = false, lockT = null, seq = 0;
+let myId = null, lastSend = 0, firing = false, lockT = null, lockOn = false, seq = 0; // lockOn: el objetivo de la mira está BLOQUEADO (disparos guiados)
 const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host);
 const send = o => ws.readyState === 1 && ws.send(JSON.stringify(o));
 
@@ -203,6 +205,8 @@ function sfx(kind, dist = 0) { // el volumen cae con la distancia
 const MAXA = { plasma: 200, missiles: 4 }, HIT_R = 20, WRECK_R = 30, RANGE = 30000, CONE = 3 * Math.PI / 180;
 const WPN = { p: { speed: 6000, life: 5, dmg: 8, cd: 0.12, size: 3, min: 0.012, color: 0x66ffd0, turn: 10 },   // plasma: cadencia alta
               m: { speed: 2500, life: 20, dmg: 60, cd: 3, size: 10, min: 0.025, color: 0xffaa33, turn: 6 } }; // misil: teledirigido, recarga lenta
+const LOCK_T = 0.9, NOLOCK_HIT = 0.45, BOOST_MAX = 1.6, needLock = t => !!t && (t.kind === 'p' || t.kind === 'n'); // bloqueo: s manteniendo una NAVE (jugador, bot o neutral) en la mira · sin bloqueo solo cuenta el 45 % de los impactos en naves · el propulsor eleva los topes hasta 1,6×
+const dodging = () => (keys.KeyQ || keys.KeyE) && Math.abs(S.w.r) > 0.6 * 1.4 * P.agil && !S.foot.on && !S.park.on, dodgeP = () => Math.max(0.25, Math.min(0.45, 0.25 + 0.2 * P.agil)); // esquiva: alabeando con Q/E (más maniobra = más probabilidad)
 let lastRumble = 0, aimT = null, lastAimB = null; const _fogC = new THREE.Color();
 function occluded(b) { // ¿lo tapa el disco de otro cuerpo más cercano (o el propio planeta bajo tus pies)? Usa b.rel/b.dist del cuadro
   for (const o of bodies) {
@@ -219,19 +223,38 @@ function notifyEl(html, ms, cls = '') { // panel de notificaciones (derecha): en
   const el = document.createElement('div'); el.className = 'ni ' + cls; el.innerHTML = html; ntEl.append(el); while (ntEl.children.length > 7) ntEl.firstChild.remove();
   setTimeout(() => el.classList.add('out'), ms - 500); setTimeout(() => el.remove(), ms); return el;
 }
-function notifyRes(type, n) { // recurso obtenido: icono + cantidad (las ganancias seguidas del mismo recurso se suman)
-  const now = performance.now(), r = ntRes[type];
-  if (r && r.el.isConnected && now - r.t < 1600) { r.n += n; r.t = now; r.el.querySelector('b').textContent = '+' + r.n; return; }
-  ntRes[type] = { el: notifyEl(`<i class="ico">${typeof ICONS !== 'undefined' ? ICONS[type] : ''}</i><b>+${n}</b><span>${type}</span>`, 6500, 'res'), n, t: now };
+const RB = { res: new Map(), xp: [], tm: 0 }, RES_WIN = 500; // botín: todo lo que llega en 500 ms (recursos de una nave, un casco o un asteroide, y su XP) sale en UNA tarjeta
+function lootFlush() {
+  RB.tm = 0; const res = [...RB.res], xp = RB.xp.splice(0), xs = xp.reduce((a, x) => a + x.n, 0); RB.res.clear(); if (!res.length && !xp.length) return;
+  const ico = k => `<i class="rico">${typeof ICONS !== 'undefined' ? ICONS[k] || '' : ''}</i>`;
+  if (!res.length) return notifyEl(`<i class="ico">★</i><span><b>+${xs} XP</b> ${xp.map(x => x.why).join(' · ')}</span>`, 5000, 'xp');
+  notifyEl(`<i class="ico">${typeof ICONS !== 'undefined' ? ICONS[res[0][0]] || '' : ''}</i><span><b>Recursos obtenidos</b><br>${res.map(([k, n]) => `${ico(k)}+${n} ${k}`).join(' · ')}${xs ? `<br><em>+${xs} XP</em> ${xp.map(x => x.why).join(' · ')}` : ''}</span>`, 6500, 'res');
 }
+function notifyRes(type, n) { RB.res.set(type, (RB.res.get(type) || 0) + n); if (!RB.tm) RB.tm = setTimeout(lootFlush, RES_WIN); } // recurso obtenido: se agrupa con lo que llegue a la vez
+const NQ = { q: [], cur: null }; // cola de sugerencias («Ya puedes comprar…»): una visible a la vez, sin duplicados, máx. 5 en espera
+function notifyQ(key, html, ms, cls) { if ((NQ.cur && NQ.cur.key === key) || NQ.q.some(x => x.key === key)) return; NQ.q.push({ key, html, ms, cls }); if (NQ.q.length > 5) NQ.q.shift(); if (!NQ.cur) nqNext(); }
+function nqNext() { const x = NQ.q.shift() || null; NQ.cur = x; if (!x) return; x.el = notifyEl(x.html + (NQ.q.length ? `<small class="more">+${NQ.q.length} más</small>` : ''), x.ms, x.cls); setTimeout(() => { if (NQ.cur === x) nqNext(); }, x.ms + 60); }
+const nqEl = key => NQ.cur && NQ.cur.key === key ? NQ.cur.el : null;
+function nqDone(key) { NQ.q = NQ.q.filter(x => x.key !== key); const c = NQ.cur; if (c && c.key === key) setTimeout(() => { if (NQ.cur === c) nqNext(); }, 1500); } // ya comprada: fuera de la cola (y la visible deja paso a la siguiente)
 const QUIET = /luz|salto|atmósfera|exosfera|planeta|Ruedas|estacionada|Amerizaje|flota|despegar|impulso|despeg|aterriz|Partida iniciada|toma(r)? el control|preparando|Escáner|BAJO ATAQUE|atacando|te disparan/i; // planeta, velocidad luz, despegue/aterrizaje, inicio de partida, escáner y ataques: solo texto central, sin notificación
 const say = t => { const now = performance.now(); P.msg = t; P.msgT = now + 2500; if ((t !== lastSay || now - lastSayT > 3000) && !QUIET.test(t)) notifyEl(`<span>${t}</span>`, 5500); lastSay = t; lastSayT = now; };
 // ---------- experiencia y niveles de la nave actual (datos y fórmula en ships.js: LVL, lvNeed, LV_MAX) ----------
+const HEXI = new Map(); function hexImg(lv, col) { const k = lv + col; let im = HEXI.get(k); if (!im) { im = new Image(); im.src = 'data:image/svg+xml;utf8,' + encodeURIComponent(hexSvg(lv, col, 40).replace('<svg ', '<svg xmlns="http://www.w3.org/2000/svg" ')); HEXI.set(k, im); if (HEXI.size > 80) HEXI.delete(HEXI.keys().next().value); } return im; } // hexágono de nivel (ships.js) como imagen para el canvas del HUD
+function lvBadge(W, now) { // nivel del jugador arriba al centro: aparece al ganar XP (~4 s) y mientras el escáner (V) está activo; al subir de nivel, brilla
+  const since = now - (P.xpT || -1e9), on = since < 4000 || S.scanT; if (!on || P.hp <= 0) return; const a = S.scanT ? 1 : Math.min(1, (4000 - since) / 600), L = lvlOf(mySpec.t), need = L.lv < LV_MAX ? lvNeed(L.lv + 1) : 0, f = need ? Math.min(1, L.xp / need) : 1, pts = lvPts(L), up = now - (P.lvUpT || -1e9) < 3000;
+  const w = 300, x = W / 2 - w / 2, y = 8, h = 40; g2.save(); g2.globalAlpha = a; g2.textAlign = 'left';
+  if (up) { g2.shadowColor = '#ffd23f'; g2.shadowBlur = 14 + 10 * Math.sin(now / 120); } g2.fillStyle = '#050f1c'; g2.beginPath(); g2.roundRect(x + 4, y + 4, w, h, 10); g2.fill(); g2.fillStyle = '#0b2233f0'; g2.beginPath(); g2.roundRect(x, y, w, h, 10); g2.fill(); g2.shadowBlur = 0; g2.lineWidth = 3; g2.strokeStyle = up ? '#ffd23f' : '#050f1c'; g2.stroke();
+  g2.fillStyle = '#ffd23f'; g2.beginPath(); g2.roundRect(x + 8, y + 8, 58, 24, 8); g2.fill(); g2.strokeStyle = '#050f1c'; g2.stroke(); g2.fillStyle = '#050f1c'; g2.font = `900 14px ${MONO}`; g2.fillText(`Nv ${L.lv}`, x + 15, y + 25); // etiqueta redondeada (sin hexágono)
+  g2.font = `bold 11px ${MONO}`; g2.fillStyle = '#dff4ff'; g2.fillText((TYPES[mySpec.t] ? TYPES[mySpec.t].name : 'Nave').toUpperCase() + (up ? ' · ¡NIVEL ' + L.lv + '!' : ''), x + 74, y + 17); if (pts > 0) { g2.textAlign = 'right'; g2.fillStyle = '#ff8a3c'; g2.fillText(`${pts} punto${pts > 1 ? 's' : ''}`, x + w - 10, y + 17); g2.textAlign = 'left'; }
+  g2.fillStyle = '#050f1c'; g2.fillRect(x + 74, y + 23, w - 84, 9); g2.fillStyle = up ? '#ffd23f' : '#5dff8a'; g2.fillRect(x + 75, y + 24, (w - 86) * f, 7); g2.font = `bold 8px ${MONO}`; g2.fillStyle = '#050f1c'; g2.textAlign = 'right'; g2.fillText(need ? `${L.xp}/${need} XP` : 'NIVEL MÁX.', x + w - 13, y + 30); g2.textAlign = 'left';
+  if (since < 1400) { g2.globalAlpha = a * (1 - since / 1400); g2.font = `900 13px ${MONO}`; g2.fillStyle = '#c8ff5d'; g2.lineWidth = 3; g2.strokeStyle = '#050f1c'; const tx = `+${P.xpAdd || 0} XP`, tx0 = x + 75 + (w - 86) * f - 20, ty = y + 20 - since / 60; g2.strokeText(tx, tx0, ty); g2.fillText(tx, tx0, ty); } // «+XP» que sube sobre la barra
+  g2.restore();
+}
 function gainXp(n, why) { // XP para la nave que pilotas ahora; cada nivel da 1 punto de mejora para esa nave
   const L = lvlOf(mySpec.t); if (!(n > 0) || L.lv >= LV_MAX) return; L.xp += n; let up = 0;
   while (L.lv < LV_MAX && L.xp >= lvNeed(L.lv + 1)) { L.xp -= lvNeed(L.lv + 1); L.lv++; up++; }
-  if (L.lv >= LV_MAX) L.xp = 0; saveLv();
-  notifyEl(`<i class="ico">★</i><span><b>+${n} XP</b> ${why}</span>`, 5000, 'xp');
+  if (L.lv >= LV_MAX) L.xp = 0; saveLv(); P.xpT = performance.now(); P.xpAdd = n; if (up) P.lvUpT = P.xpT; // indicador de nivel temporal (lvBadge)
+  RB.xp.push({ n, why }); if (!RB.tm) RB.tm = setTimeout(lootFlush, RES_WIN); // en la misma tarjeta que el botín si llega a la vez
   if (up) { notifyEl(`<i class="ico">★</i><span><b>¡Nivel ${L.lv}!</b> Ve a tu base para mejorar</span>`, 9000, 'xp'); [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => tone('square', f, f * 1.01, 0.18, 0.06), i * 110)); } // aviso normal (sin banner) y sonido
 }
 // ---------- Tab mantenida: estadísticas por jugador (humanos primero y luego bots; por nivel y bajas) sin soltar el ratón ----------
@@ -282,7 +305,7 @@ function spawnProj(owner, key, kind, pos, dir, tgt, dmg, o = {}) { // o: { spd (
   let obj;
   if (kind === 'p') { obj = new THREE.Group(); const core = new THREE.Mesh(bolt, glow(0xffffff)); core.scale.set(0.35, 0.35, 1); obj.add(new THREE.Mesh(bolt, glow(o.col ?? WPN.p.color, 0.6)), core); }
   else obj = makeMissile();
-  scene.add(obj); projs.set(key, { o0: [...pos], owner, kind, fromSpace: o.spd === undefined && airK(pos) < 0.02, spd: o.spd, bot: o.bot, pos: [...pos], dir: [...dir], tgt, life: o.life ?? WPN[kind].life, dmg: dmg ?? WPN[kind].dmg, sp: obj, puff: 0 });
+  scene.add(obj); projs.set(key, { o0: [...pos], owner, kind, fromSpace: o.spd === undefined && airK(pos) < 0.02, spd: o.spd, bot: o.bot, nl: !!o.nl, pos: [...pos], dir: [...dir], tgt, life: o.life ?? WPN[kind].life, dmg: dmg ?? WPN[kind].dmg, sp: obj, puff: 0 });
 }
 function killProj(key) { const p = projs.get(key); if (p) { scene.remove(p.sp); projs.delete(key); } }
 function puff(pos, size, color, dur, min) { const sp = new THREE.Mesh(ball, glow(color)); scene.add(sp); fx.push({ pos: [...pos], size, t: 0, dur, min, sp }); }
@@ -332,8 +355,9 @@ function shoot(kind, tgt) {
   const f = new THREE.Vector3(0, 0, -1).applyQuaternion(S.q), dir = [f.x, f.y, f.z];
   const o = kind === 'p' ? ship.muzzles[muz++ % ship.muzzles.length] : ship.pylons[P.missiles] || ship.pylons[0]; // cañón alterno / pilón del misil que sale
   const off = o.clone().applyQuaternion(S.q), pos = S.pos.map((c, i) => c + off.getComponent(i)), dmg = WPN[kind].dmg;
-  const key = `${myId ?? 0}:${++seq}`; spawnProj(myId, key, kind, pos, dir, tgt, dmg); sfx(kind);
-  send({ t: 'fire', key, kind, pos, dir, tgt, dmg, rb: S.refB, rp: S.refB >= 0 ? sub(pos, bodies[S.refB].pos) : null });
+  const key = `${myId ?? 0}:${++seq}`; spawnProj(myId, key, kind, pos, dir, tgt, dmg, { nl: !tgt }); sfx(kind); // nl: sin bloqueo (en naves solo cuenta el 45 % de los impactos)
+  if (!tgt && (needLock(lockT) || (aimT && (aimT.type === 'p' || aimT.type === 'n')))) P.nlT = performance.now(); // aviso: disparas a una nave sin bloqueo
+  send({ t: 'fire', key, kind, pos, dir, tgt, dmg, nl: tgt ? 0 : 1, rb: S.refB, rp: S.refB >= 0 ? sub(pos, bodies[S.refB].pos) : null });
 }
 // ---------- estacionar: cerca del suelo y despacio la nave se posa sobre el terreno (tren de aterrizaje) ----------
 function togglePark() { if (S.foot.on) return; // T cerca del suelo: despliega las ruedas y estaciona; T otra vez despega
@@ -382,7 +406,7 @@ function toggleWarp() {
   if (w.lock || w.bar < 2) return say('Motor de velocidad luz recargando…');
   { const blk = warpBlock(); if (blk) return say(blk.k === 'sun' ? `Demasiado cerca de ${blk.n} para velocidad luz` : `Cerca de ${blk.n}: sal de su atmósfera y mira hacia fuera del planeta para saltar`); }
   if (!warpTarget()) return say('Sin destino para el salto'); w.pick = warpTarget(); say(`Salto hacia ${w.pick.n}`); // el destino queda fijado durante la cuenta atrás
-  w.cd = 5; w.n = 6; // cuenta atrás de 5 s con pitido por número; al llegar a 0 se activa el salto (ver startWarp)
+  w.cd = 5; w.n = 6; S.v = 0; // cuenta atrás de 5 s con pitido por número; al llegar a 0 se activa el salto (ver startWarp)
 }
 function warpTarget() { // destino del salto: el rumbo fijado con G, el elegido al empezar la cuenta atrás, el cúmulo bajo la mira, la zona elegida con N o en el mapa (si aún no estás en ella) o, si no, el cuerpo más cercano a la dirección de la mira (nunca sales del sistema)
   if (S.lockB != null) return lockObj();
@@ -406,7 +430,7 @@ function warpStep(dt) { // avanza en tramos de 2500 km para no saltarse un plane
 function fireMissile() {
   if (P.hp <= 0 || P.cdM > 0 || S.warp.on || S.foot.on || S.warp.cd > 0) return;
   if (P.missiles <= 0) { sfx('empty'); return say('SIN MISILES — destruye cascos a la deriva'); }
-  P.missiles--; P.cdM = WPN.m.cd; shoot('m', lockT ? { k: lockT.kind, id: lockT.id } : null);
+  P.missiles--; P.cdM = WPN.m.cd; shoot('m', lockOn ? { k: lockT.kind, id: lockT.id } : null);
 }
 applyLoadout(mySpec, false);
 const targetSpeed = t => t.k === 'p' ? (t.id === myId ? S.ve : remotes.get(t.id)?.v || (typeof BOT !== 'undefined' ? BOT.speed(t.id) : 0)) : t.k === 'n' && typeof NEU !== 'undefined' ? NEU.speed(t.id) : 0;
@@ -435,7 +459,8 @@ ws.onmessage = ev => {
   if (m.id) { myId = m.id; window.__welcome = m; if (typeof BASE !== 'undefined' && BASE.booted()) BASE.onWelcome(m); return; }
   if ((m.created !== undefined || m.joined !== undefined || m.mismatch !== undefined || m.room !== undefined || m.resumed !== undefined) && typeof BASE !== 'undefined') return void BASE.onRoomMsg(m);
   if (m.claim !== undefined) return void (typeof BASE !== 'undefined' && BASE.onClaim(m.claim));
-  if (m.wok !== undefined) return void (typeof WAR !== 'undefined' && WAR.onOk(m)); // respuesta al despliegue de un buque o satélite
+  if (m.wok !== undefined) return void (typeof WAR !== 'undefined' && WAR.onOk(m));
+  if (m.zgain) { if (RES[m.type] && Number.isInteger(m.n) && m.n > 0 && m.n <= 50) FOOT.add(m.type, m.n); return; } // recursos pasivos de una zona reclamada (se agrupan en «Recursos obtenidos») // respuesta al despliegue de un buque o satélite
   if (m.mined) { // respuesta del servidor a una extracción (asteroide de zona o casco): solo ahora se suman los recursos concedidos
     const got = Array.isArray(m.got) ? m.got : []; for (const it of got) if (RES[it.type] && it.n > 0) FOOT.add(it.type, it.n);
     if (Number.isInteger(m.z) && ZR[m.z]) { for (const it of got) { const k = ZONES[m.z].dominant.findIndex(d => d.type === it.type); if (k >= 0) ZR[m.z][k] = Math.max(0, ZR[m.z][k] - it.n); } if (!got.length) say(`${ZONES[m.z].name}: ya no queda nada de eso`); } // se descuenta ya; el tick lo confirma
@@ -444,7 +469,7 @@ ws.onmessage = ev => {
   }
   if (m.ev) {
     const e = m.ev;
-    if (e.t === 'fire') { if (e.rb >= 0 && e.rp) e.pos = bodies[e.rb].pos.map((c, i) => c + e.rp[i]); spawnProj(e.ow ?? e.id, e.key, e.kind, e.pos, e.dir, e.tgt, e.dmg, e.tw ? { spd: e.spd || 1, col: 0xff5040, life: 30 } : undefined); if (e.tw) { const q = projs.get(e.key); if (q) q.vis = true; } const de = len(sub(e.pos, S.pos)); sfx(e.kind, de); if (de < 40000) P.lastCombat = performance.now(); if (!e.tw && P.hp > 0 && de < 30000 && de > 0 && (S.pos[0] - e.pos[0]) * e.dir[0] / de + (S.pos[1] - e.pos[1]) * e.dir[1] / de + (S.pos[2] - e.pos[2]) * e.dir[2] / de > 0.985) attackAlert('p', ownerName(e.ow ?? e.id), e.pos); } // disparo de otra nave que apunta hacia mí
+    if (e.t === 'fire') { if (e.rb >= 0 && e.rp) e.pos = bodies[e.rb].pos.map((c, i) => c + e.rp[i]); spawnProj(e.ow ?? e.id, e.key, e.kind, e.pos, e.dir, e.tgt, e.dmg, e.tw ? { spd: e.spd || 1, col: 0xff5040, life: 30 } : { nl: !!e.nl }); if (e.tw) { const q = projs.get(e.key); if (q) q.vis = true; } const de = len(sub(e.pos, S.pos)); sfx(e.kind, de); if (de < 40000) P.lastCombat = performance.now(); if (!e.tw && P.hp > 0 && de < 30000 && de > 0 && (S.pos[0] - e.pos[0]) * e.dir[0] / de + (S.pos[1] - e.pos[1]) * e.dir[1] / de + (S.pos[2] - e.pos[2]) * e.dir[2] / de > 0.985) attackAlert('p', ownerName(e.ow ?? e.id), e.pos); } // disparo de otra nave que apunta hacia mí
     else if (e.t === 'hit') {
       killProj(e.key); const vid = e.v ?? e.id, r = remotes.get(vid); puff(e.pos, 0.02, 0xffd070, 0.5, 0.012); // vid: la víctima (un bot si lo envía el anfitrión)
       if (e.sh > 0 && r) { r.fl = 1; sfx('shield', len(sub(e.pos, S.pos))); } else boom(e.pos, e.dead ? 60 : e.dmg > 20 ? 25 : 6);
@@ -517,29 +542,42 @@ function ammoPanel(W, now) {
 }
 // ---------- instrumento de vuelo: horizonte artificial (inclinación respecto al suelo), altura, distancia a mi base y alerta de choque ----------
 const _fi = { f: new THREE.Vector3(), r: new THREE.Vector3(), u: new THREE.Vector3(), beep: 0 };
-function flightInstr(W, H, now) {
-  if (P.hp <= 0 || S.warp.on || S.foot.on) return;
-  let nb = null, na = Infinity; for (const b of bodies) { if (b.k === 'sun') continue; const a = Math.hypot(S.pos[0] - b.pos[0], S.pos[1] - b.pos[1], S.pos[2] - b.pos[2]) - b.R; if (a < na) { na = a; nb = b; } }
-  if (!nb || na > 600) return; // solo cerca de un planeta
-  const g = Math.max(0, planets.info.on && planets.info.name === nb.n ? planets.info.ground : na), dv = sub(S.pos, nb.pos), dl = len(dv), up = [dv[0] / dl, dv[1] / dl, dv[2] / dl];
-  _fi.f.set(0, 0, -1).applyQuaternion(S.q); _fi.r.set(1, 0, 0).applyQuaternion(S.q); _fi.u.set(0, 1, 0).applyQuaternion(S.q);
-  const sinP = Math.max(-1, Math.min(1, _fi.f.x * up[0] + _fi.f.y * up[1] + _fi.f.z * up[2])), pitch = Math.asin(sinP), roll = Math.atan2(_fi.r.x * up[0] + _fi.r.y * up[1] + _fi.r.z * up[2], _fi.u.x * up[0] + _fi.u.y * up[1] + _fi.u.z * up[2]);
-  const vz = S.ve * sinP, tti = vz < -0.03 && g > 0 && !S.park.on ? g / -vz : Infinity, thr = 1.5; // la alerta de choque (y el anillo rojo) solo a ≤ 1,5 s del impacto bajando deprisa; apuntar al planeta desde lejos no la activa
-  const cx = W - 96, cy = H * 0.5 + 30, R = 52;
-  g2.save(); g2.textAlign = 'center';
-  g2.beginPath(); g2.arc(cx, cy, R, 0, 7); g2.save(); g2.clip(); g2.translate(cx, cy); g2.rotate(-roll); const py = pitch * 180 / Math.PI * 1.3;
-  g2.fillStyle = '#2a6aa8'; g2.fillRect(-90, -200 + py, 180, 200); g2.fillStyle = '#7a5530'; g2.fillRect(-90, py, 180, 200); g2.fillStyle = '#ffffffcc'; g2.fillRect(-90, py - 1, 180, 2);
-  g2.strokeStyle = '#ffffff99'; g2.lineWidth = 1; g2.font = `9px ${MONO}`; g2.fillStyle = '#ffffffcc'; for (let a = -30; a <= 30; a += 10) { if (!a) continue; const y = py - a * 1.3, w = a % 20 ? 10 : 18; g2.beginPath(); g2.moveTo(-w, y); g2.lineTo(w, y); g2.stroke(); if (!(a % 20)) g2.fillText(Math.abs(a), w + 10, y + 3); }
+function flightInstr(W, H, now) { // gráfica HOLOGRÁFICA lateral de colisión: solo al ENTRAR en un planeta (dentro de su exosfera, o < 200 km sin atmósfera) y descendiendo
+  const dtI = Math.min(0.1, (now - (_fi.t || now)) / 1000); _fi.t = now;
+  let nb = null, na = Infinity, show = false, g = 0, up = null, sinP = 0, vz = 0, tti = Infinity, ceil = 200;
+  if (P.hp > 0 && !S.warp.on && !S.foot.on) for (const b of bodies) { if (b.k === 'sun') continue; const a = Math.hypot(S.pos[0] - b.pos[0], S.pos[1] - b.pos[1], S.pos[2] - b.pos[2]) - b.R; if (a < na) { na = a; nb = b; } }
+  if (nb) {
+    ceil = ATMO[nb.n] ? 6 * ATMO[nb.n].H : 200; g = Math.max(0, planets.info.on && planets.info.name === nb.n ? planets.info.ground : na);
+    const dv = sub(S.pos, nb.pos), dl = len(dv); up = [dv[0] / dl, dv[1] / dl, dv[2] / dl]; _fi.f.set(0, 0, -1).applyQuaternion(S.q);
+    sinP = Math.max(-1, Math.min(1, _fi.f.x * up[0] + _fi.f.y * up[1] + _fi.f.z * up[2])); vz = S.ve * sinP; tti = vz < -0.03 && g > 0 && !S.park.on ? g / -vz : Infinity;
+    show = na < ceil * (_fi.on ? 1.1 : 1) && !S.park.on && (_fi.on ? vz < 0.01 : vz < -0.03); // histéresis: entra bajando > 30 m/s, sale al dejar de bajar o al pasar el 110 % del techo
+  }
+  _fi.on = show; _fi.a = Math.max(0, Math.min(1, (_fi.a || 0) + (show ? 1 : -1) * dtI / 0.4)); // fundido de 0,4 s
+  if (tti <= 1.5 && vz < -0.3) crashAlert(W, H, now, tti); // la alerta de choque no cambia (1,5 s)
+  if (!_fi.a || !nb) { if (!_fi.a) _fi.ref = null; return; }
+  if (!_fi.ref || _fi.refB !== nb) { _fi.ref = up.slice(); _fi.refB = nb; } // punto de referencia del eje X: donde empezó el descenso
+  const red = tti <= 1.5, col = red ? '#ff5a4a' : '#8fd8ff', col2 = red ? '#ff3b30' : '#4db8ff', fk = v => v < 1 ? Math.round(v * 1000) + ' m' : v < 100 ? v.toFixed(1) + ' km' : Math.round(v) + ' km';
+  const xs = Math.acos(Math.max(-1, Math.min(1, up[0] * _fi.ref[0] + up[1] * _fi.ref[1] + up[2] * _fi.ref[2]))) * nb.R, vh = S.ve * Math.sqrt(Math.max(0, 1 - sinP * sinP)), xi = isFinite(tti) ? vh * tti : 0; // x: km recorridos sobre la superficie · xi: distancia horizontal al impacto
+  const span = Math.max(20, (xi + 5) * 1.35), pw = 210, ph = 150, x0 = W - 16 - pw, y0 = H * 0.5 - 70, gx = x0 + 40, gy = y0 + 14, gw = pw - 52, gh = ph - 40, xa = xs - 0.2 * span;
+  const X = x => gx + (x - xa) / span * gw, Y = h => gy + gh - gh * Math.sqrt(Math.max(0, Math.min(1, h / ceil))); // altura en escala de raíz: más resolución cerca del suelo
+  g2.save(); g2.globalAlpha = _fi.a * (0.88 + 0.12 * Math.random()); // parpadeo holográfico
+  const k = 11; g2.beginPath(); g2.moveTo(x0 + k, y0); g2.lineTo(x0 + pw - k, y0); g2.lineTo(x0 + pw, y0 + k); g2.lineTo(x0 + pw, y0 + ph - k); g2.lineTo(x0 + pw - k, y0 + ph); g2.lineTo(x0 + k, y0 + ph); g2.lineTo(x0, y0 + ph - k); g2.lineTo(x0, y0 + k); g2.closePath(); // marco con esquinas recortadas
+  g2.fillStyle = '#00121fcc'; g2.fill(); g2.lineWidth = 1.5; g2.strokeStyle = '#2a6a90'; g2.stroke(); g2.save(); g2.clip();
+  g2.fillStyle = 'rgba(143,216,255,0.05)'; for (let y = y0 + (now / 45) % 4; y < y0 + ph; y += 4) g2.fillRect(x0, y, pw, 1); // líneas de escaneo animadas
+  g2.font = `9px ${MONO}`; g2.lineWidth = 1; g2.textAlign = 'right';
+  for (const f of [1, 0.25, 0.0625]) { const y = Y(ceil * f); g2.strokeStyle = 'rgba(77,184,255,0.18)'; g2.beginPath(); g2.moveTo(gx, y); g2.lineTo(gx + gw, y); g2.stroke(); g2.fillStyle = '#4db8ff'; g2.fillText(fk(ceil * f), gx - 3, y + 3); } // rejilla y marcas de altura
+  g2.textAlign = 'center'; for (let i = 0; i <= 4; i++) { const xv = xa + span * i / 4, x = X(xv); g2.strokeStyle = 'rgba(77,184,255,0.12)'; g2.beginPath(); g2.moveTo(x, gy); g2.lineTo(x, gy + gh); g2.stroke(); g2.fillStyle = '#4db8ff'; g2.fillText(i % 2 ? '' : fk(Math.max(0, xv)), x, gy + gh + 11); } // marcas del eje X (km)
+  g2.shadowColor = col2; g2.shadowBlur = 8; g2.strokeStyle = col2; g2.lineWidth = 2; g2.beginPath(); g2.moveTo(gx, gy + gh); g2.lineTo(gx + gw, gy + gh); g2.stroke(); // SUELO (eje X)
+  g2.lineWidth = 1; g2.beginPath(); g2.moveTo(gx, gy); g2.lineTo(gx, gy + gh); g2.stroke(); // eje de altura
+  if (isFinite(tti)) { g2.setLineDash([4, 4]); g2.strokeStyle = col; g2.beginPath(); for (let i = 0; i <= 16; i++) { const t = tti * i / 16, x = X(xs + vh * t), y = Y(g + vz * t); if (i) g2.lineTo(x, y); else g2.moveTo(x, y); } g2.stroke(); g2.setLineDash([]); // trayectoria prevista (vector velocidad)
+    const ix = X(xs + xi), iy = gy + gh; g2.lineWidth = 2; g2.strokeStyle = col; g2.beginPath(); g2.moveTo(ix - 5, iy - 5); g2.lineTo(ix + 5, iy + 5); g2.moveTo(ix + 5, iy - 5); g2.lineTo(ix - 5, iy + 5); g2.stroke(); } // X: punto de impacto
+  g2.fillStyle = col; g2.shadowBlur = 12; g2.beginPath(); g2.arc(X(xs), Y(g), 3.5 + (red ? 1.5 * Math.sin(now / 60) : 0), 0, 7); g2.fill(); g2.shadowBlur = 0; // mi nave
+  g2.textAlign = 'left'; g2.font = `9px ${MONO}`; g2.fillStyle = '#8fd8ff'; g2.fillText(`(${fk(xs)}, ${fk(g)})`, Math.min(X(xs) + 6, gx + gw - 70), Math.max(gy + 9, Y(g) - 6));
   g2.restore();
-  g2.strokeStyle = tti <= thr && vz < -0.3 ? '#ff3b30' : '#8fd8ff'; g2.lineWidth = 3; g2.beginPath(); g2.arc(cx, cy, R, 0, 7); g2.stroke();
-  g2.strokeStyle = '#ffd23f'; g2.lineWidth = 3; g2.beginPath(); g2.moveTo(cx - 30, cy); g2.lineTo(cx - 10, cy); g2.lineTo(cx - 5, cy + 6); g2.moveTo(cx + 30, cy); g2.lineTo(cx + 10, cy); g2.lineTo(cx + 5, cy + 6); g2.moveTo(cx, cy - 3); g2.lineTo(cx, cy + 1); g2.stroke(); // avión fijo
-  const deg = Math.round(pitch * 180 / Math.PI), mine = typeof BASE !== 'undefined' ? BASE.mine() : null, bd = mine ? len(sub(BASE.worldOf(mine), S.pos)) : null;
-  g2.font = `bold 12px ${MONO}`; g2.fillStyle = '#e6f6ff'; g2.strokeStyle = '#000'; g2.lineWidth = 3;
-  const lines = [[`ALTURA ${g < 1 ? Math.round(g * 1000) + ' m' : fD(g)}`, '#e6f6ff'], [`INCLINACIÓN ${deg > 0 ? '+' : ''}${deg}°`, deg < -8 ? '#ffb347' : '#e6f6ff']];
-  if (bd !== null) lines.push([`BASE ${fD(bd)}`, '#5dff8a']); if (tti < 60) lines.push([`IMPACTO ${tti.toFixed(1)} s`, tti <= thr ? '#ff5a4a' : '#ffd23f']);
-  lines.forEach(([t, c], i) => { g2.fillStyle = c; g2.strokeText(t, cx, cy + R + 18 + i * 15); g2.fillText(t, cx, cy + R + 18 + i * 15); });
+  const mine = typeof BASE !== 'undefined' ? BASE.mine() : null, bd = mine ? len(sub(BASE.worldOf(mine), S.pos)) : null, lines = [[`ALTURA ${fk(g)}`, '#e6f6ff']];
+  if (bd !== null) lines.push([`BASE ${fD(bd)}`, '#5dff8a']); if (isFinite(tti)) lines.push([`IMPACTO en ${tti.toFixed(1)} s · a ${fk(xi)}`, red ? '#ff5a4a' : tti < 10 ? '#ffd23f' : '#8fd8ff']);
+  g2.font = `bold 12px ${MONO}`; g2.textAlign = 'center'; g2.lineWidth = 3; g2.strokeStyle = '#000'; lines.forEach(([t, c], i) => { g2.fillStyle = c; g2.strokeText(t, x0 + pw / 2, y0 + ph + 16 + i * 15); g2.fillText(t, x0 + pw / 2, y0 + ph + 16 + i * 15); });
   g2.restore();
-  if (tti <= thr && vz < -0.3) crashAlert(W, H, now, tti); // aterrizajes suaves (< 430 km/h de caída) no disparan la alerta
 }
 function crashAlert(W, H, now, tti) { // triángulo de peligro parpadeante en el centro de la pantalla; parpadea y pita más rápido cuanto menos falta
   const fast = tti < 3, ph = now / (fast ? 90 : 170), a = 0.5 + 0.5 * Math.sin(ph), x = W / 2, y = H * 0.3, s = 62 * (1 + 0.06 * Math.sin(ph));
@@ -572,6 +610,16 @@ function attackHud(W, H, now, cm) {
     g2.translate(W / 2 + dx * R, H / 2 + dy * R); g2.rotate(a); g2.fillStyle = `rgba(255,50,30,${0.6 + 0.4 * pulse})`; g2.strokeStyle = '#fff'; g2.lineWidth = 3; g2.beginPath(); g2.moveTo(22, 0); g2.lineTo(-14, -16); g2.lineTo(-6, 0); g2.lineTo(-14, 16); g2.closePath(); g2.fill(); g2.stroke();
   }
   g2.restore(); if (now - ATK.beep > 450) { ATK.beep = now; tone('sawtooth', 520, 380, 0.12, 0.05); }
+}
+function starHud(W, H, now) { // alerta de la estrella (central, sin notificación): banner parpadeante con la cuenta atrás, número grande, viñeta que crece, pitido que se acelera y flecha de escape
+  if (P.sunT == null || P.hp <= 0) return; const t = Math.max(0, P.sunT), k = Math.min(1, 1 - t / WARCFG.starKill.tMax), bl = Math.floor(now / (100 + 20 * t)) % 2;
+  const gr = g2.createRadialGradient(W / 2, H / 2, H * (0.45 - 0.2 * k), W / 2, H / 2, H * 0.9); gr.addColorStop(0, 'rgba(255,90,0,0)'); gr.addColorStop(1, `rgba(255,${Math.round(110 - 80 * k)},20,${0.25 + 0.5 * k})`); g2.fillStyle = gr; g2.fillRect(0, 0, W, H);
+  g2.save(); g2.textAlign = 'center'; g2.font = `900 20px ${MONO}`; g2.lineWidth = 6; g2.strokeStyle = '#050f1c'; g2.fillStyle = bl ? '#ffd23f' : '#ff4b3b'; const tx = `⚠ ESTRELLA: SAL DE LA ZONA — EXPLOSIÓN EN ${t.toFixed(1)} s ⚠`; g2.strokeText(tx, W / 2, 180); g2.fillText(tx, W / 2, 180); // debajo del aviso de ataque (y = 132)
+  g2.font = `900 64px ${MONO}`; g2.lineWidth = 8; g2.fillStyle = t < 2 ? '#ff3b30' : '#ffb347'; g2.strokeText(t.toFixed(1), W / 2, 250); g2.fillText(t.toFixed(1), W / 2, 250);
+  const e = nrm(sub(S.pos, bodies[0].pos)), v = view(S.pos.map((q, i) => q + e[i] * 1e6)), cm = new THREE.Vector3(v.x, v.y, v.z).applyMatrix4(camera.matrixWorldInverse); let dx = cm.x, dy = -cm.y; const l = Math.hypot(dx, dy) || 1; dx /= l; dy /= l; const R = Math.min(W, H) * 0.4, an = Math.atan2(dy, dx); // escape: alejándose de la estrella
+  g2.translate(W / 2 + dx * R, H / 2 + dy * R); g2.rotate(an); g2.fillStyle = bl ? '#5dff8a' : '#c8ff5d'; g2.strokeStyle = '#050f1c'; g2.lineWidth = 4; g2.beginPath(); g2.moveTo(30, 0); g2.lineTo(-12, -20); g2.lineTo(-2, 0); g2.lineTo(-12, 20); g2.closePath(); g2.fill(); g2.stroke(); g2.rotate(-an); g2.font = `900 13px ${MONO}`; g2.fillStyle = '#5dff8a'; g2.strokeText('ESCAPE', 0, 38); g2.fillText('ESCAPE', 0, 38);
+  g2.restore();
+  if (now - (P.sunBeep || 0) > 90 + 110 * t) { P.sunBeep = now; tone('square', 880 + 400 * k, 880, 0.08, 0.06); }
 }
 function gauge(H) { // medidor curvo: arco azul = escudo (exterior), arco verde = casco (interior)
   const j = P.flash > 0 ? 10 * P.flash : 0, cx = 110 + (Math.random() - 0.5) * j, cy = H - 16 - hud.offsetHeight - 72 + (Math.random() - 0.5) * j, a0 = 0.75 * Math.PI, sw = 1.5 * Math.PI; // el medidor curvo queda justo encima del panel (sin tocarlo)
@@ -702,7 +750,7 @@ function countdownHud(W, H, now) { // cuenta atrás del salto: luces de salida t
   }
   g2.translate(W / 2, H * 0.42); const sc = go ? 1 : 1 + 0.45 * Math.pow(1 - frac, 2); g2.scale(sc, sc); g2.textAlign = 'center'; g2.textBaseline = 'middle'; g2.font = `bold 150px ${MONO}`;
   g2.fillStyle = go ? '#3cff78' : n <= 2 ? '#ff4b3b' : '#ffd23f'; g2.shadowColor = g2.fillStyle; g2.shadowBlur = 30; g2.fillText(go ? 'GO' : String(n), 0, 0); g2.restore();
-  g2.save(); g2.textAlign = 'center'; g2.font = `bold 16px ${MONO}`; g2.fillStyle = '#fff'; g2.fillText(go ? 'SALTO A VELOCIDAD LUZ' : `PREPARANDO SALTO A ${(warpTarget() || { n: '?' }).n.toUpperCase()} · Shift para cancelar`, W / 2, H * 0.62); g2.restore();
+  g2.save(); g2.textAlign = 'center'; g2.font = `bold 16px ${MONO}`; g2.fillStyle = '#fff'; g2.fillText(go ? 'SALTO A VELOCIDAD LUZ' : `PREPARANDO SALTO A ${(warpTarget() || { n: '?' }).n.toUpperCase()} — NAVE BLOQUEADA · Shift o G para cancelar`, W / 2, H * 0.62); g2.restore();
 }
 function drawHud(fwd, now, targets) {
   const W = hc.width = innerWidth, H = hc.height = innerHeight, lowAmmo = P.plasma < 40 || P.missiles === 0;
@@ -725,7 +773,7 @@ function drawHud(fwd, now, targets) {
     g2.strokeStyle = g2.fillStyle; g2.lineWidth = 1; g2.strokeRect(bx + 0.5, by + 0.5, 220, 9); g2.fillRect(bx + 2, by + 2, 217 * hf, 6); g2.lineWidth = 2; g2.textAlign = 'center';
   }
   if (S.foot.on) return; // a pie: sin medidor de la nave, munición ni velocidad (FOOT.hud dibuja la interfaz del astronauta)
-  attackHud(W, H, now, new THREE.Vector3()); gauge(H); flightInstr(W, H, now); ammoPanel(W, now); warpBar(W, H); speedMeter(H, now); asteroidMarks(W, H, now); scanMarks(W, H, now); zoneMarks(W, H, now);
+  lvBadge(W, now); attackHud(W, H, now, new THREE.Vector3()); starHud(W, H, now); gauge(H); flightInstr(W, H, now); ammoPanel(W, now); warpBar(W, H); speedMeter(H, now); asteroidMarks(W, H, now); scanMarks(W, H, now); zoneMarks(W, H, now);
   if (!S.warp.on && S.warp.cd <= 0 && P.hp > 0) { // rumbo del salto: G sobre la mira cuando apuntas a un planeta; marcador fijo cuando ya está fijado
     const cy = H / 2 - 84;
     if (S.lockB != null) {
@@ -760,24 +808,29 @@ function drawHud(fwd, now, targets) {
       g2.stroke();
       const bw = 68, bx = x - bw / 2, by = y - s - 13, hbar = (yy, f, c) => { g2.fillStyle = 'rgba(0,0,0,0.6)'; g2.fillRect(bx - 1, yy - 1, bw + 2, 7); g2.fillStyle = c; g2.fillRect(bx, yy, bw * Math.max(0, Math.min(1, f)), 5); };
       if (t.kind === 'p' || t.kind === 'h' || t.kind === 'n' || t.kind === 'W') { hbar(by - 8, t.sh / 100, '#4db8ff'); hbar(by, t.hp / 100, t.hp > 25 ? '#5dff8a' : '#ff4b3b'); } else hbar(by, t.hp / 100, t.hp > 40 ? '#5dff8a' : '#ff8a4c'); // vida sobre el objetivo
+      if ((t.kind === 'p' || t.kind === 'n') && t.lv !== undefined) { const hi = hexImg(t.lv || 0, t.kind === 'n' ? (t.hostile ? '#ff5a4a' : '#c8ff5d') : '#ff5a4a'); if (hi.complete && hi.naturalWidth) g2.drawImage(hi, x - s - 16, y - s - 18, 22, 24); } // nivel en la esquina superior izquierda del recuadro
       if (sel) { g2.beginPath(); g2.moveTo(x, y - s - 24); g2.lineTo(x + s + 10, y); g2.lineTo(x, y + s + 24); g2.lineTo(x - s - 10, y); g2.closePath(); g2.stroke(); } // rombo de la nave elegida con B
       g2.fillStyle = col; g2.fillText(t.kind === 'n' ? `${t.hostile ? 'HOSTIL' : 'NEUTRAL'} · ${shipTag(t)} · ${fD(t.dist)}` : t.kind === 'p' ? `${t.name} · ${shipTag(t)} · ${fD(t.dist)}` : `${t.name} · ${fD(t.dist)}`, x, y + s + 14);
+      if (lock && needLock(t)) { const k = Math.min(1, S.lk ? S.lk.t / LOCK_T : 0); g2.save(); if (!lockOn && Math.floor(now / 120) % 2) g2.globalAlpha = 0.35; g2.strokeStyle = g2.fillStyle = lockOn ? '#ff2a2a' : '#ffb347'; g2.lineWidth = 3; g2.beginPath(); g2.arc(x, y, s + 9, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * k); g2.stroke(); g2.font = `bold 11px ${MONO}`; g2.fillText(lockOn ? '◆ BLOQUEADO · MISIL GUIADO' : `◇ ADQUIRIENDO ${Math.round(k * 100)} %`, x, y + s + 28); g2.restore(); } // indicador de bloqueo (parpadea mientras se adquiere)
     }
   }
   tv.set(fwd.x, fwd.y, fwd.z).multiplyScalar(1000).project(camera);
   const ax = (tv.x * 0.5 + 0.5) * W, ay = (-tv.y * 0.5 + 0.5) * H,
-        cone = Math.tan(CONE) / Math.tan(camera.fov * Math.PI / 360) * H / 2 * (1 + 0.08 * Math.max(0, 1 - nearest / 2000) * Math.sin(now / 140)), hot = lockT && (lockT.kind === 'p' || lockT.kind === 'h' || lockT.kind === 'W' || lockT.kind === 'S');
+        cone = Math.tan(CONE) / Math.tan(camera.fov * Math.PI / 360) * H / 2 * (1 + 0.08 * Math.max(0, 1 - nearest / 2000) * Math.sin(now / 140)), hot = lockT && lockOn && (lockT.kind === 'p' || lockT.kind === 'h' || lockT.kind === 'W' || lockT.kind === 'S');
   g2.strokeStyle = hot ? '#ff2a2a' : lockT ? '#ffee55' : '#7fe8ff'; g2.beginPath(); g2.arc(ax, ay, 3, 0, 7);
   g2.moveTo(ax - 14, ay); g2.lineTo(ax - 6, ay); g2.moveTo(ax + 6, ay); g2.lineTo(ax + 14, ay); g2.moveTo(ax, ay - 14); g2.lineTo(ax, ay - 6); g2.moveTo(ax, ay + 6); g2.lineTo(ax, ay + 14); g2.stroke();
   g2.setLineDash([4, 6]); g2.beginPath(); g2.arc(ax, ay, cone, 0, 7); g2.stroke(); g2.setLineDash([]);
   g2.font = 'bold 22px ui-monospace,Consolas,monospace';
   if (hot) {
-    g2.fillStyle = '#ff2a2a'; if (Math.floor(now / 250) % 2) g2.fillText(lockT.kind === 'h' ? '⚠ BASE ENEMIGA FIJADA — DISPAROS GUIADOS ⚠' : lockT.kind === 'W' || lockT.kind === 'S' ? '⚠ ESTRUCTURA ENEMIGA FIJADA — DISPAROS GUIADOS ⚠' : '⚠ BLANCO FIJADO — IMPACTO GARANTIZADO ⚠', W / 2, 70);
+    g2.fillStyle = '#ff2a2a'; if (Math.floor(now / 250) % 2) g2.fillText(lockT.kind === 'h' ? '⚠ BASE ENEMIGA FIJADA — DISPAROS GUIADOS ⚠' : lockT.kind === 'W' || lockT.kind === 'S' ? '⚠ ESTRUCTURA ENEMIGA FIJADA — DISPAROS GUIADOS ⚠' : '⚠ BLOQUEADO — MISILES GUIADOS ⚠', W / 2, 70);
     if (now - lastBeep > 70 + 230 * Math.min(1, lockT.dist / RANGE)) { lastBeep = now; beep(); } // más cerca = pitido más rápido
-  } else if (lockT) { g2.fillStyle = '#ffee55'; g2.fillText(lockT.kind === 'n' ? `NAVE ${lockT.hostile ? 'HOSTIL' : 'NEUTRAL'} FIJADA — disparos guiados` : 'CASCO FIJADO — misil listo', W / 2, 70); }
+  } else if (lockT && !lockOn) { g2.fillStyle = Math.floor(now / 150) % 2 ? '#ffb347' : '#fff'; g2.font = `bold 18px ${MONO}`; g2.fillText(`ADQUIRIENDO BLOQUEO… ${Math.round(Math.min(1, S.lk.t / LOCK_T) * 100)} % · sin bloqueo el daño se reduce`, W / 2, 70); }
+  else if (lockT) { g2.fillStyle = '#ffee55'; g2.fillText(lockT.kind === 'n' ? `NAVE ${lockT.hostile ? 'HOSTIL' : 'NEUTRAL'} FIJADA — disparos guiados` : 'CASCO FIJADO — misil listo', W / 2, 70); }
   g2.fillStyle = '#ffd23f';
   if (P.hp <= 0) { g2.fillText('DESTRUIDO', W / 2, H / 2 - 80); if (P.cause) { g2.font = `16px ${MONO}`; g2.fillText(P.cause, W / 2, H / 2 - 52); } }
   else if (P.plasma <= 0 && P.missiles <= 0) g2.fillText('SIN MUNICIÓN — destruye cascos a la deriva', W / 2, 105);
+  if (now - (P.dodgeT || 0) < 700) { const k = 1 - (now - P.dodgeT) / 700; g2.save(); g2.fillStyle = `rgba(120,255,200,${0.18 * k})`; g2.fillRect(0, 0, W, H); g2.font = `900 30px ${MONO}`; g2.lineWidth = 6; g2.strokeStyle = '#050f1c'; g2.fillStyle = '#5dffb0'; g2.strokeText('¡ESQUIVADO!', W / 2, H / 2 - 120); g2.fillText('¡ESQUIVADO!', W / 2, H / 2 - 120); g2.restore(); } // esquiva con Q/E: destello y texto (sin notificación)
+  if (now - (P.nlT || 0) < 1200 && P.hp > 0) { g2.save(); g2.font = `bold 14px ${MONO}`; g2.lineWidth = 4; g2.strokeStyle = '#000'; g2.fillStyle = '#ffb347'; const tx = 'SIN BLOQUEO: daño reducido · mantén la mira sobre la nave'; g2.strokeText(tx, W / 2, H / 2 + 72); g2.fillText(tx, W / 2, H / 2 + 72); g2.restore(); }
   if (now < P.msgT) g2.fillText(P.msg, W / 2, H - 90);
 }
 
@@ -792,9 +845,10 @@ function frame(now) {
   // planetas se mueven; si estamos en la esfera de influencia de uno, la nave lo acompaña
   updateBodies();
   let near = null, minAlt = Infinity;
-  const canBoost = (keys.ShiftLeft || keys.ShiftRight) && S.entry && !S.warp.on && S.warp.cd <= 0 && !S.park.on && !S.foot.on && P.hp > 0 && !(planets.info.on && planets.info.ground < 0.15);
+  const canBoost = (keys.ShiftLeft || keys.ShiftRight) && S.entry && !S.warp.on && S.warp.cd <= 0 && !S.park.on && !S.foot.on && P.hp > 0 && !(planets.info.on && planets.info.ground < 0.02);
   S.boost = S.entry ? (canBoost ? Math.min(1, S.boost + dt / 6) : Math.max(0, S.boost - dt / 1.5)) : 0; // la aceleración crece mientras se mantiene; termina al salir de la atmósfera
   const bmul = 1 + 6 * S.boost, manual = keys.KeyW || S.boost > 0.02; // manual: con W o con el impulso pulsados no hay frenado automático (se puede chocar)
+  const bk = 1 + (BOOST_MAX - 1) * S.boost; // propulsor: multiplica TODOS los topes (altura, atmósfera, entrada, motores) hasta BOOST_MAX; sube en 6 s y decae en 1,5 s al soltar
   let rho = 0, rhoH = 0, rhoB = null; let capAll = Infinity, hardV = Infinity, atm = null, entry = false; // frenado automático: entrada en la atmósfera a ≤60 km/s; frena desde 5 km y bajo 1 km del suelo usa el motor de combustión (km/h)
   for (const b of bodies) {
     const alt = len(sub(S.pos, b.pos)) - b.R; if (alt < minAlt) { minAlt = alt; near = b; }
@@ -820,27 +874,27 @@ function frame(now) {
   // giro con inercia: el ratón y las teclas cambian la velocidad angular (no el ángulo), que se amortigua con el tiempo;
   // las naves grandes giran más despacio y tienen una velocidad angular máxima
   const fo = S.foot.on; if (fo) { FOOT.look(mdx, mdy); mdx = mdy = 0; } // a pie: el ratón gira al astronauta, no la nave
-  const lockFly = S.lockB != null && !S.warp.on && S.warp.cd <= 0 && !S.park.on && !S.foot.on && P.hp > 0; if (lockFly) mdx = mdy = 0; // vuelo directo (G): solo se acelera y frena
+  const lockFly = S.lockB != null && !S.warp.on && S.warp.cd <= 0 && !S.park.on && !S.foot.on && P.hp > 0; if (lockFly || S.warp.cd > 0) mdx = mdy = 0; // vuelo directo (G): solo se acelera y frena
   const TAU = 0.45, MAXR = 1.9 * P.agil, av = S.w, warp = S.warp, ag = P.agil;
   const keyRate = (pos, neg, rate) => ((pos ? 1 : 0) - (neg ? 1 : 0)) * rate * ag; // velocidad angular objetivo con teclas
   av.y += -mdx * 0.0022 / TAU * ag; av.p += -mdy * 0.0022 / TAU * ag;
-  const ky = fo || lockFly ? 0 : keyRate(keys.ArrowLeft || keys.KeyA, keys.ArrowRight || keys.KeyD, 1.1), kp = fo || lockFly ? 0 : keyRate(keys.ArrowUp, keys.ArrowDown, 1.1), kr = fo || lockFly ? 0 : keyRate(keys.KeyQ, keys.KeyE, 1.4);
+  const ky = fo || lockFly || warp.cd > 0 ? 0 : keyRate(keys.ArrowLeft || keys.KeyA, keys.ArrowRight || keys.KeyD, 1.1), kp = fo || lockFly || warp.cd > 0 ? 0 : keyRate(keys.ArrowUp, keys.ArrowDown, 1.1), kr = fo || lockFly || warp.cd > 0 ? 0 : keyRate(keys.KeyQ, keys.KeyE, 1.4);
   if (ky) av.y += (ky - av.y) * (1 - Math.exp(-dt * 3)); if (kp) av.p += (kp - av.p) * (1 - Math.exp(-dt * 3)); if (kr) av.r += (kr - av.r) * (1 - Math.exp(-dt * 3));
   if (Math.abs(mdx) + Math.abs(mdy) > 3) S.auto = false;
   mdx = mdy = 0;
   const damp = Math.exp(-dt / TAU); // sin entrada, la nave sigue girando un poco y se frena sola
   if (!ky) av.y *= damp; if (!kp) av.p *= damp; if (!kr) av.r *= damp * 0.92;
   av.y = Math.max(-MAXR, Math.min(MAXR, av.y)); av.p = Math.max(-MAXR, Math.min(MAXR, av.p)); av.r = Math.max(-MAXR * 1.2, Math.min(MAXR * 1.2, av.r));
-  if (warp.on || fo || lockFly || (S.park.on && !S.park.water)) av.y = av.p = av.r = 0; // en velocidad luz y estacionada en tierra la dirección está bloqueada
+  if (warp.on || warp.cd > 0 || fo || lockFly || (S.park.on && !S.park.water)) av.y = av.p = av.r = 0; // en velocidad luz y estacionada en tierra la dirección está bloqueada
   const yaw = av.y * dt, pitch = av.p * dt, roll = av.r * dt;
   if (P.hp <= 0) { S.park.on = false; S.foot.on = false; }
   if (S.park.on) { // en el suelo solo se puede girar sobre el eje vertical
     const up = S.park.water && S.park.upT ? S.park.upT.clone() : new THREE.Vector3(...S.park.dir); S.q.premultiply(new THREE.Quaternion().setFromAxisAngle(up, yaw));
     const f = new THREE.Vector3(0, 0, -1).applyQuaternion(S.q); f.addScaledVector(up, -f.dot(up)).normalize(); S.q.setFromRotationMatrix(new THREE.Matrix4().lookAt(new THREE.Vector3(), f, up));
   } else if (!warp.on) S.q.multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(pitch, yaw, roll, 'YXZ')));
-  if ((warp.on || warp.cd > 0) && !S.park.on) { const tb = warp.on ? warp.tb : warpTarget(); if (tb) S.q.slerp(lookQ(nrm(sub(tb.pos, S.pos))), 1 - Math.exp(-dt * (warp.on ? 10 : 3))); }
+  if (warp.on && !S.park.on) { const tb = warp.tb; if (tb) S.q.slerp(lookQ(nrm(sub(tb.pos, S.pos))), 1 - Math.exp(-dt * (warp.on ? 10 : 3))); } // durante la cuenta atrás la nave queda FIJA (no gira hacia el destino)
   if (lockFly) { const tb = lockObj(), dl = len(sub(tb.pos, S.pos)) - tb.R; if (dl < 3000) { S.lockB = null; say(tb.zone ? `Has llegado a ${tb.n}` : 'Has llegado: control manual'); } else S.q.slerp(lookQ(nrm(sub(tb.pos, S.pos))), 1 - Math.exp(-dt * 2.5)); } // llegada: a 3000 km de la superficie o del borde del cúmulo
-  if (S.auto && !warp.on && !S.park.on) S.q.slerp(lookQ(nrm(sub(tgtObj().pos, S.pos))), 1 - Math.exp(-dt * 2));
+  if (S.auto && !warp.on && warp.cd <= 0 && !S.park.on) S.q.slerp(lookQ(nrm(sub(tgtObj().pos, S.pos))), 1 - Math.exp(-dt * 2));
   S.q.normalize();
 
   // velocidad: W/S exponencial; cerca de un cuerpo se limita a ~0.8·altitud por segundo
@@ -856,17 +910,18 @@ function frame(now) {
   } else { warp.bar = Math.min(P.warpMax, warp.bar + dt * P.warpMax / 30); if (warp.lock && warp.bar >= 0.25 * P.warpMax) warp.lock = false; }
   warp.fx += ((warp.on ? 1 : 0) - warp.fx) * (1 - Math.exp(-dt * 3));
   if (S.park.on) { if (keys.KeyW && !S.foot.on && S.park.water) S.park.on = false; else S.v = 0; }
-  if (!warp.on && !S.park.on) { // velocidad normal: tope según los motores (hasta 1500 km/s)
+  if (warp.cd > 0) S.v = 0; // cuenta atrás del salto: nave fija (ni empuje ni deriva)
+  else if (!warp.on && !S.park.on) { // velocidad normal: tope según los motores (hasta 1500 km/s)
     const slow = S.low && S.v > SOFTV; // bajo 80 km: hasta ~3 560 km/h se acelera normal; de ahí a 9 000 km/h cuesta mucho más tiempo
     if (keys.KeyW && !(S.boost > 0 && canBoost)) S.v = slow ? S.v + 0.2 * dt : Math.max(S.v, 0.05) * Math.exp(2 * dt); // más allá de ~3 560 km/h el empuje suma velocidad de forma constante: cuanto más y más tiempo empujas, más rápido vas
     if (keys.KeyS) { S.v /= Math.exp(2 * dt); if (S.v < 0.02) S.v = 0; }
-    if (S.boost > 0 && canBoost && slow) S.v += (0.2 + 0.4 * S.boost) * dt; // impulso: la aceleración crece con el tiempo que lo mantienes
+    if (S.boost > 0 && canBoost && slow) S.v += (0.2 + 1.2 * S.boost) * dt; // impulso: la aceleración crece con el tiempo que lo mantienes
     else if (S.boost > 0 && canBoost) S.v = Math.max(S.v, 0.3) * Math.exp((0.5 + 0.7 * S.boost) * dt); // aceleración progresiva y más suave
-    S.v = Math.min(S.v, P.vmax, hardV, S.atm ? (manual ? LOWCAP : ATM_MAX * bmul) : S.entry ? ENTRY_MAX * (1 + 0.5 * S.boost) : Infinity);
+    S.v = Math.min(S.v, P.vmax * bk, hardV * bk, (S.atm ? (manual ? LOWCAP : ATM_MAX * bmul) : S.entry ? ENTRY_MAX : Infinity) * bk); // el propulsor se aplica DESPUÉS de los topes (los eleva)
   }
   fields.update(S.pos); // asteroides/basura cercanos; la nave también frena ante ellos
   if (now - (S.emptyT || 0) > 500) { S.emptyT = now; for (let i = fields.active.length - 1; i >= 0; i--) { const o = fields.active[i]; if (astLeft(o).length) continue; fields.gone.add(o.id); fields.active.splice(i, 1); AST.delete(o.id); if (len(sub(o.pos, S.pos)) < 40000) puff(o.pos, Math.min(40, Math.max(3, o.vis * 0.6)), 0xb0a48f, 1.4, 0.004); } } // su zona se agotó: el asteroide se desvanece (no quedan asteroides vacíos)
-  const vEff = S.park.on ? 0 : warp.on ? warp.v : Math.min(S.v, Math.max(0.02, Math.min(capAll, 2 * fields.near))), fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(S.q);
+  const vEff = S.park.on ? 0 : warp.on ? warp.v : Math.min(S.v, Math.max(0.02, Math.min(capAll * bk, 2 * fields.near))), fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(S.q);
   const oldPos = S.pos;
   if (S.park.on) parkStep(dt); else if (warp.on) warpStep(dt); else S.pos = [S.pos[0] + fwd.x * vEff * dt, S.pos[1] + fwd.y * vEff * dt, S.pos[2] + fwd.z * vEff * dt];
   if (!S.park.on && !warp.on && vEff * dt > 0.05 && planets.info.on) { const bb = bodies.find(x => x.n === planets.info.name), n = Math.min(40, Math.ceil(vEff * dt / 0.08)); if (bb) for (let k = 1; k < n; k++) { const p = oldPos.map((c, i) => c + (S.pos[i] - c) * k / n), d = sub(p, bb.pos), l = len(d); if (l < planets.surfaceR(bb, d, l) + 0.03) { S.pos = p; break; } } } // el primer punto bajo el suelo del tramo es donde chocas
@@ -892,14 +947,20 @@ function frame(now) {
     const dn = S.rhoB ? sstep(0.2, 0.8, ((fwd.x * (S.rhoB.pos[0] - S.pos[0]) + fwd.y * (S.rhoB.pos[1] - S.pos[1]) + fwd.z * (S.rhoB.pos[2] - S.pos[2])) / Math.hypot(S.rhoB.pos[0] - S.pos[0], S.rhoB.pos[1] - S.pos[1], S.rhoB.pos[2] - S.pos[2])) ) : 0; // la fricción solo actúa al descender: al salir o alejarse no hay
     const sun0 = bodies[0], xs = len(sub(S.pos, sun0.pos)) / sun0.R, ss = sstep(16, 1.5, xs), Tst = warp.on ? 0 : 1.5 * ss * ss, hs = 90 * sstep(3.6, 1.4, xs); // ESTRELLA: turbulencia desde 16 radios solares (siempre, sin importar la velocidad) y radiación letal bajo ~3 radios, mucho antes de su atmósfera
     P.heatStar = hs > 1;
-    const rd = S.rho * dn, rh = S.rhoH * dn, T0 = Math.max(Tst, warp.on || P.hp <= 0 ? 0 : Math.min(1.5, Math.min(vEff, 80) / 20 * rd)), T = T0 < 0.05 ? 0 : T0; // sin zumbido residual fuera de la atmósfera
+    const rd = S.rho * dn, rh = S.rhoH * dn, T0 = Math.max(Tst, warp.on || P.hp <= 0 ? 0 : Math.min(1.5, Math.min(vEff / bk, 80) / 20 * rd)), T = T0 < 0.05 ? 0 : T0; // sin zumbido residual fuera de la atmósfera
     P.turb += (T - P.turb) * (1 - Math.exp(-dt * 6));
-    P.heat = Math.max(0, Math.min(100, P.heat + (220 * Math.pow(Math.max(0, (vEff - 12) / 48), 1.3) * rh + hs - (vEff < 12 ? 18 : 4)) * dt));
+    P.heat = Math.max(0, Math.min(100, P.heat + (220 * Math.pow(Math.max(0, (vEff / bk - 12) / 48), 1.3) * rh + hs - (vEff < 12 ? 18 : 4)) * dt));
     if (P.hp > 0 && P.heat > 50) burn(0.6 * (P.heat - 50) * dt, now);
     if (P.hp > 0 && P.heat >= 100) { P.cause = P.heatStar ? 'la radiación de la estrella destruyó la nave' : 'te desintegraste al entrar a la atmósfera a demasiada velocidad'; burn(P.hp + P.sh + 1, now); }
     if (P.turb > 0.05 && audio && now - lastRumble > 90) { lastRumble = now; noise(0.14, 0.03 + 0.07 * Math.min(1, P.turb), 500, 90); } // retumbar
   }
 
+  { // PELIGRO DE LA ESTRELLA: en su zona letal corre una cuenta atrás de destrucción (más corta cuanto más cerca; escudo y casco no la paran); fuera se cancela tras WARCFG.starKill.reset s. También en velocidad luz
+    const SK = WARCFG.starKill, sun = bodies[0], ds = len(sub(S.pos, sun.pos)) - sun.R, span = STAR_KILL_R - sun.R, inK = P.hp > 0 && !S.park.on && !S.foot.on && ds < span;
+    if (inK) { const tD = Math.max(SK.tMin, Math.min(SK.tMax, SK.tMax * Math.max(0, ds) / span)); P.sunT = Math.min(P.sunT == null ? tD : P.sunT - dt, tD); P.sunOut = 0;
+      if (P.sunT <= 0) { P.sunT = null; if (S.warp.on) endWarp(''); P.cause = 'la radiación de la estrella destruyó la nave'; burn(P.hp + P.sh + 1, now); boom(S.pos, 140); } }
+    else if (P.sunT != null && (P.sunOut = (P.sunOut || 0) + dt) > SK.reset) P.sunT = null;
+  }
   FOOT.frame(dt, now); FOOT.tickStay(dt); if (typeof BASE !== 'undefined') BASE.frame(dt, now); if (typeof BOT !== 'undefined') BOT.frame(dt, now); if (typeof NEU !== 'undefined') NEU.frame(dt, now); if (typeof WAR !== 'undefined') WAR.frame(dt); // modo a pie: caminar, recolectar y colocar al astronauta
 
   // render con origen flotante + compresión de distancias enormes (mantiene el tamaño angular real)
@@ -929,9 +990,9 @@ function frame(now) {
   P.sf = Math.max(0, P.sf - dt * 2.5); P.shake = Math.max(0, P.shake - dt * 2.5); setShieldFlash(ship, P.sf);
   if (alive && P.hp < 40 && (P.smoke -= dt) <= 0) { P.smoke = 0.06; puff(S.pos.map((c, j) => c - fwd.getComponent(j) * 0.03 + (Math.random() - 0.5) * 0.01), 0.012, 0xff7a30, 1.4, 0.004); } // casco dañado: humo
   if (alive && P.plasma < MAXA.plasma && now - (P.fireT || 0) > 1500) { P.pAcc = (P.pAcc || 0) + dt; const rg = P.regen || 1.4; if (P.pAcc >= rg) { P.pAcc -= rg; P.plasma++; } } // la munición de plasma se recarga muy lentamente (1 cada 1,4 s; menos con puntos de nivel en Recarga) si no disparas
-  if (alive && firing && !S.warp.on && !S.foot.on && S.warp.cd <= 0 && P.cdP <= 0 && P.plasma > 0) { P.fireT = now; P.plasma--; P.cdP = WPN.p.cd; shoot('p', lockT ? { k: lockT.kind, id: lockT.id } : null); }
+  if (alive && firing && !S.warp.on && !S.foot.on && S.warp.cd <= 0 && P.cdP <= 0 && P.plasma > 0) { P.fireT = now; P.plasma--; P.cdP = WPN.p.cd; shoot('p', lockOn ? { k: lockT.kind, id: lockT.id } : null); }
   if (now - lastSend > 66) { lastSend = now; send({ t: 's', rb: S.refB, rp: S.refB >= 0 ? sub(S.foot.on ? S.shipPos : S.pos, bodies[S.refB].pos) : null, name: myName, pos: S.foot.on ? S.shipPos : S.pos, q: S.q.toArray(), v: alive ? vEff : 0, hp: P.hp / P.hpMax * 100, sh: P.sh / P.shMax * 100, sp: mySpec, lv: lvlOf(mySpec.t).lv, k: P.kills, d: P.deaths || 0, ms: P.missiles, pk: S.park.on ? 1 : 0, bt: Math.round(S.boost * 100) / 100 }); }
-  S.ve = alive ? vEff : 0; engine(S.ve, (keys.KeyW && alive) || S.warp.on || S.boost > 0.05); if (S.boost > 0.02) P.shake = Math.max(P.shake, 0.1 + 0.15 * S.boost);
+  S.ve = alive ? vEff : 0; engine(S.ve, (keys.KeyW && alive) || S.warp.on || S.boost > 0.05);
   const targets = [];
   for (const r of remotes.values()) {
     const f = new THREE.Vector3(0, 0, -1).applyQuaternion(r.q), k = r.v * (Date.now() - r.t) / 1000;
@@ -960,6 +1021,8 @@ function frame(now) {
     const a = Math.acos(Math.min(1, fwd.x * t.dir[0] + fwd.y * t.dir[1] + fwd.z * t.dir[2]));
     if (a < bestA && t.dist < (t.kind === 'h' ? 200 : RANGE) && !losBlocked(t)) { bestA = a; lockT = t; }
   }
+  if (lockT && S.lk && S.lk.kind === lockT.kind && S.lk.id === lockT.id) S.lk.t += dt; else S.lk = lockT ? { kind: lockT.kind, id: lockT.id, t: 0 } : null; // adquisición: hay que mantener la nave en la mira LOCK_T s
+  lockOn = !!lockT && (!needLock(lockT) || S.lk.t >= LOCK_T); // bases, cascos y estructuras: al instante
   aimT = null; // objetivo bajo la mira para el recuadro de vista previa
   if (alive) {
     let bd = Infinity; const CA = Math.cos(4 * Math.PI / 180);
@@ -997,6 +1060,8 @@ function frame(now) {
     if (p.owner === myId && typeof WAR !== 'undefined' && WAR.hit(old, p.pos, p)) { killProj(key); continue; } // golpe a un buque de guerra o satélite ajeno (lo decide el servidor)
     const gi = planets.impact(old, p.pos); if (gi) { killProj(key); if (len(sub(gi, S.pos)) < 200) boom(gi, p.kind === 'm' ? 0.06 : 0.012); FOOT.splash(gi, p.kind); continue; } // el proyectil golpea el suelo: explosión y daño de área a los objetos
     if (p.owner !== myId && p.owner !== -myId && !p.vis && alive && segDist(old, p.pos, S.pos) < (p.spd !== undefined || ak > 0.02 ? 0.04 : HIT_R)) { // en el aire y los disparos de torreta: radio real de la nave (40 m); en el espacio, el radio grande de siempre // el impacto lo decide la víctima
+      if (p.nl && Math.random() >= NOLOCK_HIT) { killProj(key); puff(p.pos, 0.01, 0xffd070, 0.3, 0.006); continue; } // disparo sin bloqueo: roza (solo cuenta el 45 %)
+      if (dodging() && Math.random() < dodgeP()) { killProj(key); P.dodgeT = now; tone('sine', 700, 1600, 0.12, 0.06); continue; } // esquiva con Q/E (lo decide la víctima: yo)
       killProj(key); if (p.owner < 0 && typeof BASE !== 'undefined') { const th = BASE.HG.get(-p.owner); attackAlert(p.sn ? 's' : 't', p.sn || (th ? th.nm : 'un enemigo'), th && !p.sn ? BASE.worldOf(th) : ATK.pos); } else if (p.owner !== myId) attackAlert('p', ownerName(p.owner), ownerPos(p.owner)); hurt(p.dmg, p.dir, now); send({ t: 'hit', by: p.owner, key, dmg: p.dmg, pos: S.pos, dead: P.hp <= 0, sh: P.sh });
       continue;
     }

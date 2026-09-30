@@ -4,9 +4,9 @@
 const BASES = []; // { owner, name, body: nombre del planeta, lat, lon } (radianes): los rellena base.js con los hangares del servidor
 const MAP = (() => {
   const root = document.createElement('div'); root.id = 'map';
-  root.innerHTML = '<div class="mh"><b>MAPA DEL SISTEMA</b></div><canvas class="m2"></canvas><div class="mc" hidden></div>'; // el canvas 3D (.m3) se crea al abrir el mapa y se destruye al cerrarlo: así no queda un segundo contexto WebGL en memoria durante la partida
+  root.innerHTML = '<div class="mh"><b>MAPA DEL SISTEMA</b></div><canvas class="m2"></canvas><div class="mc" hidden></div><button class="mfol" hidden style="position:absolute;left:50%;bottom:46px;transform:translateX(-50%);z-index:3;padding:10px 18px;border:3px solid #050f1c;border-bottom-width:5px;border-radius:12px;background:#4db8ff;color:#050f1c;font:900 14px ui-monospace,Consolas,monospace;letter-spacing:.12em;box-shadow:4px 4px 0 #050f1c;cursor:pointer">MOSTRAR POSICIÓN ACTUAL</button>'; // el canvas 3D (.m3) se crea al abrir el mapa y se destruye al cerrarlo: así no queda un segundo contexto WebGL en memoria durante la partida
   document.body.append(root);
-  const c2 = root.querySelector('.m2'), g = c2.getContext('2d'), card = root.querySelector('.mc');
+  const c2 = root.querySelector('.m2'), g = c2.getContext('2d'), card = root.querySelector('.mc'), fol = root.querySelector('.mfol'); // fol: botón «MOSTRAR POSICIÓN ACTUAL» (solo en modo libre)
   const RTS_PITCH = -1.0, RTS_YAW = 0, RTS_DIST = 2.2, DIST_MAX = 80; // vista RTS: cámara alta mirando en diagonal (57° sobre el plano), rumbo fijo; distancia inicial cerca de tu nave y hasta ver todo el sistema
   const st = { open: false, drag: null, btn: 0, moved: 0, mx: 0, my: 0, yaw: RTS_YAW, pitch: RTS_PITCH, pos: new THREE.Vector3(), goal: null, keys: {}, sel: null, cardSig: '', hover: [], t: 0, follow: true, dist: RTS_DIST }; // follow: la cámara sigue a tu nave hasta que la muevas a mano (C la vuelve a fijar)
   let sys = null, c3 = null, pmr = null;
@@ -116,9 +116,6 @@ const MAP = (() => {
     const s = st.sel; if (!s) { card.hidden = true; return; }
     const sig = JSON.stringify([s.kind, s.i, ZR, S.tgt, s.kind === 'cz' ? [WAR.CZS[s.i], WAR.look(s.i).txt] : 0]); if (sig === st.cardSig && !card.hidden) return; st.cardSig = sig; card.hidden = false;
     if (s.kind === 'zone') { card.innerHTML = zoneBlock(s.i); return; }
-    if (s.kind === 'cz') { const z = WAR.CZ[s.i], Z = WAR.CZS[s.i], L = WAR.look(s.i), d = czDist(z, S.pos);
-      card.innerHTML = `<h3 style="color:${L.col}">${z.name}</h3><small>Zona de control · de ${fD(z.r0)} a ${z.r1 === Infinity ? 'el infinito' : fD(z.r1)} de la estrella · ${d > 0 ? fD(d) + ' hasta su borde' : 'estás dentro'}</small><div class="zb"><b style="color:${L.col}">${L.txt}</b><small>${Z.o ? 'Dueño: ' + WAR.nmOf(Z.o) : 'Sin dueño'}${Z.c ? ` · reclamando: ${WAR.nmOf(Z.c)} ${Z.p} %` : ''}</small>`
-        + `<small>Se reclama permaneciendo dentro ~${WARCFG.capS} s (con tu buque dentro, 1,5× más rápido; con enemigos dentro baja). Reclamada: puedes desplegar buques de guerra y construir satélites (lejos de la estrella y a más de ${fD(WARCFG.orbitClear)} de la órbita de un planeta). ZONA ROJA (no se despliega): contiene o está a menos de ${fD(WARCFG.exclHg)} de un planeta con hangar enemigo, o de ${fD(WARCFG.exclWs)} de un buque enemigo.</small></div>`; return; }
     const b = bodies[s.i], d = Math.hypot(b.pos[0] - S.pos[0], b.pos[1] - S.pos[1], b.pos[2] - S.pos[2]) - b.R, zs = b.k === 'sun' ? [] : ZT.filter(t => t.zone.anchor === b.i), occ = BASES.find(x => x.body === b.n);
     card.innerHTML = `<h3>${b.n}</h3><small>${b.k === 'sun' ? 'estrella' : b.parent ? 'luna de ' + b.parent.n : (b.label || 'planeta')} · ${fD(Math.max(0, d))}${d > 1 ? ' · a 5 c: ' + fT(d / (5 * C)) : ''}${occ ? ' · hangar de ' + occ.owner : ''}</small>`
       + (zs.length ? zs.map(t => zoneBlock(t.zi)).join('') : '<div class="zb"><small>Sin zona de recursos cercana.</small></div>');
@@ -156,28 +153,68 @@ const MAP = (() => {
       }
       neu.count = neuO.count = ni; neu.instanceMatrix.needsUpdate = neuO.instanceMatrix.needsUpdate = true; if (neu.instanceColor) neu.instanceColor.needsUpdate = true;
     }
-    pmr.render(sys.sc, cam); g.clearRect(0, 0, W, H);
-    const pts = []; let hover = null, hd = 22; g.textAlign = 'left';
+    pmr.render(sys.sc, cam); g.clearRect(0, 0, W, H); fol.hidden = st.follow;
+    const pts = [], LQ = []; let hover = null, hd = 22; g.textAlign = 'left';
+    const fs = Math.round(Math.max(10, Math.min(14, 14 - Math.log2(Math.max(1, Math.abs(st.pos.y) / 1.5))))); // tamaño de las etiquetas según el zoom
     const proj = v => { vTmp.copy(v).project(cam); if (vTmp.z > 1 || Math.abs(vTmp.x) > 1.05 || Math.abs(vTmp.y) > 1.05) return null; return [(vTmp.x * 0.5 + 0.5) * W, (-vTmp.y * 0.5 + 0.5) * H]; };
-    if (typeof WAR !== 'undefined') czDraw(pts, now); // zonas de control, buques, satélites y modo colocación (debajo de las etiquetas)
-    const lab = (v, text, col, kind, pos, bold, extra) => { const s = proj(v); if (!s) return null; const [x, y] = s; g.font = `${bold ? 'bold ' : ''}12px ${MONO}`; g.fillStyle = col; g.strokeStyle = '#000'; g.lineWidth = 3; g.strokeText(text, x + 10, y + 4); g.fillText(text, x + 10, y + 4); const p = { x, y, n: text, kind, pos, ...extra }; pts.push(p); return p; };
-    sys.objs.forEach((o, i) => { const b = o.b, top = o.p.clone(); top.y += dispR(b) * 1.15; const occ = BASES.find(x => x.body === b.n); lab(top, b.n + (occ ? '  ⌂ ' + occ.owner : ''), b.k === 'sun' ? '#ffd166' : '#dff4ff', b.k === 'sun' ? 'estrella' : b.parent ? 'luna' : (b.label || 'planeta').toLowerCase(), b.pos, false, { body: true, ref: i }); });
-    sys.zones.forEach((o, i) => { // zonas: nombre + iconos con lo que queda
-      const res = zoneRes(o.t.zi), empty = res.every(it => !it.n), top = o.p.clone(); top.y += zoneR(o.t.zone) * 1.2;
-      const p = lab(top, o.t.n + (empty ? ' · agotada' : ''), o.t.zi === selZ ? '#ffd23f' : empty ? '#8899aa' : RES[res[0].type], 'zona', o.t.pos, o.t.zi === selZ, { ref: i, res }); if (!p) return;
-      let cx = p.x + 10; g.font = `bold 11px ${MONO}`; for (const it of res) { const im = icoImg(it.type); g.globalAlpha = it.n ? 1 : 0.35; if (im && im.complete && im.naturalWidth) g.drawImage(im, cx, p.y + 9, 14, 14); g.fillStyle = '#fff'; g.strokeText(String(it.n), cx + 16, p.y + 20); g.fillText(String(it.n), cx + 16, p.y + 20); cx += 26 + 7 * String(it.n).length; } g.globalAlpha = 1;
-    });
-    for (const q of ngl) { if (q.p.distanceTo(st.pos) > 9) continue; const lvs = q.ms.map(n => n.lv), l1 = Math.min(...lvs), l2 = Math.max(...lvs); lab(q.p.clone().add(new THREE.Vector3(0, q.k * 3.2, 0)), `${q.hos ? 'HOSTILES' : 'Neutrales'} · Nv ${l1 === l2 ? l1 : l1 + '-' + l2} · ${q.ms.length} naves`, q.hos ? '#ff5a4a' : q.col, 'grupo de naves neutrales', q.ms[0].w, q.hos); } // nivel al acercar el zoom
-    lab(sys.me.position.clone().add(new THREE.Vector3(0, 0.25, 0)), myName + ' (tú)', '#4db8ff', 'tú', S.pos, true);
-    os.forEach((r, i) => lab(sys.foes[i].position.clone().add(new THREE.Vector3(0, 0.22, 0)), r.name || 'Piloto', hex(accent(r)), 'jugador', r.apos, true));
-    for (const p of pts) { const dd = Math.hypot(p.x - st.mx, p.y - st.my); if (dd < hd) { hd = dd; hover = p; } }
-    if (hover && !st.drag) {
-      const d = Math.hypot(hover.pos[0] - S.pos[0], hover.pos[1] - S.pos[1], hover.pos[2] - S.pos[2]), l2 = hover.kind === 'zona' ? (resList(hover.res) ? 'quedan ' + resList(hover.res) : 'agotada') : `${fD(d)}${d > 1 ? ' · a 5 c: ' + fT(d / (5 * C)) : ''}`;
-      g.fillStyle = 'rgba(0,10,20,0.85)'; g.fillRect(hover.x + 14, hover.y + 26, 300, 48); g.fillStyle = '#fff'; g.font = `bold 12px ${MONO}`; g.fillText(`${hover.n} · ${hover.kind}`, hover.x + 20, hover.y + 42); g.font = `11px ${MONO}`; g.fillStyle = '#9fd4ee'; g.fillText(hover.body || hover.kind === 'zona' ? l2 + ' · clic: ficha' : l2, hover.x + 20, hover.y + 60);
+    const queue = (x, y, text, col, pri, o = {}) => { const size = o.size || fs; g.font = `${o.bold ? 'bold ' : ''}${size}px ${MONO}`; LQ.push({ x: x + (o.dx ?? 10), y: y + (o.dy ?? 4), w: g.measureText(text).width + (o.extraW || 0), h: size + 4 + (o.h2 || 0), size, text, col, pri, bold: o.bold, after: o.after, center: o.center }); }; // cola de etiquetas: se dibujan al final por prioridad y sin solaparse
+    const lab = (v, text, col, kind, pos, bold, extra, pri = 5, o = {}) => { const s = proj(v); if (!s) return null; const [x, y] = s; queue(x, y, text, col, pri, { bold, ...o }); const p = { x, y, n: text, kind, pos, ...extra }; pts.push(p); return p; };
+    if (typeof WAR !== 'undefined') { try { czDraw(pts, now, queue); } catch (err) { if (!st.czErr) { st.czErr = 1; console.warn('mapa: zonas de control', err); } } } // un fallo en las zonas nunca debe dejar el mapa sin textos
+    // ---------- cursor sobre un planeta, luna, estrella o cúmulo: brillo verde pulsante y ficha junto al cursor (radio proyectado + margen; el más cercano a la cámara) ----------
+    const camUp = vTmp2.set(0, 1, 0).applyQuaternion(cam.quaternion).clone(), scrR = (c, r) => { const p0 = proj(c), p1 = proj(camUp.clone().multiplyScalar(r).add(c)); return p0 && p1 ? [p0, Math.max(6, Math.hypot(p1[0] - p0[0], p1[1] - p0[1]))] : null; };
+    let hv = null;
+    if (!st.drag && !st.place) {
+      sys.objs.forEach((o, i) => { const q = scrR(o.p, dispR(o.b)); if (q && Math.hypot(q[0][0] - st.mx, q[0][1] - st.my) < q[1] + 6) { const dep = o.p.distanceTo(st.pos); if (!hv || dep < hv.dep) hv = { dep, s: q[0], r: q[1], kind: 'b', i, o }; } });
+      sys.zones.forEach((o, i) => { const q = scrR(o.p, zoneR(o.t.zone) * 1.3); if (q && Math.hypot(q[0][0] - st.mx, q[0][1] - st.my) < q[1] + 6) { const dep = o.p.distanceTo(st.pos); if (!hv || dep < hv.dep) hv = { dep, s: q[0], r: q[1], kind: 'z', i, o }; } });
     }
+    st.hv = hv;
+    if (hv) { const pul = 0.5 + 0.5 * Math.sin(now / 220); g.save(); g.shadowColor = '#5dff8a'; g.shadowBlur = 12 + 12 * pul; g.strokeStyle = `rgba(93,255,138,${0.55 + 0.45 * pul})`; g.lineWidth = 3; g.beginPath(); g.arc(hv.s[0], hv.s[1], hv.r + 5, 0, 7); g.stroke(); g.lineWidth = 1.5; g.globalAlpha = 0.5; g.beginPath(); g.arc(hv.s[0], hv.s[1], hv.r + 10 + 3 * pul, 0, 7); g.stroke(); g.restore(); }
+    // ---------- etiquetas ----------
+    sys.objs.forEach((o, i) => { const b = o.b, top = o.p.clone(); top.y += dispR(b) * 1.15; const occ = BASES.find(x => x.body === b.n); lab(top, b.n + (occ ? '  ⌂ ' + occ.owner : ''), b.k === 'sun' ? '#ffd166' : '#dff4ff', b.k === 'sun' ? 'estrella' : b.parent ? 'luna' : (b.label || 'planeta').toLowerCase(), b.pos, !b.parent, { body: true, ref: i }, b.parent ? 4 : 7); });
+    sys.zones.forEach((o, i) => { // zonas de recursos: nombre + iconos con lo que queda
+      const res = zoneRes(o.t.zi), empty = res.every(it => !it.n), top = o.p.clone(); top.y += zoneR(o.t.zone) * 1.2;
+      lab(top, o.t.n + (empty ? ' · agotada' : ''), o.t.zi === selZ ? '#ffd23f' : empty ? '#8899aa' : RES[res[0].type], 'zona', o.t.pos, o.t.zi === selZ, { ref: i, res }, o.t.zi === selZ ? 8 : 5, { h2: 18, after: (lx, ly) => { let cx = lx; g.font = `bold 11px ${MONO}`; g.lineWidth = 3; for (const it of res) { const im = icoImg(it.type); g.globalAlpha = it.n ? 1 : 0.35; if (im && im.complete && im.naturalWidth) g.drawImage(im, cx, ly + 5, 14, 14); g.fillStyle = '#fff'; g.strokeText(String(it.n), cx + 16, ly + 16); g.fillText(String(it.n), cx + 16, ly + 16); cx += 26 + 7 * String(it.n).length; } g.globalAlpha = 1; } });
+    });
+    for (const q of ngl) { if (q.p.distanceTo(st.pos) > 9) continue; const lvs = q.ms.map(n => n.lv), l1 = Math.min(...lvs), l2 = Math.max(...lvs); lab(q.p.clone().add(new THREE.Vector3(0, q.k * 3.2, 0)), `${q.hos ? 'HOSTILES' : 'Neutrales'} · Nv ${l1 === l2 ? l1 : l1 + '-' + l2} · ${q.ms.length} naves`, q.hos ? '#ff5a4a' : q.col, 'grupo de naves neutrales', q.ms[0].w, q.hos, {}, q.hos ? 6 : 4); } // nivel al acercar el zoom
+    os.forEach((r, i) => lab(sys.foes[i].position.clone().add(new THREE.Vector3(0, 0.22, 0)), r.name || 'Piloto', hex(accent(r)), 'jugador', r.apos, true, {}, 8));
+    { const s0 = proj(sys.me.position); if (s0) pts.push({ x: s0[0], y: s0[1], n: myName + ' (tú)', kind: 'tú', pos: S.pos }); } // la etiqueta «TÚ» la dibuja su icono
+    LQ.sort((a, b) => b.pri - a.pri); const placed = [];
+    for (const L of LQ) { // de mayor a menor prioridad; las que tapan a otra más importante no se dibujan (solo las de prioridad ≥ 9 se dibujan siempre)
+      const rx = L.center ? L.x - L.w / 2 : L.x, ry = L.y - L.size, rw = L.w, rh = L.h;
+      if (L.pri < 9 && placed.some(r => rx < r[0] + r[2] && rx + rw > r[0] && ry < r[1] + r[3] && ry + rh > r[1])) continue; placed.push([rx, ry, rw, rh]);
+      g.textAlign = L.center ? 'center' : 'left'; g.font = `${L.bold ? 'bold ' : ''}${L.size}px ${MONO}`; g.lineJoin = 'round'; g.lineWidth = 4; g.strokeStyle = '#050f1c'; g.fillStyle = L.col; g.strokeText(L.text, L.x, L.y); g.fillText(L.text, L.x, L.y); if (L.after) L.after(L.x, L.y);
+    }
+    g.textAlign = 'left';
+    // ---------- SIEMPRE: icono de MI BASE y de MI NAVE (con su rumbo); fuera de la vista, flecha en el borde ----------
+    const pin = (v, label, icon) => {
+      const cs = v.clone().applyMatrix4(cam.matrixWorldInverse); let x = 0, y = 0, on = false;
+      if (cs.z < -0.01) { const q = cs.clone().applyMatrix4(cam.projectionMatrix); x = (q.x * 0.5 + 0.5) * W; y = (-q.y * 0.5 + 0.5) * H; on = x > 26 && x < W - 26 && y > 60 && y < H - 50; }
+      if (on) { icon(x, y, 1); g.textAlign = 'center'; g.font = `900 12px ${MONO}`; g.lineWidth = 4; g.strokeStyle = '#050f1c'; g.fillStyle = '#9fd8ff'; g.strokeText(label, x, y + 28); g.fillText(label, x, y + 28); g.textAlign = 'left'; return; }
+      let dx = cs.z < -0.01 ? x - W / 2 : cs.x, dy = cs.z < -0.01 ? y - H / 2 : -cs.y; const l = Math.hypot(dx, dy) || 1; dx /= l; dy /= l;
+      const k = Math.min((W / 2 - 50) / Math.max(1e-6, Math.abs(dx)), (H / 2 - 76) / Math.max(1e-6, Math.abs(dy))), ex = W / 2 + dx * k, ey = H / 2 + dy * k;
+      g.save(); g.translate(ex, ey); g.rotate(Math.atan2(dy, dx)); g.beginPath(); g.moveTo(22, 0); g.lineTo(8, -10); g.lineTo(8, 10); g.closePath(); g.fillStyle = '#4db8ff'; g.fill(); g.lineWidth = 3; g.strokeStyle = '#050f1c'; g.stroke(); g.restore();
+      icon(ex - dx * 8, ey - dy * 8, 0.75); g.textAlign = 'center'; g.font = `900 11px ${MONO}`; g.lineWidth = 4; g.strokeStyle = '#050f1c'; g.fillStyle = '#9fd8ff'; const ty = ey - dy * 8 + (dy > 0.5 ? -22 : 26); g.strokeText(label, ex - dx * 8, ty); g.fillText(label, ex - dx * 8, ty); g.textAlign = 'left';
+    };
+    const mb = typeof BASE !== 'undefined' ? BASE.mine() : null, bb = mb && bodies.find(q => q.n === mb.b);
+    if (bb) { const vb = dpos(bb, new THREE.Vector3()).add(new THREE.Vector3(Math.cos(mb.la) * Math.cos(mb.lo), Math.sin(mb.la), Math.cos(mb.la) * Math.sin(mb.lo)).multiplyScalar(dispR(bb) * 1.04));
+      pin(vb, 'TU BASE', (x, y, k) => { g.save(); g.translate(x, y); g.scale(k, k); g.beginPath(); g.moveTo(0, -14); g.lineTo(14, -2); g.lineTo(10, -2); g.lineTo(10, 11); g.lineTo(-10, 11); g.lineTo(-10, -2); g.lineTo(-14, -2); g.closePath(); g.fillStyle = '#4db8ff'; g.fill(); g.lineWidth = 3; g.strokeStyle = '#050f1c'; g.stroke(); g.fillStyle = '#050f1c'; g.fillRect(-3, 3, 6, 8); g.restore(); }); }
+    { const f = new THREE.Vector3(0, 0, -1).applyQuaternion(S.q), p0 = proj(sys.me.position), p1 = proj(sys.me.position.clone().addScaledVector(f, 0.3)), ang = p0 && p1 ? Math.atan2(p1[1] - p0[1], p1[0] - p0[0]) : -Math.PI / 2;
+      pin(sys.me.position, 'TÚ', (x, y, k) => { g.save(); g.translate(x, y); g.rotate(ang); g.scale(k, k); g.beginPath(); g.moveTo(16, 0); g.lineTo(-10, -11); g.lineTo(-5, 0); g.lineTo(-10, 11); g.closePath(); g.fillStyle = '#4db8ff'; g.fill(); g.lineWidth = 3; g.strokeStyle = '#050f1c'; g.stroke(); g.restore(); }); }
+    for (const p of pts) { const dd = Math.hypot(p.x - st.mx, p.y - st.my); if (dd < hd) { hd = dd; hover = p; } }
+    const panel = (x, y, lines) => { g.save(); g.font = `bold 12px ${MONO}`; const w = Math.max(...lines.map(([t]) => g.measureText(t).width)) + 22, h = lines.length * 16 + 12; x = Math.min(x, W - w - 8); y = Math.min(y, H - h - 8); g.fillStyle = '#050f1c'; g.fillRect(x + 4, y + 4, w, h); g.fillStyle = '#0b2233f0'; g.fillRect(x, y, w, h); g.lineWidth = 3; g.strokeStyle = '#050f1c'; g.strokeRect(x, y, w, h); lines.forEach(([t, c, b], i) => { g.font = `${b ? 'bold ' : ''}${b ? 12 : 11}px ${MONO}`; g.fillStyle = c; g.fillText(t, x + 11, y + 20 + i * 16); }); g.restore(); }; // ficha junto al cursor (pegatina)
+    if (hv && !st.drag) {
+      if (hv.kind === 'b') { const b = hv.o.b, d = Math.hypot(b.pos[0] - S.pos[0], b.pos[1] - S.pos[1], b.pos[2] - S.pos[2]) - b.R, occ = BASES.find(x => x.body === b.n), zi = typeof WAR !== 'undefined' ? czAt(SYS, WAR.CZ, b.pos) : -1;
+        panel(st.mx + 18, st.my + 18, [[b.n, '#5dff8a', 1], [b.k === 'sun' ? 'Estrella' : b.parent ? 'Luna de ' + b.parent.n : (b.label || 'Planeta'), '#9fd4ee'], [`Radio ${Math.round(b.R).toLocaleString('es')} km · a ${fD(Math.max(0, d))} de ti`, '#dff4ff'], ...(occ ? [[`Hangar de ${occ.owner}`, occ.owner === myName ? '#4db8ff' : '#ff8a6a']] : []), ...(zi >= 0 ? [[`Zona: ${WAR.owner(zi)}`, WAR.look(zi).col]] : []), ['Clic: ficha', '#7fb6d4']]); }
+      else { const t = hv.o.t, res = zoneRes(t.zi), left = resList(res), d = Math.max(0, Math.hypot(t.pos[0] - S.pos[0], t.pos[1] - S.pos[1], t.pos[2] - S.pos[2]) - t.zone.radius);
+        panel(st.mx + 18, st.my + 18, [[t.n, '#5dff8a', 1], ['Cúmulo de recursos', '#9fd4ee'], [left ? 'Quedan: ' + left : 'Agotado: ya no da recursos', left ? '#ffd23f' : '#8899aa'], [`Radio ${fD(t.zone.radius)} · ${fD(d)} hasta su borde`, '#dff4ff'], ['Clic: ficha', '#7fb6d4']]); }
+    } else if (hover && hd < 22 && !st.drag) {
+      const d = Math.hypot(hover.pos[0] - S.pos[0], hover.pos[1] - S.pos[1], hover.pos[2] - S.pos[2]), l2 = hover.kind === 'zona' ? (resList(hover.res) ? 'quedan ' + resList(hover.res) : 'agotada') : `${fD(d)}${d > 1 ? ' · a 5 c: ' + fT(d / (5 * C)) : ''}`;
+      panel(hover.x + 14, hover.y + 22, [[`${hover.n} · ${hover.kind}`, '#fff', 1], [hover.body || hover.kind === 'zona' || hover.cz !== undefined ? l2 + ' · clic: ficha' : l2, '#9fd4ee']]);
+    }
+    else if (typeof WAR !== 'undefined' && st.czHz >= 0 && !st.drag && !st.place) { const zo = WAR.owner(st.czHz), col = WAR.look(st.czHz).col; g.save(); g.font = `bold 12px ${MONO}`; const w = g.measureText(zo).width + 18; g.fillStyle = '#050f1c'; g.fillRect(st.mx + 17, st.my + 17, w, 22); g.fillStyle = '#0b2233f0'; g.fillRect(st.mx + 14, st.my + 14, w, 22); g.lineWidth = 2; g.strokeStyle = col; g.strokeRect(st.mx + 14, st.my + 14, w, 22); g.fillStyle = col; g.fillText(zo, st.mx + 23, st.my + 29); g.restore(); } // zona bajo el cursor: solo a quién pertenece
     const nz = ZT.filter(t => zoneRes(t.zi).every(it => !it.n)).length;
-    g.textAlign = 'right'; g.font = `11px ${MONO}`; g.fillStyle = '#7fb6d4'; g.fillText(`Cuerpos: ${bodies.length - 1} · Zonas de recursos: ${ZT.length}${nz ? ` (${nz} agotadas)` : ''} · Jugadores aparte de ti: ${os.length} · Hangares: ${BASES.length} · Neutrales: ${nl.length}${nl.some(n => n.h) ? ` (${nl.filter(n => n.h).length} hostiles)` : ''}`, W - 24, 30);
-    g.textAlign = 'center'; g.fillText(`${st.follow ? 'SIGUIENDO TU NAVE · Rueda: acercar/alejar · ' : 'Rueda: acercar al cursor · '}Arrastrar: desplazarse · Clic der. + arrastrar: mirar · WASD/flechas: mover · E/Q: subir/bajar · Shift: rápido · Clic: ficha · C: centrar y seguir tu nave · M / Esc: cerrar`, W / 2, H - 18);
+    g.textAlign = 'right'; g.font = `11px ${MONO}`; g.lineWidth = 3; g.strokeStyle = '#050f1c'; g.fillStyle = '#7fb6d4'; const tr = `Cuerpos: ${bodies.length - 1} · Zonas de recursos: ${ZT.length}${nz ? ` (${nz} agotadas)` : ''} · Jugadores aparte de ti: ${os.length} · Hangares: ${BASES.length} · Neutrales: ${nl.length}${nl.some(n => n.h) ? ` (${nl.filter(n => n.h).length} hostiles)` : ''}`; g.strokeText(tr, W - 24, 30); g.fillText(tr, W - 24, 30);
+    g.textAlign = 'center'; const ft = `${st.follow ? 'SIGUIENDO TU NAVE · Rueda: acercar/alejar · ' : 'Rueda: acercar al cursor · '}Arrastrar: desplazarse · Clic der. + arrastrar: mirar · WASD/flechas: mover · E/Q: subir/bajar · Shift: rápido · Clic: ficha · C: centrar y seguir tu nave · M / Esc: cerrar`; g.strokeText(ft, W / 2, H - 18); g.fillText(ft, W / 2, H - 18); // leyenda / pie
     st.hover = pts; if (st.sel) renderCard();
   }
   // ---------- zonas de control (estilo mapa galáctico de Helldivers): TESELAN todo el plano orbital en sectores anulares fijos respecto a la estrella ----------
@@ -199,23 +236,31 @@ const MAP = (() => {
     czRay.setFromCamera({ x: st.mx / c2.width * 2 - 1, y: -(st.my / c2.height) * 2 + 1 }, sys.cam); const o = czRay.ray.origin, d = czRay.ray.direction;
     if (Math.abs(d.y) < 1e-6) return null; const t = -o.y / d.y; return t > 0 ? [(o.x + d.x * t) / K, 0, (o.z + d.z * t) / K] : null;
   }
-  function czDraw(pts, now) {
+  function czDraw(pts, now, Q) { // Q: cola de etiquetas de drawSys
     const pl = st.place, mp = czMouse(), hz = mp ? czAt(SYS, WAR.CZ, mp) : -1, sz = st.sel && st.sel.kind === 'cz' ? st.sel.i : -1, P = [];
     g.save(); g.lineJoin = 'round';
     WAR.CZ.forEach((z, zi) => { const sp = projPoly(czPoly(z)); if (sp.length >= 3) P.push({ zi, sp, L: WAR.look(zi), hi: zi === hz || zi === sz }); });
     const path = sp => { g.beginPath(); sp.forEach(([x, y], k) => { if (k) g.lineTo(x, y); else g.moveTo(x, y); }); g.closePath(); };
-    for (const q of P) { path(q.sp); g.globalAlpha = q.hi ? 0.3 : q.L.cap ? 0.2 + 0.08 * Math.sin(now / 250) : 0.11; g.fillStyle = q.L.col; g.fill(); g.globalAlpha = 1; g.lineWidth = 6; g.strokeStyle = '#050f1c'; g.stroke(); } // 1.ª pasada: relleno y borde negro
+    for (const q of P) { path(q.sp); g.globalAlpha = q.hi ? 0.3 : q.L.cap ? 0.2 + 0.08 * Math.sin(now / 250) : q.L.sun ? 0.1 : 0.11; g.fillStyle = q.L.col; g.fill(); g.globalAlpha = 1; g.lineWidth = 6; g.strokeStyle = '#050f1c'; g.stroke(); // 1.ª pasada: relleno y borde negro
+      if (q.L.sun) { g.save(); g.clip(); const xs = q.sp.map(p => p[0]), ys = q.sp.map(p => p[1]), x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys); g.strokeStyle = 'rgba(255,159,28,0.18)'; g.lineWidth = 6; g.beginPath(); for (let x = x0 - (y1 - y0); x < x1; x += 22) { g.moveTo(x, y1); g.lineTo(x + (y1 - y0), y0); } g.stroke(); g.restore(); } } // zona solar: franjas de peligro, no reclamable
     P.sort((x, y) => x.hi - y.hi); for (const q of P) { path(q.sp); g.lineWidth = q.hi ? 3.5 : 2; g.strokeStyle = q.L.col; if (q.L.cap) { g.setLineDash([12, 8]); g.lineDashOffset = -now / 30; } g.stroke(); g.setLineDash([]); } // 2.ª: borde de color (la resaltada encima)
-    for (const q of P) { // etiqueta técnica en el centroide
-      const z = WAR.CZ[q.zi], c = czCenter(z), s = projU(czV.set(c[0] * K, 0, c[2] * K)); if (!s || s[0] < -80 || s[0] > c2.width + 80 || s[1] < -40 || s[1] > c2.height + 40) continue; const [cx, ty] = s;
-      g.textAlign = 'center'; g.lineWidth = 3; g.strokeStyle = '#000'; g.fillStyle = q.L.col; g.font = `bold 11px ${MONO}`; const t1 = z.name.toUpperCase(); g.strokeText(t1, cx, ty); g.fillText(t1, cx, ty);
-      g.font = `10px ${MONO}`; g.strokeText(q.L.txt, cx, ty + 13); g.fillText(q.L.txt, cx, ty + 13);
-      if (q.L.cap) { g.fillStyle = '#050f1c'; g.fillRect(cx - 40, ty + 17, 80, 7); g.fillStyle = q.L.col; g.fillRect(cx - 39, ty + 18, 78 * q.L.p / 100, 5); }
-      pts.push({ x: cx, y: ty, n: z.name, kind: 'zona de control', pos: c, cz: q.zi });
+    const ring = (Date.now() / 1000 % WARCFG.gain.every) / WARCFG.gain.every; // anillo de 10 s sincronizado con el reloj real (el servidor entrega al cambiar de franja)
+    for (const q of P) { // SIN textos: en el centroide, icono del recurso que entrega + «+1» + anillo de 10 s (brillante en mis zonas, atenuado en las demás) y barra fina solo mientras se reclama
+      const z = WAR.CZ[q.zi]; if (z.noClaim || !z.res) continue; const c = czCenter(z), sp = projU(czV.set(c[0] * K, 0, c[2] * K)); if (!sp || sp[0] < -60 || sp[0] > c2.width + 60 || sp[1] < -60 || sp[1] > c2.height + 60) continue;
+      const xs = q.sp.map(p => p[0]), sz = Math.max(22, Math.min(44, (Math.max(...xs) - Math.min(...xs)) * 0.1)), mine = WAR.CZS[q.zi].o === myId, [cx, cy] = sp, im = icoImg(z.res), r = sz * 0.72;
+      g.save(); g.globalAlpha = mine ? 1 : 0.5; g.beginPath(); g.arc(cx, cy, r + 3, 0, 7); g.fillStyle = '#050f1c'; g.fill(); g.lineWidth = 3; g.strokeStyle = 'rgba(255,255,255,0.15)'; g.beginPath(); g.arc(cx, cy, r, 0, 7); g.stroke();
+      g.strokeStyle = mine ? '#5dff8a' : '#9fb3c4'; g.beginPath(); g.arc(cx, cy, r, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * (mine ? ring : 1)); g.stroke(); // reloj de 10 s
+      if (im && im.complete && im.naturalWidth) g.drawImage(im, cx - sz / 2, cy - sz / 2, sz, sz);
+      g.font = `900 ${Math.round(sz * 0.5)}px ${MONO}`; g.textAlign = 'left'; g.lineWidth = 4; g.strokeStyle = '#050f1c'; g.fillStyle = mine ? '#c8ff5d' : '#dfe8ee'; const t = `+${WARCFG.gain.n}`; g.strokeText(t, cx + r + 6, cy + sz * 0.18); g.fillText(t, cx + r + 6, cy + sz * 0.18);
+      g.font = `bold ${Math.round(sz * 0.32)}px ${MONO}`; g.lineWidth = 3; g.fillStyle = '#9fd4ee'; g.strokeText(`${WARCFG.gain.every}s`, cx + r + 6, cy + sz * 0.18 + sz * 0.4); g.fillText(`${WARCFG.gain.every}s`, cx + r + 6, cy + sz * 0.18 + sz * 0.4);
+      if (q.L.cap) { g.globalAlpha = 1; g.fillStyle = '#050f1c'; g.fillRect(cx - 30, cy + r + 8, 60, 6); g.fillStyle = q.L.col; g.fillRect(cx - 29, cy + r + 9, 58 * q.L.p / 100, 4); } // progreso solo mientras se reclama
+      g.restore();
     }
+    st.czHz = hz; // zona bajo el cursor: drawSys muestra solo a quién pertenece
     for (const s of WAR.all()) { // buques (rombo grande) y satélites (pequeño) en su sitio real: están anclados a la estrella · azul míos, rojo ajenos
-      if (!s.w) continue; const q = projU(czV.set(s.w[0] * K, 0, s.w[2] * K)); if (!q) continue; const col = s.o === myId ? '#4db8ff' : '#ff3b30', r = s.k === 'W' ? 8 : 5;
+      if (!s.w) continue; const q = projU(czV.set(s.w[0] * K, 0, s.w[2] * K)); if (!q) continue; const mine = s.o === myId, col = mine ? '#4db8ff' : '#ff3b30', r = s.k === 'W' ? 8 : 5;
       g.beginPath(); g.moveTo(q[0], q[1] - r); g.lineTo(q[0] + r, q[1]); g.lineTo(q[0], q[1] + r); g.lineTo(q[0] - r, q[1]); g.closePath(); g.fillStyle = col; g.fill(); g.lineWidth = 3; g.strokeStyle = '#050f1c'; g.stroke();
+      Q(q[0], q[1], `${s.k === 'W' ? 'BUQUE' : 'SATÉLITE'} · ${mine ? 'TUYO' : WAR.nmOf(s.o)}`, mine ? '#9fd8ff' : '#ff8a7a', 6, { bold: true, size: 10 });
       pts.push({ x: q[0], y: q[1], n: `${s.k === 'W' ? 'Buque' : 'Satélite'} de ${WAR.nmOf(s.o)}`, kind: s.k === 'W' ? 'buque de guerra' : 'satélite defensivo', pos: s.w });
     }
     st.ghost = null;
@@ -225,7 +270,7 @@ const MAP = (() => {
         g.beginPath(); g.arc(x, y, 11 + 2 * Math.sin(now / 150), 0, 7); g.globalAlpha = 0.35; g.fillStyle = col; g.fill(); g.globalAlpha = 1; g.lineWidth = 5; g.strokeStyle = '#050f1c'; g.stroke(); g.lineWidth = 2; g.strokeStyle = col; g.stroke();
         g.beginPath(); g.moveTo(x, y - 6); g.lineTo(x + 4, y + 5); g.lineTo(x - 4, y + 5); g.closePath(); g.fillStyle = col; g.fill();
         g.textAlign = 'center'; g.font = `bold 12px ${MONO}`; g.lineWidth = 4; g.strokeStyle = '#000'; g.fillStyle = col; const tx = why || `CLIC: ${pl.k === 'W' ? 'DESPLEGAR EL BUQUE' : 'CONSTRUIR EL SATÉLITE'} AQUÍ`; g.strokeText(tx, x, y + 30); g.fillText(tx, x, y + 30);
-        g.font = `10px ${MONO}`; g.fillStyle = '#dff4ff'; g.strokeText(WAR.CZ[hz].name, x, y + 44); g.fillText(WAR.CZ[hz].name, x, y + 44);
+        
       }
       const W = c2.width, tx = `${pl.k === 'W' ? 'DESPLIEGUE · BUQUE DE GUERRA' : 'CONSTRUCCIÓN · SATÉLITE DEFENSIVO'} — clic en un punto de una zona AZUL (tuya) y segura · Esc: cancelar`; g.font = `bold 13px ${MONO}`; const w = g.measureText(tx).width + 36;
       g.fillStyle = '#050f1c'; g.fillRect(W / 2 - w / 2 + 4, 52, w, 34); g.fillStyle = '#0b2233'; g.fillRect(W / 2 - w / 2, 48, w, 34); g.lineWidth = 3; g.strokeStyle = '#050f1c'; g.strokeRect(W / 2 - w / 2, 48, w, 34); g.textAlign = 'center'; g.fillStyle = '#ffd23f'; g.fillText(tx, W / 2, 70);
@@ -246,9 +291,9 @@ const MAP = (() => {
   root.addEventListener('click', e => {
     if (st.place) { if (!e.target.closest('.mc, .mh') && st.moved < 5) placeClick(); return; } // modo colocación: el clic confirma la posición
     const zb = e.target.closest('[data-z]'); if (zb) { const zi = +zb.dataset.z; S.tgt = bodies.length + zi; S.lockB = null; say(`Destino fijado: ${ZONES[zi].name} · Shift: salto luz`); st.cardSig = ''; renderCard(); return; } // fijar la zona como destino del salto luz
-    if (e.target.closest('.mc, .mh') || st.moved >= 5 || !sys) return;
+    if (e.target.closest('.mc, .mh, .mfol') || st.moved >= 5 || !sys) return;
     let best = null, bd = 26; for (const p of st.hover) { const d = Math.hypot(p.x - e.clientX, p.y - e.clientY); if (d < bd) { bd = d; best = p; } }
-    if (!best && typeof WAR !== 'undefined') { const mp = czMouse(); if (mp) best = { cz: czAt(SYS, WAR.CZ, mp), kind: 'zona de control' }; } // clic en cualquier punto: la zona que lo contiene
+    if (st.hv) best = st.hv.kind === 'b' ? { body: true, ref: st.hv.i, kind: 'planeta' } : { kind: 'zona', ref: st.hv.i }; // el planeta o cúmulo resaltado (brillo verde)
     select(best);
   });
   root.addEventListener('wheel', e => { // acercar/alejar hacia el punto bajo el cursor
@@ -258,7 +303,7 @@ const MAP = (() => {
     const dir = ray.ray.direction, hit = dir.y * st.pos.y < 0 ? -st.pos.y / dir.y : Math.abs(st.pos.y) + 2, step = Math.min(hit, 300) * 0.18 * (e.deltaY < 0 ? 1 : -1);
     st.pos.addScaledVector(dir, step); if (st.pos.length() > 600) st.pos.setLength(600);
   }, { passive: false });
-  root.addEventListener('mousedown', e => { if (e.target.closest('.mh, .mc')) return; st.drag = [e.clientX, e.clientY]; st.btn = e.button === 2 || e.ctrlKey ? 2 : 0; st.moved = 0; });
+  root.addEventListener('mousedown', e => { if (e.target.closest('.mh, .mc, .mfol')) return; st.drag = [e.clientX, e.clientY]; st.btn = e.button === 2 || e.ctrlKey ? 2 : 0; st.moved = 0; });
   addEventListener('mouseup', () => st.drag = null);
   addEventListener('mousemove', e => {
     if (!st.open) return; st.mx = e.clientX; st.my = e.clientY; if (!st.drag) return;
@@ -267,6 +312,7 @@ const MAP = (() => {
     const k = (Math.abs(st.pos.y) + 0.5) * 0.0022, fx = -Math.sin(st.yaw), fz = -Math.cos(st.yaw); // desplazarse: se arrastra el plano del sistema
     st.pos.x += (-dx * -fz + dy * fx) * k; st.pos.z += (-dx * fx + dy * fz) * k;
   });
+  fol.addEventListener('click', e => { e.stopPropagation(); focusMe(); }); // recentra en tu nave y vuelve al seguimiento (igual que C)
   const place = k => { st.place = { k }; st.sel = null; card.hidden = true; if (!st.open) open(); st.dist = 14; }; // abre el mapa en modo colocación de un buque (W) o de un satélite (S)
   return { open, close, place, BASES, warm: b => bodyTex(b), st }; // warm: genera la textura base del cuerpo (pantalla de carga); la comparten la esfera del espacio, el radar y este mapa
 })();

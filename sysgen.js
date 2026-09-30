@@ -136,21 +136,25 @@
     capS: 50, // s para reclamar una zona en solitario (más rápido con tu buque dentro; baja si hay enemigos dentro o nadie)
     exclHg: 150000, exclWs: 100000, // ZONA ROJA (no se despliega): la zona que contiene un planeta con hangar enemigo o un buque enemigo, y las vecinas a las que llega ese radio
     starClear: 1000000, orbitClear: 80000, // no se despliega a menos de esto de la estrella ni de la órbita de un planeta principal (sus lunas quedan dentro de ese margen)
-    sectors: [4, 4, 5, 5, 6, 6, 6, 6], outerSectors: 6, // sectores de cada anillo de planeta (de dentro afuera) y de los Confines
+    sectors: [4, 4, 5, 5, 6, 6, 6, 6], outerSectors: 6,
+    starKill: { k: 3, tMax: 8, tMin: 1.5, reset: 1 }, // ZONA LETAL de la estrella: radio = máx(R★·(1+k), radio del Núcleo estelar); cuenta atrás clamp(tMax·d_superficie/(R_letal−R★), tMin, tMax) s; fuera se cancela tras `reset` s
+    gain: { n: 1, every: 10 }, // recursos pasivos: cada zona reclamada da a su dueño n unidades de su recurso cada `every` s (no salen de los cúmulos) // sectores de cada anillo de planeta (de dentro afuera) y de los Confines
     ws: { max: 2, hp: 3000, sh: 1000, near: 8, range: 400, dmg: 6, cd: 1.1, spd: 30, cost: { oro: 40, diamante: 8, plata: 60, cobre: 100, piedra: 150 } }, // buque de guerra (~3,4 km); near: km que cuentan como «en base»
     sat: { maxZone: 3, hp: 800, range: 1200, dmg: 20, cd: 4, spd: 50, radar: 1500000, cost: { oro: 8, plata: 20, cobre: 40, piedra: 60 } }, // satélite defensivo (~1 km): misiles guiados de largo alcance
   };
   const TAU = Math.PI * 2;
-  function genControlZones(sys) { // zonas: { id, name, ring, r0, r1 (Infinity en los Confines), a0 (ángulo inicial), da (amplitud), n (sectores del anillo), planet } · zs.rings: [{ r0, r1, a0, n, first }]
+  function genControlZones(sys) { // zonas: { id, name, ring, r0, r1 (Infinity en los Confines), a0 (ángulo inicial), da (amplitud), n (sectores del anillo), planet, res (recurso pasivo), noClaim (zona solar) } · zs.rings: [{ r0, r1, a0, n, first }]
     const r = mulberry((((sys.seed >>> 0) || 1) ^ 0x51c3a7) >>> 0 || 11), zs = [], rings = [], mains = sys.bodies.filter(b => b.k !== 'sun' && !b.parent), orb = mains.map(b => b.a * DS); // órbitas de dentro afuera
     const edges = [0, orb[0] / 2, ...orb.slice(1).map((o, k) => (orb[k] + o) / 2), orb[orb.length - 1] + (orb.length > 1 ? orb[orb.length - 1] - orb[orb.length - 2] : 1.5e6) / 2, Infinity];
     const ring = (k, n, name) => {
       const a0 = n > 1 ? r() * TAU / n : 0, da = TAU / n; rings.push({ r0: edges[k], r1: edges[k + 1], a0, n, first: zs.length });
       for (let j = 0; j < n; j++) zs.push({ id: zs.length, name: n > 1 ? `${name} · Sector ${j + 1}` : name, ring: k, r0: edges[k], r1: edges[k + 1], a0: a0 + j * da, da, n, planet: k >= 1 && k <= mains.length ? mains[k - 1].n : null });
     };
-    ring(0, 1, 'Núcleo estelar');
+    ring(0, 1, 'Núcleo estelar'); zs[0].noClaim = true; // la zona del SOL no se puede reclamar (ni dar recursos, ni desplegar)
     mains.forEach((b, k) => ring(k + 1, WARCFG.sectors[Math.min(k, WARCFG.sectors.length - 1)], 'Anillo ' + b.n));
     ring(mains.length + 1, WARCFG.outerSectors, 'Confines');
+    const r2 = mulberry((((sys.seed >>> 0) || 1) ^ 0x7e11a5) >>> 0 || 13), RW = ZONE_SEC_W, tot = Object.values(RW).reduce((a, b) => a + b, 0); // generador aparte: no altera la geometría
+    for (const z of zs) if (!z.noClaim) { let x = r2() * tot; z.res = 'agua'; for (const k in RW) { x -= RW[k]; if (x <= 0) { z.res = k; break; } } } // recurso pasivo (los raros, menos frecuentes)
     zs.rings = rings; return zs;
   }
   function bodyPosAt(sys, i, t) { // posición de un cuerpo en el instante t (s de reloj real: igual que simT en game.js); la usa el servidor, que no simula las órbitas
@@ -179,6 +183,7 @@
   // ¿Se puede desplegar en la zona zi en el punto off (km, ABSOLUTO respecto a la estrella, en el plano orbital)? '' = sí; si no, el motivo
   function czCheck(sys, zs, zi, off, me, owner, hangars, ships, t) {
     const z = zs[zi]; if (!z || !Array.isArray(off) || off.length !== 3 || !off.every(Number.isFinite) || Math.abs(off[1]) > 5000) return 'Zona no válida';
+    if (z.noClaim) return 'Zona solar: no se puede desplegar';
     if (owner !== me) return 'Zona no reclamada por ti: reclámala primero (permanece dentro)';
     if (czAt(sys, zs, off) !== zi) return 'Fuera de la zona';
     const rr = Math.hypot(off[0], off[2]); if (rr < WARCFG.starClear) return 'Demasiado cerca de la estrella';

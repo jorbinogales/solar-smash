@@ -16,7 +16,7 @@ const NEU = (() => {
   const r1 = x => Math.round(x * 10) / 10, r3 = x => Math.round(x * 1e3) / 1e3;
   function model(n) { if (n.grp) scene.remove(n.grp); n.grp = makeShip({ t: n.t, a: [0, 0, 0, 0, 0, 0], c: ACC }, HULL); n.grp.gear.visible = false; n.grp.visible = false; scene.add(n.grp); } // geometría compartida (caché de ships.js); oculta hasta que frame() la coloque
   function drop(id) { const n = E.get(id); if (n && n.grp) scene.remove(n.grp); E.delete(id); }
-  const safeAlt = b => b.k === 'sun' ? 3 * b.R : Math.max(2500, 6 * (ATMO[b.n] ? ATMO[b.n].H : 0)); // nunca bajan a la atmósfera (así tampoco se acercan a las bases)
+  const safeAlt = b => b.k === 'sun' ? STAR_KILL_R - b.R + 20000 : Math.max(2500, 6 * (ATMO[b.n] ? ATMO[b.n].H : 0)); // nunca bajan a la atmósfera (así tampoco se acercan a las bases)
   // puntos de encuentro: cada zona de recursos y cada planeta principal (rutas habituales de los jugadores); c: centro relativo al cuerpo ancla a, r: radio por el que vagan
   const SPOTS = [...ZONES.map(z => ({ a: z.anchor, c: z.off, r: z.radius + 8000 })), ...MAINS.map(b => ({ a: b.i, c: [0, 0, 0], r: b.R + safeAlt(b) + 25000 }))];
   const spotPos = s => { const A = bodies[s.a].pos; return [A[0] + s.c[0], A[1] + s.c[1], A[2] + s.c[2]]; };
@@ -122,6 +122,7 @@ const NEU = (() => {
     for (const n of E.values()) {
       const w = n.w || world(n); if (segDist(old, pos, w) >= R) continue; // sin mirar si se dibuja aquí: el anfitrión decide aunque esa nave quede lejos de su cámara
       if (!wasHost) { if (p.owner !== myId) return false; puff(pos, 0.02, 0xffd070, 0.4, 0.012); return true; }
+      if (p.nl && Math.random() >= NOLOCK_HIT) { puff(pos, 0.01, 0xffd070, 0.3, 0.006); return true; } // disparo sin bloqueo: solo cuenta el 45 % de los impactos
       const gr = G.get(n.g), dm = p.dmg, had = n.shA > 0, over = dm - n.shA; n.shA = Math.max(0, n.shA - dm); if (over > 0) n.hpA -= over;
       n.dmg.set(who, (n.dmg.get(who) || 0) + dm);
       if (gr && (gr.host == null || !foe(gr.host))) gr.host = who; // TODO el grupo pasa a hostil contra el agresor

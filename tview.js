@@ -48,7 +48,7 @@ const TV = (() => {
       pivot.rotation.y = now / 1800; rd.render(sc, cam);
       const [t1, t2, col] = info(a); lab.innerHTML = `${t1}<br>${t2}`; box.style.borderColor = col + '55';
       const lv = a.type === 'p' || a.type === 'n' ? a.t.lv || 0 : null, sg = lv === null ? '' : lv + col; // nivel de naves (jugadores, bots y neutrales)
-      if (sg !== hxSig) { hxSig = sg; hx.style.display = sg ? 'block' : 'none'; hx.innerHTML = sg ? hexSvg(lv, col, 42) : ''; }
+      if (sg !== hxSig) { hxSig = sg; hx.style.display = sg ? 'block' : 'none'; hx.innerHTML = sg ? hexSvg(lv, col, 42) : ''; } // nivel de jugadores, bots y neutrales (esquina superior izquierda del recuadro)
     },
   };
 })();

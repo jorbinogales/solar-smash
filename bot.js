@@ -37,6 +37,7 @@ const BOT = (() => {
       // atmósfera: velocidad máxima y altura mínima sobre el suelo
       const relN = sub(B.pos, nb.b.pos), l = len(relN), upN = relN.map(c => c / l); const D = new THREE.Vector3(...nrm(sub(T, B.pos)));
       if (nb.alt < 300) { vDes = Math.min(vDes, 2.5); const sr = planets.surfaceR(nb.b, relN, l), alt = l - sr; if (alt < 0.7) D.addScaledVector(new THREE.Vector3(...upN), 1.2 * (0.7 - alt) / 0.7 + 0.2).normalize(); if (alt < 0.15) B.pos = nb.b.pos.map((c, i) => c + upN[i] * (sr + 0.15)); }
+      { const sd = sub(B.pos, bodies[0].pos), sl = len(sd); if (sl < STAR_KILL_R * 1.2) D.addScaledVector(new THREE.Vector3(sd[0] / sl, sd[1] / sl, sd[2] / sl), 2).normalize(); } // evita la zona letal de la estrella
       B.q.rotateTowards(lookQ([D.x, D.y, D.z]), 2.2 * dt); B.v += (vDes - B.v) * (1 - Math.exp(-dt * 1.5));
       const f = FWD.clone().applyQuaternion(B.q); B.pos = [B.pos[0] + f.x * B.v * dt, B.pos[1] + f.y * B.v * dt, B.pos[2] + f.z * B.v * dt];
       if (aimAt && B.cd <= 0) { const ad = sub(aimAt, B.pos), al = len(ad); if (al < 3.5 && (f.x * ad[0] + f.y * ad[1] + f.z * ad[2]) / al > Math.cos(0.14)) { B.cd = CD; fire(B, idx, [ad[0] / al + (Math.random() - 0.5) * 0.02, ad[1] / al + (Math.random() - 0.5) * 0.02, ad[2] / al + (Math.random() - 0.5) * 0.02]); } }
@@ -52,6 +53,7 @@ const BOT = (() => {
     if (p.owner <= -1000) return false; // las torretas de las bases bot solo disparan a humanos
     for (const [idx, B] of bots) {
       if (B.dead || segDist(old, pos, B.pos) >= (p.spd !== undefined || ak > 0.02 ? 0.05 : HIT_R)) continue;
+      if (p.nl && Math.random() >= NOLOCK_HIT) { puff(pos, 0.01, 0xffd070, 0.3, 0.006); return true; } // disparo sin bloqueo: solo cuenta el 45 % de los impactos
       const over = p.dmg - B.sh; B.sh = Math.max(0, B.sh - p.dmg); if (over > 0) B.hp -= over;
       const dead = B.hp <= 0; if (dead) { B.dead = performance.now() + 20000; boom(B.pos, 30); if (B.grp) B.grp.visible = false; }
       send({ t: 'hit', by: p.owner, key, dmg: p.dmg, pos: B.pos, dead, sh: B.sh, v: 2000 + idx }); // v: la víctima es el bot
