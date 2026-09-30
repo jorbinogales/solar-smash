@@ -64,8 +64,39 @@ const MODELS = (() => {
 
   // =====================================================================================================================
   // BUQUE DE GUERRA (~3,5 km × ESCALA 4 ≈ 14 km): casco de cuña con proa de cuchillo, vientre oscuro, cubierta de vuelo con pista iluminada, hangares en los costados,
-  // puente con mástil y antenas, 6 torretas gemelas en sus posiciones de boca (x = ±0,39; z = −0,2 · 0,35 · 0,8), bloque de motores con 3 toberas y 2 propulsores auxiliares.
+  // puente con mástil y antenas, 6 torretas gemelas ANIMABLES (objetos aparte con yaw/pitch en userData.turrets; x = ±0,39; z = −0,2 · 0,35 · 0,8), bloque de motores con 3 toberas y 2 propulsores auxiliares.
   // =====================================================================================================================
+  // ---------- torretas animables del buque (objetos separados del casco) ----------
+  // Cada torreta: Group `yaw` (pivote en lo alto de su barbeta; gira sobre y) > [cúpula (rol H)] + Group `pitch` (pivote en el eje de los cañones; cabecea sobre x) > [cañones y frenos de boca (rol D)].
+  // Geometría fundida UNA vez (turretGeo) y compartida por las 6 torretas de todos los buques; materiales = los del casco de cada bando. Coste: 2 draw calls por torreta (12 por buque).
+  // Orden = el de war.js (WT): 0-2 costado izquierdo (x −), 3-5 derecho (x +); z = TUR_Z; la central (z 0,35) es la metralleta, las otras dos lanzamisiles.
+  const TUR_X = 0.39, TUR_Z = [-0.2, 0.35, 0.8], TUR_Y = 0.09, TUR_PY = 0.038, TUR_MZ = -0.26, TUR_GUN = 0.02; // yaw en y = 0,09 (tope de la barbeta) · pitch a +0,038 sobre él (y = 0,128, el eje de los cañones) · boca a −0,26 en z
+  const TUR_PMIN = -10 * PI / 180, TUR_PMAX = 80 * PI / 180, TUR_X_AXIS = new THREE.Vector3(1, 0, 0), TUR_Y_AXIS = new THREE.Vector3(0, 1, 0);
+  let TG = null;
+  function turretGeo() {
+    if (TG) return TG; const Ky = G.skit(0.5), Kp = G.skit(0.5);
+    Ky.add('H', loft([{ z: -0.055, w: 0.07, h: 0.035, y: 0.035, c: 0.01 }, { z: -0.02, w: 0.11, h: 0.06, y: 0.035, c: 0.02 }, { z: 0.06, w: 0.10, h: 0.05, y: 0.032, c: 0.02 }])); // cúpula (coordenadas locales de yaw)
+    for (const o of [-TUR_GUN, TUR_GUN]) { Kp.add('D', cylZ(0.009, 0.009, 0.20, 6), [o, 0, -0.155]); Kp.add('D', bx(0.02, 0.02, 0.028), [o, 0, -0.245]); } // cañón (cerrado atrás: al cabecear asoma por encima de la cúpula) y freno de boca
+    return (TG = { yaw: Ky.parts(), pitch: Kp.parts() });
+  }
+  function addTurrets(g, mine) {
+    const M = mats(mine), T = turretGeo(), list = [];
+    for (const sx of [-1, 1]) TUR_Z.forEach((z, zi) => {
+      const yaw = new THREE.Group(), pitch = new THREE.Group(), x = sx * TUR_X;
+      yaw.position.set(x, TUR_Y, z); pitch.position.set(0, TUR_PY, 0); for (const [role, geo] of T.yaw) yaw.add(new THREE.Mesh(geo, M[role])); for (const [role, geo] of T.pitch) pitch.add(new THREE.Mesh(geo, M[role])); yaw.add(pitch); g.add(yaw);
+      list.push({ yaw, pitch, home: { yaw: 0, pitch: 0 }, muzzleLocal: [new THREE.Vector3(-TUR_GUN, 0, TUR_MZ), new THREE.Vector3(TUR_GUN, 0, TUR_MZ)], pos: new THREE.Vector3(x, TUR_Y + TUR_PY, z), kind: zi === 1 ? 'mg' : 'missile', limits: { pitchMin: TUR_PMIN, pitchMax: TUR_PMAX } });
+    });
+    g.userData.turrets = list; return g;
+  }
+  // boca (side 0 = cañón izquierdo · 1 = derecho) en coordenadas del modelo con el yaw/pitch ACTUALES (rota a mano, sin depender de matrixWorld). `out` opcional para no crear objetos.
+  function turretMuzzle(model, i, side, out) {
+    const t = model.userData.turrets[i]; return (out || new THREE.Vector3()).copy(t.muzzleLocal[side ? 1 : 0]).applyAxisAngle(TUR_X_AXIS, t.pitch.rotation.x).add(t.pitch.position).applyAxisAngle(TUR_Y_AXIS, t.yaw.rotation.y).add(t.yaw.position);
+  }
+  // apunta la torreta i hacia el vector d (coordenadas del modelo, desde su centro): yaw absoluto y pitch recortado a los límites. Devuelve la torreta.
+  function turretAim(model, i, dx, dy, dz) {
+    const t = model.userData.turrets[i]; t.yaw.rotation.y = Math.atan2(-dx, -dz); t.pitch.rotation.x = Math.min(t.limits.pitchMax, Math.max(t.limits.pitchMin, Math.atan2(dy, Math.hypot(dx, dz)))); return t;
+  }
+
   let PW = null;
   function partsW() {
     if (PW) return PW; const K = G.skit(0.5, WN), Kw = G.skit(0.2, WN);
@@ -91,13 +122,8 @@ const MODELS = (() => {
       for (let i = 0; i < 4; i++) K.add('D', bx(0.010, 0.05, 0.012), [sx * 0.466, 0.0, 0.10 + i * 0.22]); // costillas del casco
       Kw.add('WN', bx(0.003, 0.05, 0.36), [sx * 0.331, 0.12, 0.05]); Kw.add('WN', bx(0.003, 0.05, 0.30), [sx * 0.322, 0.12, 0.86]); // bandas de ventanas del casco
     }
-    // --- 6 torretas gemelas
-    for (const sx of [-1, 1]) for (const z of [-0.2, 0.35, 0.8]) {
-      const x = sx * 0.39; K.add('D', cylY(0.062, 0.072, 0.03, 8), [x, 0.075, z]); K.add('TL', torY(0.058, 0.004, 8), [x, 0.092, z]);
-      K.add('H', loft([{ z: z - 0.055, w: 0.07, h: 0.035, y: 0.125, x, c: 0.01 }, { z: z - 0.02, w: 0.11, h: 0.06, y: 0.125, x, c: 0.02 }, { z: z + 0.06, w: 0.10, h: 0.05, y: 0.122, x, c: 0.02 }]));
-      for (const bxo of [-0.02, 0.02]) { K.add('D', cylZ(0.009, 0.009, 0.20, 6, true), [x + bxo, 0.128, z - 0.155]); K.add('D', bx(0.02, 0.02, 0.028), [x + bxo, 0.128, z - 0.245]); }
-      K.add('TL', bx(0.012, 0.008, 0.012), [x, 0.152, z - 0.03]);
-    }
+    // --- 6 torretas gemelas: aquí solo el anillo fijo (barbeta) de cada una; cúpula y cañones son objetos animables (turretGeo / addTurrets)
+    for (const sx of [-1, 1]) for (const z of TUR_Z) { const x = sx * TUR_X; K.add('D', cylY(0.062, 0.072, 0.03, 8), [x, 0.075, z]); K.add('TL', torY(0.058, 0.004, 8), [x, 0.092, z]); }
     // --- cresta de proa, aletas de popa y torretas antiaéreas
     K.add('H2', loft([{ z: -1.55, w: 0.04, h: 0.012, y: 0.086, c: 0.004 }, { z: -1.20, w: 0.12, h: 0.02, y: 0.145, c: 0.006 }, { z: -0.85, w: 0.19, h: 0.034, y: 0.19, c: 0.01 }]));
     K.add('A', bx(0.012, 0.003, 0.60), [0, 0.176, -1.17], [-0.10, 0, 0]);
@@ -227,7 +253,8 @@ const MODELS = (() => {
   const flameMat = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
 
   // ---------- API: mine => Object3D (los tres comparten geometría y materiales; solo cambian los del bando) ----------
-  const W = mine => inst(partsW(), mine), S = mine => inst(partsS(), mine);
+  const W = mine => addTurrets(inst(partsW(), mine), mine), S = mine => inst(partsS(), mine); // W: userData.turrets[6] (ver addTurrets) · W.turretMuzzle / W.turretAim
+  W.turretMuzzle = turretMuzzle; W.turretAim = turretAim;
   const F = mine => { // el caza expone .flames / .missiles / .flameMul para setThrust y updateShipFx (ships.js)
     const g = inst(partsF(mine), mine), fl = new THREE.Group(); fl.add(new THREE.Mesh(flames(mine), flameMat)); g.add(fl);
     Object.assign(g, { flames: [fl], missiles: [], flameMul: 1, muzzles: [], pylons: [] }); return g;

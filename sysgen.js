@@ -154,7 +154,7 @@
     // range 6000 km de detección y disparo (satélite 1200, cazas 3000, torres de base mucho menos) · spd 300 km/s (el servidor admite hasta 500) → a 6000 km tarda 20 s y el
     // proyectil vive l/spd·1,5 + 3 s (≤ 60) · hr 0,25 km: radio de espoleta de proximidad del proyectil (las demás torretas, 0,04-0,05) · cd 1,1 s entre disparos del buque,
     // que alternan entre las 3 torretas gemelas del costado que mira al blanco (cada torreta dispara cada 3,3 s, cañón izquierdo y derecho por turnos)
-    ws: { max: 2, hp: 3000, sh: 1000, scale: 4, near: 32, range: 6000, dmg: 6, cd: 1.1, spd: 300, hr: 0.25, w: 'missile', dmgLong: 100, dmgAmmo: 20, closeKm: 300, ammoRange: 300, ammoMinKm: 100, missileRange: 6000, ammo: { w: 'cannon', dmg: 1, cd: 0.09, spd: 400, hr: 0.1, spread: 0.004 }, missile: { w: 'missile', dmg: 100, cd: 5, spd: 200, hr: 0.25 }, cost: { oro: 40, diamante: 8, plata: 60, cobre: 100, piedra: 150 } },
+    ws: { max: 2, hp: 8000, sh: 3000, shRegen: 60, shDelay: 6, turnRate: { yaw: 1.6, pitch: 1.2 }, aimTol: 6, aimTolMg: 10, scale: 4, near: 32, range: 6000, dmg: 6, cd: 1.1, spd: 300, hr: 0.25, w: 'missile', dmgLong: 100, dmgAmmo: 20, closeKm: 300, ammoRange: 300, ammoMinKm: 100, missileRange: 6000, ammo: { w: 'cannon', dmg: 1, cd: 0.09, spd: 400, hr: 0.1, spread: 0.004 }, missile: { w: 'missile', dmg: 100, cd: 5, spd: 200, hr: 0.25 }, cost: { oro: 40, diamante: 8, plata: 60, cobre: 100, piedra: 150 } },
     ftr: { max: 30, n: 3, hp: 60, dmg: 4, cd: 0.8, range: 3000, w: 'plasma', engage: 8000, patrol: 6000, vmax: 200, turn: 1.1, scale: 6, cost: { plata: 15, cobre: 30, piedra: 30 } }, // escuadrón de CAZAS: n cazas de hp cada uno (cada caza es una UNIDAD: icono, objetivo y daño propios), plasma ligero; vmax 200 km/s (< las naves de jugador), giro 1,1 rad/s, modelo ×6; patrullan patrol km en torno a su punto y atacan hasta engage km de él
     sat: { maxZone: 3, hp: 800, range: 1200, dmg: 20, cd: 4, spd: 50, w: 'missile', radar: 1500000, cost: { oro: 8, plata: 20, cobre: 40, piedra: 60 } }, // satélite defensivo (~1 km): misiles guiados de largo alcance
   };
@@ -238,7 +238,11 @@
     for (const b of sys.bodies) if (b.k !== 'sun' && !b.parent && Math.abs(rr - b.a * DS) < WARCFG.orbitClear) return `Demasiado cerca de la órbita de ${b.n}`;
     return attack || owner === me ? '' : czDanger(sys, zs, zi, me, hangars, [], t); // los buques (propios o enemigos) ya no impiden desplegar; en una zona PROPIA (p. ej. la inicial) la ZONA ROJA por un hangar enemigo vecino tampoco
   }
+  // efecto al recibir un impacto (mismo criterio para buques, naves, bots y neutrales): 'shield' la cúpula/silueta se ilumina · 'break' el escudo se rompe (animación y sonido) · 'hull' daño al casco sin escudo.
+  // Tras romperse, el escudo no vuelve a mostrarse hasta superar el 10 % de su máximo (wasBroken).
+  const shieldFx = (sh0, sh1, max, wasBroken) => sh0 <= 0 || (wasBroken && sh0 < 0.1 * max) ? 'hull' : sh1 <= 0 ? 'break' : 'shield';
+  root.shieldFx = shieldFx;
   root.SYS_SCALE = SYS_SCALE; root.genSystem = genSystem; root.genZones = genZones; root.wreckLoot = wreckLoot; root.BASE_UP = BASE_UP; root.baseStats = baseStats; root.TOWER_STYLES = TOWER_STYLES; root.WEAPONS = WEAPONS; root.weaponCd = weaponCd;
   root.WARCFG = WARCFG; root.genControlZones = genControlZones; root.bodyPosAt = bodyPosAt; root.czAt = czAt; root.czCheck = czCheck; root.czDist = czDist; root.czCenter = czCenter; root.czDanger = czDanger; root.czDeployPoint = czDeployPoint;
-  if (typeof module !== 'undefined') module.exports = { SYS_SCALE, genSystem, genZones, wreckLoot, BASE_UP, baseStats, TOWER_STYLES, WEAPONS, weaponCd, WARCFG, genControlZones, bodyPosAt, czAt, czCheck, czDist, czCenter, czDanger, czDeployPoint };
+  if (typeof module !== 'undefined') module.exports = { shieldFx, SYS_SCALE, genSystem, genZones, wreckLoot, BASE_UP, baseStats, TOWER_STYLES, WEAPONS, weaponCd, WARCFG, genControlZones, bodyPosAt, czAt, czCheck, czDist, czCenter, czDanger, czDeployPoint };
 })(typeof window !== 'undefined' ? window : globalThis);

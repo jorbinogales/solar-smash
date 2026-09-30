@@ -51,7 +51,7 @@ const WAR = (() => {
     for (const r of rows) {
       if (!Array.isArray(r) || r.length !== 9 || !bodies[r[3]]) continue; const [id, o, zi, a, x, y, z, hp, e] = r; seen.add(id); let s = M.get(id);
       if (!s || s.o !== o) { if (s) dropS(s); s = { id, o, zi, a, off: [x, y, z], k }; M.set(id, s); build(s); }
-      if (s.w && s.hp !== undefined && hp < s.hp) puff(s.w, (k === 'W' ? 0.4 : 0.1) * (k === 'W' ? SCW : 1), 0xffb050, 0.5, 0.02); // impacto visible a distancia
+      if (s.w && s.hp !== undefined && (hp < s.hp || (k === 'W' && e < s.sh - 0.5)) && !(performance.now() - (s.fxT || 0) < 400)) { if (k === 'W') { const fx = shieldFx(s.sh || 0, e, C.ws.sh, s.shBr); s.shBr = fx === 'break' || (fx === 'hull' && !!s.shBr); if (fx === 'shield') s.shBr = false; shieldHitW(s, null, fx); } else puff(s.w, 0.1, 0xffb050, 0.5, 0.02); } // impacto visible a distancia (lo ve todo el mundo por el tick)
       s.hp = hp; if (k === 'W') s.sh = e; else s.on = e;
     }
     for (const [id, s] of [...M]) if (!seen.has(id)) { dropS(s); M.delete(id); if (pref === id) pref = 'base'; }
@@ -164,13 +164,44 @@ const WAR = (() => {
     const V = L.filter(ok); if (!V.length) { T.tg = null; return; } const tb = V[0].tier, B = V.filter(c => c.tier === tb);
     T.tg = (T.tg && B.find(c => tKey(c) === tKey(T.tg))) || B[ord % B.length]; T.lrOn = len(sub(T.tg.pos, c0)) > C.ws.closeKm;
   }
+  // ---------- ANIMACIÓN DE LAS TORRETAS (models.js: userData.turrets[i].yaw/.pitch; MODELS.W.turretMuzzle): giro con velocidad limitada hacia su blanco (o el último disparo visto de
+  // un buque remoto, ~1 s); sin blanco, VIGILANCIA: puntos al azar (yaw ±100-170° según torreta, pitch 5-35°) cada 2-5 s con pausas de 0,5-2 s. Solo dispara con el cañón alineado. ----------
+  const tState = s => s.tur || (s.tur = WT.map((w, i) => ({ ...w, i, cd: Math.random() * 1.5, tg: null, b: 0, ya: 0, pi: 0.1, err: Math.PI, amp: (100 + 70 * ((i * 37 + (s.id || 0) * 13) % 10) / 10) * Math.PI / 180 })));
+  const wrap = a => Math.atan2(Math.sin(a), Math.cos(a));
+  const MT = s => s.g && s.g.userData && s.g.userData.turrets && s.g.userData.turrets.length === 6 ? s.g.userData.turrets : null;
+  function aimAngles(s, T, p) { // yaw/pitch (en el modelo) desde el centro de la torreta hacia p (mundo): yaw 0 = proa (−z), pitch + = eleva
+    const c0 = turretC(s, T); _v.set(p[0] - c0[0], p[1] - c0[1], p[2] - c0[2]).applyQuaternion(_qi.copy(s.q).invert()); const L = _v.length() || 1, mt = MT(s), lim = mt ? mt[T.i].limits : { pitchMin: -0.17, pitchMax: 1.4 };
+    return { ya: Math.atan2(-_v.x, -_v.z), pi: Math.max(lim.pitchMin, Math.min(lim.pitchMax, Math.asin(Math.max(-1, Math.min(1, _v.y / L))))) };
+  }
+  function animTurrets(s, dt, now) {
+    const T6 = tState(s), mt = MT(s), R = C.ws.turnRate, near = s.g && s.g.visible && s.d < 20000; // de lejos no se ven: se orientan al instante
+    for (const T of T6) {
+      let want = null;
+      if (T.tg) want = aimAngles(s, T, T.tg.id === myId ? S.pos : T.tg.pos);
+      else if (T.rt && T.rt.t > now) want = aimAngles(s, T, T.rt.p); // buque remoto: hacia donde disparó por última vez
+      if (!want) { // vigilancia
+        if (!T.sc || now > T.sc.until) T.sc = { ya: wrap((T.sx < 0 ? Math.PI / 2 : -Math.PI / 2) + (Math.random() * 2 - 1) * T.amp), pi: (5 + Math.random() * 30) * Math.PI / 180, until: now + 2000 + Math.random() * 3000, hold: 500 + Math.random() * 1500 };
+        want = T.sc; T.lost = T.lost || now;
+      } else T.lost = 0;
+      if (!near) { T.ya = want.ya; T.pi = want.pi; } else { const dy = wrap(want.ya - T.ya), dp = want.pi - T.pi; T.ya = wrap(T.ya + Math.sign(dy) * Math.min(Math.abs(dy), R.yaw * dt)); T.pi += Math.sign(dp) * Math.min(Math.abs(dp), R.pitch * dt); }
+      T.err = Math.hypot(wrap(want.ya - T.ya), want.pi - T.pi);
+      if (mt) { mt[T.i].yaw.rotation.y = T.ya; mt[T.i].pitch.rotation.x = T.pi; }
+    }
+  }
+  function muzzleOf(s, T, side) { // boca REAL (mundo) del cañón `side` de la torreta T, con su orientación actual; sin modelo de torretas, aproximación desde el centro
+    const mt = MT(s); if (mt && models.W.turretMuzzle) { const v = models.W.turretMuzzle(s.g, T.i, side); return toWorld(s.w, s.q, v.x * SCW, v.y * SCW, v.z * SCW); }
+    const c0 = turretC(s, T), f = new THREE.Vector3(0, 0, -1).applyEuler(new THREE.Euler(T.pi, T.ya, 0, 'YXZ')).applyQuaternion(s.q); return c0.map((c, k) => c + f.getComponent(k) * 0.26 * SCW);
+  }
+  function noteFire(pos, dir) { // (game.js) disparo de torreta retransmitido: la torreta más cercana de un buque orienta su cañón hacia allí ~1 s
+    for (const s of WS.values()) { if (!s.w || len(sub(s.w, pos)) > 3 * SCW) continue; const T6 = tState(s); let best = null, bd = Infinity; for (const T of T6) { const d = len(sub(turretC(s, T), pos)); if (d < bd) { bd = d; best = T; } } if (best) best.rt = { p: pos.map((c, k) => c + dir[k] * 1000), t: performance.now() + 1000 }; return; }
+  }
   function wsTurrets(s, t, dt, alive, host, now) {
-    const T6 = s.tur || (s.tur = WT.map((w, i) => ({ ...w, i, cd: Math.random() * 1.5, tg: null, b: 0 })));
+    const T6 = tState(s);
     if (!(s.candT > now)) { s.candT = now + 300; const L = wsCands(s, alive, host), seen = L.length > 0; let kM = 0, kA = 0; for (const T of T6) assign(s, T, L, T.w === 'M' ? kM++ : kA++);
       if (seen) { if (!s.det && now - (s.alT || 0) > C.alarmCd * 1000) { s.alT = now; send({ t: 'walarm', i: s.id }); } s.det = now; } else if (s.det && now - s.det > 3000) s.det = 0; } // alarma al detectar un enemigo nuevo
-    for (const T of T6) { T.cd -= dt; if (!T.tg || T.cd > 0) continue;
-      const tg = T.tg.id === myId ? { ...T.tg, pos: S.pos, v: S.ve || 0, q: S.q } : T.tg, c0 = turretC(s, T), dir = nrm(sub(tg.pos, c0)); T.b ^= 1;
-      const mz = c0.map((c, k) => c + dir[k] * 0.26 * SCW + (T.b ? 0.02 : -0.02) * SCW * (k === 0 ? 1 : 0)); // boca de SU cañón, orientada hacia su blanco (alternando los dos cañones)
+    for (const T of T6) { T.cd -= dt; if (!T.tg || T.cd > 0 || T.err > (T.w === 'A' ? C.ws.aimTolMg : C.ws.aimTol) * Math.PI / 180) continue; // solo con el cañón ALINEADO con su blanco
+      const tg = T.tg.id === myId ? { ...T.tg, pos: S.pos, v: S.ve || 0, q: S.q } : T.tg, c0 = turretC(s, T); T.b ^= 1;
+      const mz = muzzleOf(s, T, T.b); // boca real de SU cañón (alternando izquierdo/derecho)
       if (T.w === 'M') { const M = C.ws.missile; fire(s, { ...t, w: M.w, dmg: C.ws.dmgLong, spd: M.spd, hr: M.hr, cd: M.cd }, tg, 'M', mz); T.cd = M.cd * (0.8 + 0.4 * Math.random()); }
       else { const A = C.ws.ammo; fire(s, { ...t, w: A.w, dmg: C.ws.dmgAmmo, spd: A.spd, hr: A.hr, cd: A.cd }, { ...tg, pos: tg.pos.map(c => c + (Math.random() - 0.5) * A.spread * len(sub(tg.pos, c0))) }, 'A', mz); T.cd = typeof weaponCd === 'function' ? weaponCd(WEAPONS[A.w], T, A.cd) : A.cd; }
     }
@@ -211,7 +242,7 @@ const WAR = (() => {
       if (s.halo) { s.halo.visible = s.g.visible && v.d > 60; s.halo.position.set(v.x, v.y, v.z); }
     }
     const host = BASE.isHost() && BASE.started() && !BASE.loading() && BASE.LB.phase === 'playing';
-    if (host) fsim(dt, now);
+    domeTick(dt); for (const s of WS.values()) if (s.w && s.q && !s.arr) animTurrets(s, dt, now); if (host) fsim(dt, now);
     for (const f of FQ.values()) f.c.forEach((c, j) => { // dibujo de los cazas (los demás clientes extrapolan desde el último estado)
       if (!c.g) { c.g = unitModel('F', f.o === myId); scene.add(c.g); c.halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: haloTex(), color: f.o === myId ? 0x4db8ff : 0xff4030, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, sizeAttenuation: false })); c.halo.scale.set(0.022, 0.022, 1); scene.add(c.halo); } // halo de bando: visible a miles de km
       let w = c.pos; if (!host && c.t0) { const fw = new THREE.Vector3(0, 0, -1).applyQuaternion(c.q), k = c.v * Math.min(1, (now - c.t0) / 1000); w = [w[0] + fw.x * k, w[1] + fw.y * k, w[2] + fw.z * k]; }
@@ -237,7 +268,7 @@ const WAR = (() => {
       let ok = s.k === 'S' && segDist(old, pos, s.w) < 0.3;
       if (s.k === 'W') { const f = fwdOf(s); for (const z of [1.35, 0.45, -0.45, -1.25]) if (segDist(old, pos, s.w.map((c, i) => c + f[i] * z * SCW)) < 0.5 * SCW) ok = true; } // 4 esferas a lo largo del casco (escaladas)
       if (!ok) continue;
-      send({ t: 'wh', k: s.k, i: s.id, dmg: p.dmg, nb: neu ? 1 : 0, ws: p.wv }); const a = Math.min(s.sh || 0, p.dmg); if (s.k === 'W') s.sh -= a; s.hp -= p.dmg - a; boom(pos, p.kind === 'm' ? 0.08 : 0.02); if (!neu) P.lastCombat = performance.now(); return true;
+      send({ t: 'wh', k: s.k, i: s.id, dmg: p.dmg, nb: neu ? 1 : 0, ws: p.wv }); const a = Math.min(s.sh || 0, p.dmg), sh0 = s.sh || 0; if (s.k === 'W') s.sh -= a; s.hp -= p.dmg - a; { const fx = shieldFx(sh0, s.k === 'W' ? s.sh : 0, C.ws.sh, s.shBr); s.shBr = fx === 'break' || (fx === 'hull' && !!s.shBr); if (fx === 'shield') s.shBr = false; shieldHitW(s, pos, fx); } boom(pos, p.kind === 'm' ? 0.08 : 0.02); if (!neu) P.lastCombat = performance.now(); return true;
     }
     const R = p.spd !== undefined || ak > 0.02 ? 0.05 * FSC : HIT_R;
     for (const f of FQ.values()) { if ((!neu && f.o === myId) || (p.owner < 0 && f.o === -p.owner) || (p.owner >= 2000 && p.owner < 3000 && f.o === p.owner - 1000) || f.arr) continue; for (let j = 0; j < F.n; j++) { const c = f.c[j]; if (!(f.hp[j] > 0) || !c.w || segDist(old, pos, c.w) > R) continue; send({ t: 'wh', k: 'F', i: f.id, j, dmg: p.dmg, nb: neu ? 1 : 0 }); f.hp[j] -= p.dmg; boom(pos, 0.02); return true; } }
@@ -315,6 +346,27 @@ const WAR = (() => {
     if (nL[1] < 0.7 || !onDeck(l, 0.01) || l[1] < DECK.y - 0.01 || vEff * 3600 > LAND_KMH) return false;
     S.pos = toWorldS(s, [l[0], deckRest(), l[2]]); S.v = Math.min(S.v, 0.01); return true;
   }
+  // ---------- ESCUDO DEL BUQUE: elipsoide translúcido que envuelve las cajas del modelo (×1,1), geometría compartida y un material por buque (uniformes): se ilumina en el punto de impacto
+  // con una onda que se expande y se apaga en 0,4 s; sin impactos es invisible. Rotura: destello de todo el elipsoide 0,5 s + sonido; después, impactos al casco (fogonazo naranja y humo). ----------
+  let DOMEG = null, DOMEB = null;
+  const DOME_VS = 'varying vec3 vN; varying vec3 vNV; varying vec3 vV; void main() { vN = normalize(position); vNV = normalize(normalMatrix * normal); vec4 mv = modelViewMatrix * vec4(position, 1.0); vV = normalize(-mv.xyz); gl_Position = projectionMatrix * mv; }';
+  const DOME_FS = 'uniform vec3 uHit; uniform float uT; uniform float uA; uniform float uBr; uniform vec3 uCol; varying vec3 vN; varying vec3 vNV; varying vec3 vV; void main() { float d = acos(clamp(dot(vN, uHit), -1.0, 1.0)); float k = clamp(1.0 - uT / 0.4, 0.0, 1.0); float ring = exp(-pow((d - uT * 5.0) / 0.18, 2.0)) * k; float spot = exp(-d * d * 18.0) * k; float fr = pow(1.0 - abs(dot(normalize(vNV), normalize(vV))), 3.0); float a = (ring * 0.9 + spot * 1.2 + fr * 0.25 * k + uBr * (0.4 + 0.6 * fr)) * uA; gl_FragColor = vec4(uCol * a, a); }';
+  function domeOf(s) {
+    if (s.dome) return s.dome;
+    if (!DOMEG) { DOMEG = new THREE.SphereGeometry(1, 32, 20); const B = colliders('W').boxes, lo = [0, 1, 2].map(i => Math.min(...B.map(b => b.c[i] - b.h[i]))), hi = [0, 1, 2].map(i => Math.max(...B.map(b => b.c[i] + b.h[i]))); DOMEB = { c: lo.map((v, i) => (v + hi[i]) / 2), h: lo.map((v, i) => (hi[i] - v) / 2 * 1.1 * Math.SQRT2) }; } // √2: el elipsoide envuelve la caja
+    const m = new THREE.ShaderMaterial({ uniforms: { uHit: { value: new THREE.Vector3(0, 0, -1) }, uT: { value: 9 }, uA: { value: 0 }, uBr: { value: 0 }, uCol: { value: new THREE.Color(s.o === myId ? 0x4db8ff : 0xff6a3c) } }, vertexShader: DOME_VS, fragmentShader: DOME_FS, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
+    const d = new THREE.Mesh(DOMEG, m); d.visible = false; d.frustumCulled = false; d.position.set(...DOMEB.c); d.scale.set(...DOMEB.h); if (s.g) s.g.add(d); s.dome = d; return d;
+  }
+  function shieldHitW(s, pos, fx) { // fx de sysgen.shieldFx · pos: punto de impacto (mundo) si se conoce; si no, un punto al azar de la cúpula
+    if (!s.w || !s.q) return; s.fxT = performance.now(); const wp = pos || s.w;
+    if (fx === 'hull') { puff(wp, 0.25 * SCW, 0xff8a3c, 0.6, 0.012); puff(wp, 0.4 * SCW, 0x5a4a3a, 1.6, 0.008); return; } // casco: fogonazo naranja, chispas y humo
+    if (!s.g) return; const d = domeOf(s), u = d.material.uniforms;
+    if (pos) { _v.set(pos[0] - s.w[0], pos[1] - s.w[1], pos[2] - s.w[2]).applyQuaternion(_qi.copy(s.q).invert()).divideScalar(SCW); u.uHit.value.set((_v.x - DOMEB.c[0]) / DOMEB.h[0], (_v.y - DOMEB.c[1]) / DOMEB.h[1], (_v.z - DOMEB.c[2]) / DOMEB.h[2]).normalize(); }
+    else u.uHit.value.set(Math.random() - 0.5, Math.random() * 0.6, Math.random() - 0.5).normalize();
+    u.uT.value = 0; u.uA.value = 1; d.visible = true; puff(wp, 0.12 * SCW, s.o === myId ? 0x9fe8ff : 0xffb070, 0.3, 0.01); // chispas en el punto de impacto
+    if (fx === 'break') { u.uBr.value = 1; puff(s.w, 2 * SCW, s.o === myId ? 0x9fe8ff : 0xff9a6a, 0.5, 0.02); sfx('escudo', s.w); sfx('impacto', s.w); } // el escudo se rompe
+  }
+  function domeTick(dt) { for (const s of WS.values()) { const d = s.dome; if (!d || !d.visible) continue; const u = d.material.uniforms; u.uT.value += dt; u.uBr.value = Math.max(0, u.uBr.value - dt * 2); u.uA.value = (s.sh > 0 && s.sh < 0.25 * C.ws.sh ? 0.45 + 0.35 * Math.sin(performance.now() / 45) : 1); if (u.uT.value > 0.5 && u.uBr.value <= 0) d.visible = false; } } // escudo bajo: parpadea
   function collide(old, vEff, now) { // buques y satélites son SÓLIDOS según su modelo real: a más de 600 km/h de CIERRE te estrellas; menos, daño y rebote según la normal de la caja golpeada. El buque recibe daño leve ('wh', ≤ 2 % de su vida, cada 2 s como mucho)
     for (const s of all()) {
       if (!s.w || s.arr || !s.q) continue; const K = colliders(s.k), sc = SCALE(s.k), r = SHIP_R / sc;
@@ -445,7 +497,7 @@ const WAR = (() => {
   };
   const COST = { W: C.ws.cost, S: C.sat.cost, F: F.cost }, DEPL = { W: 'DESPLEGAR', S: 'CONSTRUIR', F: 'DESPLEGAR' };
   const DESC = { W: `Nave capital de ~14 km: misiles guiados de largo alcance (${C.ws.missileRange} km, ${C.ws.dmgLong} de daño) y metralleta (≤ ${C.ws.ammoRange} km, ${C.ws.dmgAmmo} por bala). Se despliega a ${C.approachKm} km de un cúmulo o sobre un planeta (también el de una base rival, para atacarla): reapareces estacionado en su pista (y puedes aterrizar en ella con T): allí y junto al buque compras como en la base.`, S: 'Base flotante estática con misiles guiados de largo alcance. En zonas tuyas o sin dueño (ayuda a reclamarla) y en ataque junto a un planeta con base rival; se desactiva si otro reclama su zona.', F: `${F.n} cazas ligeros que patrullan la zona y atacan enemigos y neutrales; en una zona sin dueño, ayudan a reclamarla. Si caen los ${F.n}, se pierde.` };
-  const STATS = k => k === 'W' ? [['Casco', C.ws.hp, 3000, '#5dff8a'], ['Escudo', C.ws.sh, 1000, '#4db8ff'], ['Alcance (km)', C.ws.range, 6000, '#ffd23f'], ['Misiles largo alcance (km)', C.ws.missileRange, 6000, '#ff6a3c'], ['Misil: daño', C.ws.dmgLong, 120, '#ff6a3c'], ['Misil: recarga (s)', C.ws.missile.cd, 10, '#ff6a3c'], ['Umbral misil/metralleta (km)', C.ws.closeKm, 6000, '#9fd4ee'], ['Metralleta: alcance (km)', C.ws.ammoRange, 6000, '#ffd23f'], ['Metralleta: daño por bala', C.ws.dmgAmmo, 120, '#ffd23f'], ['Metralleta: balas/s (en ráfaga)', Math.round(1 / C.ws.ammo.cd), 20, '#ffd23f'], ['Velocidad (km/s)', 0, 400, '#f5a8ff'], ['Unidades', 1, 3, '#9fd4ee'], ['Máximo', C.ws.max, 3, '#9fd4ee']]
+  const STATS = k => k === 'W' ? [['Casco', C.ws.hp, 8000, '#5dff8a'], ['Escudo', C.ws.sh, 8000, '#4db8ff'], ['Alcance (km)', C.ws.range, 6000, '#ffd23f'], ['Misiles largo alcance (km)', C.ws.missileRange, 6000, '#ff6a3c'], ['Misil: daño', C.ws.dmgLong, 120, '#ff6a3c'], ['Misil: recarga (s)', C.ws.missile.cd, 10, '#ff6a3c'], ['Umbral misil/metralleta (km)', C.ws.closeKm, 6000, '#9fd4ee'], ['Metralleta: alcance (km)', C.ws.ammoRange, 6000, '#ffd23f'], ['Metralleta: daño por bala', C.ws.dmgAmmo, 120, '#ffd23f'], ['Metralleta: balas/s (en ráfaga)', Math.round(1 / C.ws.ammo.cd), 20, '#ffd23f'], ['Velocidad (km/s)', 0, 400, '#f5a8ff'], ['Unidades', 1, 3, '#9fd4ee'], ['Máximo', C.ws.max, 3, '#9fd4ee']]
     : k === 'S' ? [['Vida', C.sat.hp, 3000, '#5dff8a'], ['Escudo', 0, 1000, '#4db8ff'], ['Alcance (km)', C.sat.range, 6000, '#ffd23f'], ['Daño/disparo', C.sat.dmg, 40, '#ff8a3c'], ['Disparos/s', +(1 / C.sat.cd).toFixed(2), 6, '#c8ff5d'], ['Velocidad (km/s)', 0, 400, '#f5a8ff'], ['Unidades', 1, 3, '#9fd4ee'], ['Por zona', C.sat.maxZone, 3, '#9fd4ee']]
     : [['Vida (cada caza)', F.hp, 3000, '#5dff8a'], ['Escudo', 0, 1000, '#4db8ff'], ['Alcance (km)', F.range, 6000, '#ffd23f'], ['Daño/disparo', F.dmg, 40, '#ff8a3c'], ['Disparos/s', +(F.n / F.cd).toFixed(1), 6, '#c8ff5d'], ['Velocidad (km/s)', F.vmax, 400, '#f5a8ff'], ['Unidades', F.n, 3, '#9fd4ee'], ['Escuadrones', 'sin límite', 1, '#9fd4ee']];
   const full = k => k === 'W' ? mineW().length + stock.W >= C.ws.max : k === 'F' ? mineF().length + stock.F >= F.max : false;
@@ -515,5 +567,5 @@ const WAR = (() => {
   const creditOf = p => p.owner >= 7000 && p.owner < 8000 ? (fOwner(p.owner) ?? p.owner) : p.owner < 0 && p.owner > -1000 && p.sn ? -p.owner : p.owner; // a quién se acredita un golpe/baja: caza → dueño del escuadrón · buque/satélite (p.sn) → su dueño · resto, el propio disparador
 
   setTimeout(() => { colliders('W'); colliders('S'); }, 0); // se calculan durante la carga (≈ 0,6 s + 0,2 s), no en el primer roce
-  return { wsTurrets, wsCands, creditOf, wsTarget, enemyWS, wsSel, basePick, structNear, CZ, CZS, look, owner, check, deploy, collide, colliders, sdModel, deck, deckRest, SHIP_R, landSpot, land, parkStep, units, iconImg, onAlarm, czPos, frame, sync, onEvent, onOk, hit, targets, pos: posOf, hud, spawn, near, mine: mineW, menu, buy, sig, model, nmOf, all, nearestOwned, fOwner, fname: id => 'Cazas de ' + nmOf(fOwner(id)), models };
+  return { animTurrets, muzzleOf, noteFire, wsTurrets, wsCands, creditOf, wsTarget, enemyWS, wsSel, basePick, structNear, CZ, CZS, look, owner, check, deploy, collide, colliders, sdModel, deck, deckRest, SHIP_R, landSpot, land, parkStep, units, iconImg, onAlarm, czPos, frame, sync, onEvent, onOk, hit, targets, pos: posOf, hud, spawn, near, mine: mineW, menu, buy, sig, model, nmOf, all, nearestOwned, fOwner, fname: id => 'Cazas de ' + nmOf(fOwner(id)), models };
 })();

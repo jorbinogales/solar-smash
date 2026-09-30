@@ -85,7 +85,7 @@ function czTick(R, now) { // captura: un único jugador (vivo) dentro de una zon
   if (R.czSlot !== undefined && slot !== R.czSlot) R.cz.forEach((Z, zi) => { const z = R.czs[zi]; if (!Z.o || z.noClaim || !z.res) return; if (R.botRes && R.botRes[Z.o]) R.botRes[Z.o][z.res] = (R.botRes[Z.o][z.res] || 0) + WARCFG.gain.n; for (const cl of wss.clients) if (cl.R === R && cl.pid === Z.o) send(cl, { zgain: 1, zi, type: z.res, n: WARCFG.gain.n }); });
   R.czSlot = slot;
   for (const s of R.sats.values()) s.on = !R.cz[s.zi].o || R.cz[s.zi].o === s.o || s.a > 0 ? 1 : 0; // activo en zona propia o sin dueño, y en ataque (anclado al planeta rival); se desactiva si otro reclama la zona
-  for (const s of R.wships.values()) if (now - s.shT > 6000 && s.sh < WARCFG.ws.sh) s.sh = Math.min(WARCFG.ws.sh, s.sh + 25 * dt); // escudo del buque: se regenera sin recibir golpes
+  for (const s of R.wships.values()) if (now - s.shT > WARCFG.ws.shDelay * 1000 && s.sh < WARCFG.ws.sh) s.sh = Math.min(WARCFG.ws.sh, s.sh + WARCFG.ws.shRegen * dt); // escudo del buque: se regenera sin recibir golpes
 }
 const MINE_MAX = 60, MINE_GAP_MS = 100; // anti-trampas básico: unidades máximas de un recurso por asteroide y separación mínima entre extracciones de un mismo cliente
 const COLORS = [0x4db8ff, 0xff6a3c, 0x5dff8a, 0xffd23f, 0xd06bff, 0xf2f2f2, 0xff5fa2, 0x3ff0e0];

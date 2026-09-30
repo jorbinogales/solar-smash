@@ -349,6 +349,7 @@ const THR_COL = { p: 0xff5a28, c: 0xffd23f, m: 0xff8a3c }, THR = (() => {
       g.setDrawRange(0, n * 2); g.attributes.position.needsUpdate = true; g.attributes.color.needsUpdate = true; } };
 })();
 const num3 = a => Array.isArray(a) && a.length === 3 && a.every(Number.isFinite);
+function shieldBreak(pos, at) { puff(pos, 0.06, 0x9fe8ff, 0.5, 0.03); puff(pos, 0.03, 0xffffff, 0.25, 0.02); for (let i = 0; i < 6; i++) puff(pos.map(c => c + (Math.random() - 0.5) * 0.06), 0.01, 0xbfefff, 0.4 + Math.random() * 0.3, 0.006); sfx('escudo', at); } // el escudo se rompe: destello, esquirlas de luz y chasquido (espacial; at null = mío)
 function puff(pos, size, color, dur, min) { const sp = new THREE.Mesh(ball, glow(color)); scene.add(sp); fx.push({ pos: [...pos], size, t: 0, dur, min, sp }); }
 const DUST0 = new THREE.Color(0xa08c70); let dustAcc = 0;
 function dustBurst(n, str) { // nube de polvo bajo la nave: sale del suelo en anillo y se expande
@@ -521,10 +522,11 @@ ws.onmessage = ev => {
   if (m.ev) {
     const e = m.ev;
     if (e.t === 'fire' && e.kind === 'r') { if (e.rb >= 0 && e.rp) e.pos = bodies[e.rb].pos.map((c, i) => c + e.rp[i]); beamSet(e.key, e.pos, e.pos.map((c, i) => c + e.dir[i] * (e.len || 0)), e.tgt); if (len(sub(e.pos, S.pos)) < 40000) P.lastCombat = performance.now(); } // haz del cañón de riel: solo se dibuja y se oye (el daño lo aplica quien simula la torreta)
-    else if (e.t === 'fire') { if (e.rb >= 0 && e.rp) e.pos = bodies[e.rb].pos.map((c, i) => c + e.rp[i]); const W = WEAPONS[e.w] || (e.kind === 'c' ? WEAPONS.cannon : e.kind === 'm' ? WEAPONS.missile : WEAPONS.plasma); spawnProj(e.ow ?? e.id, e.key, e.kind, e.pos, e.dir, e.tgt, e.dmg, e.tw ? { spd: e.spd || 1, col: W.col, life: 30 } : { nl: !!e.nl }); if (e.tw) { const q = projs.get(e.key); if (q) q.vis = true; } const de = len(sub(e.pos, S.pos)); sfx(e.kind === 'm' ? 'misil' : e.w ? W.snd : e.tw ? 'torreta' : 'plasma', e.pos); if (de < 40000) P.lastCombat = performance.now(); if (!e.tw && P.hp > 0 && de < 30000 && de > 0 && (S.pos[0] - e.pos[0]) * e.dir[0] / de + (S.pos[1] - e.pos[1]) * e.dir[1] / de + (S.pos[2] - e.pos[2]) * e.dir[2] / de > 0.985) attackAlert('p', ownerName(e.ow ?? e.id), e.pos); } // disparo de otra nave que apunta hacia mí
+    else if (e.t === 'fire') { if (e.rb >= 0 && e.rp) e.pos = bodies[e.rb].pos.map((c, i) => c + e.rp[i]); if (e.tw && typeof WAR !== 'undefined' && Array.isArray(e.dir)) WAR.noteFire(e.pos, e.dir); const W = WEAPONS[e.w] || (e.kind === 'c' ? WEAPONS.cannon : e.kind === 'm' ? WEAPONS.missile : WEAPONS.plasma); spawnProj(e.ow ?? e.id, e.key, e.kind, e.pos, e.dir, e.tgt, e.dmg, e.tw ? { spd: e.spd || 1, col: W.col, life: 30 } : { nl: !!e.nl }); if (e.tw) { const q = projs.get(e.key); if (q) q.vis = true; } const de = len(sub(e.pos, S.pos)); sfx(e.kind === 'm' ? 'misil' : e.w ? W.snd : e.tw ? 'torreta' : 'plasma', e.pos); if (de < 40000) P.lastCombat = performance.now(); if (!e.tw && P.hp > 0 && de < 30000 && de > 0 && (S.pos[0] - e.pos[0]) * e.dir[0] / de + (S.pos[1] - e.pos[1]) * e.dir[1] / de + (S.pos[2] - e.pos[2]) * e.dir[2] / de > 0.985) attackAlert('p', ownerName(e.ow ?? e.id), e.pos); } // disparo de otra nave que apunta hacia mí
     else if (e.t === 'hit') {
       killProj(e.key); const vid = e.v ?? e.id, r = remotes.get(vid); puff(e.pos, 0.02, e.bm ? 0x6ab8ff : 0xffd070, 0.5, 0.012); // vid: la víctima (un bot si lo envía el anfitrión)
-      if (e.sh > 0 && r) { r.fl = 1; if (!e.bm) sfx('escudo', e.pos); } else if (!e.bm) boom(e.pos, e.dead ? 60 : e.dmg > 20 ? 25 : 6);
+      const fxK = r ? shieldFx(r.sh || 0, e.sh || 0, 100, r.shBr) : 'hull'; if (r) r.shBr = fxK === 'break' || (fxK === 'hull' && !!r.shBr); // r.sh: % del escudo antes del golpe · e.sh: escudo que le queda tras él
+      if (fxK !== 'hull') { r.fl = 1; if (fxK === 'break') shieldBreak(e.pos, e.pos); else if (!e.bm) sfx('escudo', e.pos); } else if (!e.bm) boom(e.pos, e.dead ? 60 : e.dmg > 20 ? 25 : 6); // sin escudo: impacto en el casco
       if (e.dead && e.by === myId) { P.kills++; say('¡BAJA CONFIRMADA!'); if (vid >= 2000) gainXp(5, 'Bot enemigo derribado'); else gainXp(8 + 4 * ((r && r.lv) || 0), `${(r && r.name) || 'Piloto'} derribado`); } } // XP: bots 5; jugadores 8 + 4 × su nivel
     else if (e.t === 'nhit' && typeof NEU !== 'undefined') NEU.onHit(e);
     else if (e.t === 'wreck' && e.by !== myId) boom(wrecks[e.w].pos, 80);
@@ -689,8 +691,8 @@ function gauge(H) { // medidor curvo: arco azul = escudo (exterior), arco verde 
   g2.fillStyle = '#4db8ff'; g2.fillText(`ESC ${Math.round(Math.max(0, P.sh))}`, cx, cy - 2); g2.fillStyle = hullCol; g2.fillText(`CASCO ${Math.round(Math.max(0, P.hp))}`, cx, cy + 18);
 }
 function hurt(dmg, dir, now, soft) { // el escudo absorbe primero; lo que sobra va al casco · soft: daño continuo (haz del cañón de riel): fogonazo, temblor y sonido atenuados y espaciados
-  const over = dmg - P.sh, had = P.sh > 0; P.sh = Math.max(0, P.sh - dmg); if (over > 0) P.hp -= over;
-  P.shT = now; P.lastCombat = now; P.flash = soft ? Math.max(P.flash, 0.35) : 1; P.shake = soft ? Math.max(P.shake, 0.12) : dmg > 20 ? 1 : 0.5; if (had) P.sf = 1; if (!soft || now - (P.softT || 0) > 450) { P.softT = now; impact(dir, dmg > 20); AUDIO.hitMe(dmg, over > 0); } // impacto en MI nave: metálico (o zumbido del escudo)
+  const over = dmg - P.sh, had = P.sh > 0, sh0 = P.sh; P.sh = Math.max(0, P.sh - dmg); if (over > 0) P.hp -= over; const sfxK = shieldFx(sh0, P.sh, P.shMax, P.shBr); P.shBr = sfxK === 'break' || (sfxK === 'hull' && !!P.shBr); void had; // escudo: se ve solo mientras lo hay; al romperse, animación y sonido
+  P.shT = now; P.lastCombat = now; P.flash = soft ? Math.max(P.flash, 0.35) : 1; P.shake = soft ? Math.max(P.shake, 0.12) : dmg > 20 ? 1 : 0.5; if (sfxK !== 'hull') P.sf = 1; if (sfxK === 'break') shieldBreak(S.pos, null); if (!soft || now - (P.softT || 0) > 450) { P.softT = now; impact(dir, dmg > 20); AUDIO.hitMe(dmg, over > 0); } // impacto en MI nave: metálico (o zumbido del escudo)
   if (P.hp <= 0) { P.deaths = (P.deaths || 0) + 1; P.deadUntil = now + 10000; S.v = 0; boom(S.pos, 60); } // muertes: se ven en la tabla de Tab
 }
 function impact(dir, big) { // fogonazo y chispas sobre mi nave, del lado de donde vino el proyectil
