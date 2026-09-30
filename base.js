@@ -383,7 +383,7 @@ const BASE = (() => {
       if (segDist(old, pos, c) < HG_R * BK) { send({ t: 'hh', o: h.o, dmg: p.dmg, ...ex }); h.hp -= p.dmg; boom(pos, p.kind === 'm' ? 0.04 : 0.01); return true; }
     return false;
   }
-  const flashHit = (pos, p) => puff(pos, 0.02 * BK, p.col ?? 0xffb050, 0.45, 0.015); // fogonazo del color del arma con tamaño mínimo en pantalla (se ve aunque ocurra lejos)
+  const flashHit = (pos, p) => { const k = p.dmg >= 100 ? 2.5 : p.dmg >= 20 ? 1.5 : 1; puff(pos, 0.02 * BK * k, p.col ?? 0xffb050, 0.45, 0.015 * k); }; // fogonazo del color del arma con tamaño mínimo en pantalla (se ve aunque ocurra lejos)
   function hit(old, pos, p) { // proyectiles míos o de mis bots contra el hangar de otro jugador (los bots solo atacan a humanos)
     for (const h of HG.values()) { if (h.o === myId || (p.owner >= 2000 && h.o >= 1000)) continue; if (hitOne(h, old, pos, p, {})) { flashHit(pos, p); return true; } }
     return false;
