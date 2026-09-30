@@ -374,8 +374,8 @@ const WAR = (() => {
     if (!BASE.started() || BASE.loading()) return;
     const W = hc.width, H = hc.height; g2.save(); g2.textAlign = 'center';
     if (P.hp > 0 && !S.foot.on) {
-      for (const u of units()) { // mis unidades SIEMPRE (con flecha en el borde, como «TU BASE»); las enemigas en pantalla, al alcance del radar y con línea de visión
-        const mine = u.o === myId, dl = u.d; if (dl < 0.3) continue;
+      for (const u of units()) { // unidades de MI zona: las mías con flecha en el borde; las enemigas en pantalla, al alcance del radar y con línea de visión
+        const mine = u.o === myId, dl = u.d; if (dl < 0.3 || (!inMyZone(u.w) && !aimedIs(u.k, u.id))) continue; // solo las de MI zona (aliadas y enemigas), salvo la fijada/apuntada
         if (!mine && (u.k === 'S' ? dl > C.sat.radar : u.k === 'F' ? dl > 60000 : dl > 5e6)) continue;
         const dd = sub(u.w, S.pos); if (!mine && losBlocked({ kind: 'W', dir: dd.map(q => q / dl), dist: dl })) continue;
         const p = scrPos(u.w, W, H); if (p.edge && !mine) continue; if (!p.edge && dl < (u.k === 'W' ? 12 * SCW : 1)) p.y -= 60; // muy cerca: el icono no tapa el modelo

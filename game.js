@@ -226,6 +226,8 @@ function hudFlush() { // al final del HUD: de mayor a menor prioridad; si una et
   g2.restore(); HLQ.length = 0;
 }
 const fDs = km => km < 1e4 ? km.toFixed(1) + ' km' : km < 1e6 ? Math.round(km / 1000) + ' mil km' : (km / 1e6).toFixed(1) + ' M km'; // distancia corta (sin «s-luz»; esa solo en el objeto apuntado)
+let MYZ = -1, myzT = 0, CZG = null; // FILTRO POR ZONA de los marcadores del HUD: solo lo que está en MI sector de control (czAt compartido de sysgen); la zona de mi nave se recalcula cada 250 ms
+function inMyZone(p) { if (!p) return false; CZG = CZG || genControlZones(SYS); const now = performance.now(); if (now - myzT > 250) { myzT = now; MYZ = czAt(SYS, CZG, S.foot && S.foot.on ? S.shipPos : S.pos, simT); } return czAt(SYS, CZG, p, simT) === MYZ; }
 const aimedIs = (kind, id) => !!((lockT && lockT.kind === kind && lockT.id === id) || (aimT && aimT.t && aimT.t.kind === kind && aimT.t.id === id) || (S.tsel && S.tsel.kind === kind && S.tsel.id === id));
 // ---------- experiencia y niveles de la nave actual (datos y fórmula en ships.js: LVL, lvNeed, LV_MAX) ----------
 const HEXI = new Map(); function hexImg(lv, col) { const k = lv + col; let im = HEXI.get(k); if (!im) { im = new Image(); im.src = 'data:image/svg+xml;utf8,' + encodeURIComponent(hexSvg(lv, col, 40).replace('<svg ', '<svg xmlns="http://www.w3.org/2000/svg" ')); HEXI.set(k, im); if (HEXI.size > 80) HEXI.delete(HEXI.keys().next().value); } return im; } // hexágono de nivel (ships.js) como imagen para el canvas del HUD
@@ -853,6 +855,7 @@ function drawHud(fwd, now, targets) {
   const nearest = Math.min(Infinity, ...targets.filter(t => t.kind === 'p').map(t => t.dist)); // enemigo más cercano (solo naves de jugadores)
   for (const t of targets) {
     if ((t.kind === 'w' && t.dist > 300000) || losBlocked(t)) continue; // sin línea de visión (planeta de por medio) no se dibuja
+    if (t !== lockT && t !== S.tsel && !(aimT && aimT.t === t) && !inMyZone(S.pos.map((c, i) => c + t.dir[i] * t.dist))) continue; // solo entidades de MI zona (salvo el objetivo fijado, elegido o apuntado)
     const lock = t === lockT, sel = t === S.tsel, col = sel ? '#ffd23f' : t.kind === 'n' ? (t.hostile ? (lock ? '#ff2a2a' : '#ff5a4a') : (lock ? '#ffee55' : '#c8ff5d')) : t.kind === 'p' || t.kind === 'h' || t.kind === 'W' || t.kind === 'S' || t.kind === 'F' ? (lock ? '#ff2a2a' : '#ff8a4c') : (lock ? '#ffee55' : '#5dff8a'); // neutrales: verde amarillento (rojo si están hostiles); elegida con B: amarillo
     tv.copy(t.grp.position).project(camera);
     let x = (tv.x * 0.5 + 0.5) * W, y = (-tv.y * 0.5 + 0.5) * H; const behind = tv.z > 1;
