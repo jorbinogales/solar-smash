@@ -227,16 +227,14 @@
     return '';
   }
   // ¿Se puede desplegar en la zona zi en el punto off (km, ABSOLUTO respecto a la estrella, en el plano orbital)? '' = sí; si no, el motivo
-  function czCheck(sys, zs, zi, off, me, owner, hangars, ships, t, anch, kind) { // buques, satélites y cazas: zonas propias o SIN DUEÑO (sus unidades la reclaman) y, en ataque, junto a un planeta con base rival · kind: reservado · off: posición ABSOLUTA · anch > 0: desplegado junto a ese planeta (anclado a él): sin la regla de órbita, fuera de su atmósfera
+  function czCheck(sys, zs, zi, off, me, owner, hangars, ships, t, anch, kind) { // TODAS las unidades se despliegan en CUALQUIER zona (propia, sin dueño, de otro jugador/bot, roja): solo cuentan las reglas físicas · owner/hangars/ships/kind: se conservan por compatibilidad · off ABSOLUTA · anch > 0: anclado a ese planeta
     const z = zs[zi]; if (!z || !Array.isArray(off) || off.length !== 3 || !off.every(Number.isFinite) || Math.abs(off[1]) > 5000) return 'Zona no válida';
     if (z.noClaim) return 'Zona solar: no se puede desplegar';
-    const attack = (anch > 0 && hangars.some(h => h.o !== me && h.b === (sys.bodies[anch] || {}).n)) || (ships || []).some(s => s.o !== me && czDist(z, add3(bodyPosAt(sys, s.a, t), s.off)) < WARCFG.exclWs); // ATAQUE: junto a un planeta con base rival (o de bot) o donde hay un buque enemigo // ATAQUE: junto a un planeta con base rival (o de bot): vale aunque la zona sea suya o roja
-    if (owner && owner !== me && !attack) return 'Zona de otro jugador: solo junto a su planeta con base (ataque)';
     if (czAt(sys, zs, off) !== zi && !(anch > 0 && czAt(sys, zs, bodyPosAt(sys, anch, t)) === zi)) return 'Fuera de la zona'; // anclado a un planeta: cuenta la zona del PLANETA (a 300 km de altitud el punto puede asomar al sector vecino si el planeta está junto al borde)
     const rr = Math.hypot(off[0], off[2]); if (rr < WARCFG.starClear) return 'Demasiado cerca de la estrella';
-    if (anch > 0) { const b = sys.bodies[anch], H = sys.atmo[b.n] ? sys.atmo[b.n].H : 0; if (d3(off, bodyPosAt(sys, anch, t)) < b.R + 5.5 * H + 5) return 'Dentro de la atmósfera'; return attack || owner === me ? '' : czDanger(sys, zs, zi, me, hangars, [], t, anch); }
+    if (anch > 0) { const b = sys.bodies[anch], H = sys.atmo[b.n] ? sys.atmo[b.n].H : 0; if (d3(off, bodyPosAt(sys, anch, t)) < b.R + 5.5 * H + 5) return 'Dentro de la atmósfera'; return ''; }
     for (const b of sys.bodies) if (b.k !== 'sun' && !b.parent && Math.abs(rr - b.a * DS) < WARCFG.orbitClear) return `Demasiado cerca de la órbita de ${b.n}`;
-    return attack || owner === me ? '' : czDanger(sys, zs, zi, me, hangars, [], t); // los buques (propios o enemigos) ya no impiden desplegar; en una zona PROPIA (p. ej. la inicial) la ZONA ROJA por un hangar enemigo vecino tampoco
+    return ''; // dueño y ZONA ROJA ya no bloquean (el mapa sigue coloreándolas; las unidades disputan la zona por presencia)
   }
   // efecto al recibir un impacto (mismo criterio para buques, naves, bots y neutrales): 'shield' la cúpula/silueta se ilumina · 'break' el escudo se rompe (animación y sonido) · 'hull' daño al casco sin escudo.
   // Tras romperse, el escudo no vuelve a mostrarse hasta superar el 10 % de su máximo (wasBroken).
