@@ -150,20 +150,8 @@ function createFields(scene, bodies) {
       for (let i = 0; i < cnt; i++) { const u = r() * 2 - 1, a = r() * 6.2832, sn = Math.sqrt(1 - u * u); out.push({ d: new THREE.Vector3(sn * Math.cos(a), u, sn * Math.sin(a)), s: 0.06 + 0.08 * r(), c: col, t: it.type, n: it.n }); } }
     return (o.ng = out);
   }
-  const fixed = []; // basura en órbita de los planetas: [cuerpo, nº de piezas]
-  for (const [bi, count] of [[1, 150], [2, 100], [3, 150], [4, 80], [5, 80], [6, 80], [7, 80], [8, 60], [9, 60], [10, 60]].filter(x => x[0] < bodies.length)) { // basura orbital (el doble de antes) alrededor de cada mundo
-    const b = bodies[bi], r = rndOf(bi * 97 + 3), centers = Array.from({ length: 3 }, () => new THREE.Vector3(r() - 0.5, (r() - 0.5) * 0.6, r() - 0.5).normalize());
-    for (let j = 0; j < count; j++) {
-      const dir = centers[j % 3].clone().add(new THREE.Vector3(r() - 0.5, r() - 0.5, r() - 0.5).multiplyScalar(0.7)).normalize(), dist = b.R * (1.4 + 3.5 * r()), size = 0.06 + r() * r() * 0.6;
-      fixed.push({ parent: b, off: [dir.x * dist, dir.y * dist, dir.z * dist], m: ROCKS.length + ((r() * DEBRIS.length) | 0), size, r: size * 0.55, ax: new THREE.Vector3(r() - 0.5, r() - 0.5, r() - 0.5).normalize(), rate: 0.1 + r() * 0.5, a0: r() * 6.28, tint: 0.8 + r() * 0.4 });
-    }
-  }
-  for (const [bi, count] of [[1, 30], [2, 25], [3, 30], [4, 20], [5, 20], [6, 20], [7, 20], [8, 15], [9, 15], [10, 15]].filter(x => x[0] < bodies.length)) { // asteroides pequeños en órbita de cada mundo (recursos a mano)
-    const b = bodies[bi], r = rndOf(bi * 131 + 7);
-    for (let j = 0; j < count; j++) { const dir = new THREE.Vector3(r() - 0.5, (r() - 0.5) * 0.7, r() - 0.5).normalize(), dist = b.R * (1.8 + 5 * r()), size = 1 + r() * r() * 14; fixed.push({ parent: b, off: [dir.x * dist, dir.y * dist, dir.z * dist], m: (r() * ROCKS.length) | 0, size, r: size * 0.9, ax: new THREE.Vector3(r() - 0.5, r() - 0.5, r() - 0.5).normalize(), rate: 0.02 + r() * 0.12, a0: r() * 6.28, tint: 0.85 + r() * 0.3 }); }
-  }
-  const SYS_R = Math.max(...bodies.filter(b => !b.parent).map(b => (b.a || 0) * DIST_SCALE)) + 3e6; // radio del sistema: fuera del cinturón hay asteroides sueltos
-  let last = null; const sph = new THREE.Sphere(), gone = new Set(); fixed.forEach((f, n) => f.id = 'f' + n);
+  // SOLO existen los asteroides de los cúmulos (zonas de recursos) y solo mientras les quede algún recurso: sin basura orbital, sin asteroides sueltos ni cinturón decorativo
+  let last = null; const sph = new THREE.Sphere(), gone = new Set();
   const ZCELL = 2000, ZROCK = { agua: 3, piedra: 1, cobre: 2, plata: 2, oro: 2, diamante: 3 }; // celda del cúmulo de una zona (km) y tipo de roca preferido según su recurso principal
   const push = (im, n) => { // solo se sube a la GPU la parte usada de los buffers y las mallas vacías no se dibujan
     im.count = n; im.visible = n > 0; if (!n) return; im.instanceMatrix.updateRange.count = n * 16; im.instanceMatrix.needsUpdate = true; if (im.instanceColor) { im.instanceColor.updateRange.count = n * 3; im.instanceColor.needsUpdate = true; }
@@ -193,19 +181,6 @@ function createFields(scene, bodies) {
         return;
       }
       last = [...P]; active.length = 0; api.near = Infinity;
-      if (hr < SYS_R + RA && Math.abs(P[1]) < 1.5e6) {
-        for (let i = Math.floor((P[0] - RA) / CELL); i <= Math.floor((P[0] + RA) / CELL); i++)
-          for (let j = Math.floor((P[1] - RA) / CELL); j <= Math.floor((P[1] + RA) / CELL); j++)
-            for (let k = Math.floor((P[2] - RA) / CELL); k <= Math.floor((P[2] + RA) / CELL); k++) {
-              const r = rndOf((i * 73856093) ^ (j * 19349663) ^ (k * 83492791));
-              const ch = Math.hypot((i + 0.5) * CELL, (k + 0.5) * CELL), inB = ch > BELT.i && ch < BELT.o && Math.abs((j + 0.5) * CELL) < BELT.h; // cinturón: denso (60 % de las celdas); resto del sistema: asteroides sueltos (12 %)
-              if (r() > (inB ? 0.6 : 0.12)) continue; const id = i + ':' + j + ':' + k; if (gone.has(id)) continue; // los destruidos no vuelven a aparecer en esta sesión
-              const pos = [(i + r()) * CELL, (j + r()) * CELL, (k + r()) * CELL], h = Math.hypot(pos[0], pos[2]), u = r();
-              if (Math.abs(pos[1]) > 1.5e6 || Math.hypot(pos[0] - P[0], pos[1] - P[1], pos[2] - P[2]) > RA || bodies.some(b => Math.hypot(pos[0] - b.pos[0], pos[1] - b.pos[1], pos[2] - b.pos[2]) < b.R * 1.5 + 200)) continue;
-              const size = 2 + 140 * u * u * u;
-              active.push({ id, pos, r: size * 0.9, vis: size, m: (r() * ROCKS.length) | 0, ax: new THREE.Vector3(r() - 0.5, r() - 0.5, r() - 0.5).normalize(), rate: 0.02 + r() * 0.15, a0: r() * 6.28, tint: 0.85 + r() * 0.3 });
-            }
-      }
       for (const z of ZONES) { // cúmulo denso de cada zona de recursos (ZONES, game.js): mismas celdas deterministas, pero en coordenadas de la zona, que sigue a su planeta
         const par = bodies[z.anchor], lx = P[0] - par.pos[0] - z.off[0], ly = P[1] - par.pos[1] - z.off[1], lz = P[2] - par.pos[2] - z.off[2];
         if (Math.hypot(lx, ly, lz) > RA + z.radius) continue;
@@ -217,12 +192,10 @@ function createFields(scene, bodies) {
           if (Math.hypot(ox, oy, oz) > z.radius || Math.hypot(ox - lx, oy - ly, oz - lz) > RA) continue;
           const off = [z.off[0] + ox, z.off[1] + oy, z.off[2] + oz], pos = [par.pos[0] + off[0], par.pos[1] + off[1], par.pos[2] + off[2]];
           if (bodies.some(b => Math.hypot(pos[0] - b.pos[0], pos[1] - b.pos[1], pos[2] - b.pos[2]) < b.R * 1.5 + 200)) continue;
-          active.push({ id, z: z.id, pos, parent: par, off, r: size * 0.9, vis: size, m: r() < 0.6 ? rt : (r() * ROCKS.length) | 0, ax: new THREE.Vector3(r() - 0.5, r() - 0.5, r() - 0.5).normalize(), rate: 0.02 + r() * 0.15, a0: r() * 6.28, tint: 0.85 + r() * 0.3 });
+          const o = { id, z: z.id, pos, parent: par, off, r: size * 0.9, vis: size, m: r() < 0.6 ? rt : (r() * ROCKS.length) | 0, ax: new THREE.Vector3(r() - 0.5, r() - 0.5, r() - 0.5).normalize(), rate: 0.02 + r() * 0.15, a0: r() * 6.28, tint: 0.85 + r() * 0.3 };
+          if (!astLeft(o).length) { gone.add(id); continue; } // su zona ya no tiene nada de lo que llevaba: no existe
+          active.push(o);
         }
-      }
-      for (const f of fixed) {
-        const pos = [f.parent.pos[0] + f.off[0], f.parent.pos[1] + f.off[1], f.parent.pos[2] + f.off[2]];
-        if (!gone.has(f.id) && Math.hypot(pos[0] - P[0], pos[1] - P[1], pos[2] - P[2]) < RA) active.push({ id: f.id, pos, parent: f.parent, off: f.off, r: f.r, vis: f.size, m: f.m, ax: f.ax, rate: f.rate, a0: f.a0, tint: f.tint });
       }
       for (const o of active) api.near = Math.min(api.near, Math.hypot(o.pos[0] - P[0], o.pos[1] - P[1], o.pos[2] - P[2]) - o.r);
     },

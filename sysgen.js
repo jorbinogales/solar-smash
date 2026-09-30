@@ -83,14 +83,27 @@
       const th = ZONE_THEME[t][(r() * 2) | 0];
       zones.push({ id: k, name: `${th} ${name0}`, anchor, off, radius, dominant: dom });
     };
-    for (const { b, i } of planets) { // a unas decenas de miles de km del planeta, fuera de su basura orbital y de su atmósfera
-      const radius = Math.round(5000 + r() * 2000), th = r() * 6.2832, el = (r() - 0.5) * 0.3, d = b.R * (6 + 4 * r()) + radius + 3000;
-      add(i, [Math.round(d * Math.cos(th) * Math.cos(el)), Math.round(d * Math.sin(el)), Math.round(d * Math.sin(th) * Math.cos(el))], radius, 'de ' + b.n);
+    // Separación garantizada (con cotas inferiores válidas en TODA la órbita): entre cúmulos ≥ 3 × el radio mayor; a cualquier cuerpo ≥ R + 6·H(atmósfera) + 2 × radio + MARGEN
+    // (así tampoco pisan ninguna órbita). Si un candidato no cumple se reintenta con el mismo generador r() (determinista: igual en servidor, juego, menú y mapa).
+    const MARGIN = 3000, DSs = DS, moonR = Math.max(0, ...sys.bodies.filter(m => m.parent).map(m => m.R)), atmH = n => (sys.atmo[n] ? sys.atmo[n].H : 0);
+    const bodyOf = n => sys.bodies.find(x => x.n === n), hInt = (anchor, off) => { const hr = Math.hypot(off[0], off[2]); if (!anchor) return [hr, hr]; const A = sys.bodies[anchor].a * DSs; return [A - hr, A + hr]; }; // radio horizontal (respecto a la estrella) que puede ocupar el centro de la zona
+    const bInt = b => b.k === 'sun' ? [0, 0] : b.parent ? (p => [p.a * DSs - b.a, p.a * DSs + b.a])(bodyOf(b.parent)) : [b.a * DSs, b.a * DSs]; // ídem para un cuerpo (las lunas giran alrededor de su planeta)
+    const gap = (a, b) => Math.max(0, a[0] - b[1], b[0] - a[1]);
+    function fits(anchor, off, radius) {
+      for (const z of zones) { const d = z.anchor === anchor ? Math.hypot(off[0] - z.off[0], off[1] - z.off[1], off[2] - z.off[2]) : Math.hypot(gap(hInt(anchor, off), hInt(z.anchor, z.off)), off[1] - z.off[1]); if (d < 3 * Math.max(radius, z.radius)) return false; }
+      for (const [bi, b] of sys.bodies.entries()) { const d = bi === anchor ? Math.hypot(off[0], off[1], off[2]) : Math.hypot(gap(hInt(anchor, off), bInt(b)), off[1]); if (d < b.R + 6 * atmH(b.n) + 2 * radius + MARGIN) return false; } // todas las órbitas están en y = 0
+      return true;
+    }
+    const place = (anchor, radius, cand) => { let off = cand(); for (let k = 0; k < 40 && !fits(anchor, off, radius); k++) off = cand(); return off; };
+    for (const { b, i } of planets) { // cerca de su planeta, por encima o por debajo del plano orbital: nunca sobre la órbita de su planeta ni la de sus lunas
+      const radius = Math.round(5000 + r() * 2000), clear = b.R + 6 * atmH(b.n) + 2 * radius + MARGIN;
+      const off = place(i, radius, () => { const th = r() * 6.2832, h = clear + r() * 8000, y = (r() < 0.5 ? -1 : 1) * (2 * radius + moonR + MARGIN + r() * 3000); return [Math.round(h * Math.cos(th)), Math.round(y), Math.round(h * Math.sin(th))]; });
+      add(i, off, radius, 'de ' + b.n);
     }
     const bl = sys.belt, a0 = r() * 6.2832;
-    for (let k = 0; k < 3; k++) { // en el cinturón: puntos fijos respecto a la estrella
-      const th = a0 + k * 2.0944 + (r() - 0.5) * 0.6, rr = bl.i + (0.3 + 0.4 * r()) * (bl.o - bl.i);
-      add(0, [Math.round(rr * Math.cos(th)), 0, Math.round(rr * Math.sin(th))], Math.round(7000 + r() * 2000), ['α', 'β', 'γ'][k]);
+    for (let k = 0; k < 3; k++) { // en el cinturón: puntos fijos respecto a la estrella, repartidos a 120°
+      const radius = Math.round(7000 + r() * 2000), off = place(0, radius, () => { const th = a0 + k * 2.0944 + (r() - 0.5) * 0.6, rr = bl.i + (0.3 + 0.4 * r()) * (bl.o - bl.i); return [Math.round(rr * Math.cos(th)), 0, Math.round(rr * Math.sin(th))]; });
+      add(0, off, radius, ['α', 'β', 'γ'][k]);
     }
     const has = new Set(zones.flatMap(z => z.dominant.map(d => d.type))); // con pocos planetas: todos los recursos deben existir en algún sitio
     for (const t of RT) if (!has.has(t)) { const z = zones.find(q => q.dominant.length < 2) || zones[zones.length - 1]; z.dominant[1] = { type: t, budget: bud(t, 0.5) }; has.add(t); } // el secundario sustituido siempre es principal en otra zona

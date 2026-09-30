@@ -25,7 +25,9 @@ const server = http.createServer((req, res) => {
 });
 
 const WRECKS = 32, WRECK_RESPAWN_MS = 90000;
-const wss = new WebSocketServer({ server, maxPayload: 4096 }); let nextId = 1;
+const wss = new WebSocketServer({ server, maxPayload: 8192 }); let nextId = 0; // 8 KB: el estado de hasta 36 naves neutrales ('ns') cabe con margen
+const idInUse = id => [...wss.clients].some(c => c.pid === id) || [...rooms.values()].some(R => R.lobby.has(id) || R.hangars.has(id) || R.players.has(id));
+const newPid = () => { for (let k = 0; k < 999; k++) { nextId = nextId % 999 + 1; if (!idInUse(nextId)) return nextId; } return nextId; }; // ids de jugador SIEMPRE 1-999 (reutilizando los libres): 1000+ = hangares de bots, 2000+ = bots, 3000+ = neutrales. Antes crecían sin fin y tras ~1000 conexiones un jugador pasaba por bot
 const SHIPS = ['saeta', 'halcon', 'coloso', 'nomada'];
 const spec = sp => ({ t: SHIPS.includes(sp && sp.t) ? sp.t : 'halcon', a: Array.from({ length: 6 }, (_, i) => Math.max(0, Math.min(3, Math.round(Number(sp && sp.a && sp.a[i]) || 0)))), c: Number.isFinite(sp && sp.c) ? (sp.c >>> 0) & 0xffffff : 0x4db8ff });
 const num = (a, n) => Array.isArray(a) && a.length === n && a.every(Number.isFinite);
@@ -33,7 +35,7 @@ const send = (ws, o) => { if (ws.readyState === 1) ws.send(JSON.stringify(o)); }
 const bcast = (R, o) => { const s = JSON.stringify(o); for (const c of wss.clients) if (c.R === R && c.readyState === 1) c.send(s); }; // solo a los jugadores de esa sala
 const relay = (R, from, ev) => { const s = JSON.stringify({ ev: { ...ev, id: from } }); for (const c of wss.clients) if (c.R === R && c.readyState === 1 && c.pid !== from) c.send(s); };
 const admin = R => { const h = R.members.get(R.host); return h && h.id != null && R.lobby.has(h.id) ? h.id : Math.min(Infinity, ...R.lobby.keys()); }; // el anfitrión simula a los bots
-const stateOf = (id, m, name) => ({ id, name: String(name).slice(0, 20), pos: m.pos, q: m.q, v: m.v, hp: m.hp, sh: Number.isFinite(m.sh) ? m.sh : 0, sp: spec(m.sp), lv: Number.isInteger(m.lv) ? Math.max(0, Math.min(20, m.lv)) : 0, pk: m.pk ? 1 : 0, bt: Number.isFinite(m.bt) ? Math.max(0, Math.min(1, m.bt)) : 0, rb: Number.isInteger(m.rb) ? m.rb : -1, rp: num(m.rp, 3) ? m.rp : null, ms: Number.isFinite(m.ms) ? m.ms : 0 }); // lv: nivel de la nave que pilota (0-20)
+const stateOf = (id, m, name) => ({ id, name: String(name).slice(0, 20), pos: m.pos, q: m.q, v: m.v, hp: m.hp, sh: Number.isFinite(m.sh) ? m.sh : 0, sp: spec(m.sp), lv: Number.isInteger(m.lv) ? Math.max(0, Math.min(20, m.lv)) : 0, k: Number.isInteger(m.k) ? Math.max(0, Math.min(9999, m.k)) : 0, d: Number.isInteger(m.d) ? Math.max(0, Math.min(9999, m.d)) : 0, pk: m.pk ? 1 : 0, bt: Number.isFinite(m.bt) ? Math.max(0, Math.min(1, m.bt)) : 0, rb: Number.isInteger(m.rb) ? m.rb : -1, rp: num(m.rp, 3) ? m.rp : null, ms: Number.isFinite(m.ms) ? m.ms : 0 }); // lv: nivel de la nave que pilota (0-20)
 // naves neutrales (neutral.js, las simula el anfitrión): fila compacta [id, grupo, cuerpo ancla, rx, ry, rz, qx, qy, qz, qw, v, hp %, esc %, tipo (índice de SHIPS), nivel, hostil]
 const LOOT_OK = ['agua', 'piedra', 'cobre', 'plata', 'oro'], clampN = (x, a, b) => Math.max(a, Math.min(b, x));
 const neuRow = (R, e) => Array.isArray(e) && e.length === 16 && e.every(Number.isFinite) && e[0] >= 3000 && e[0] < 4000 && Number.isInteger(e[2]) && e[2] >= 0 && e[2] < R.SYS.bodies.length && Number.isInteger(e[13]) && e[13] >= 0 && e[13] < SHIPS.length
@@ -52,7 +54,7 @@ const newMember = (ws, m, id, idx) => ({ token: ws.token, nm: cleanName(m.nm, 'P
 const dropMember = (R, tk) => { R.members.delete(tk); if (R.host === tk) { const nx = R.members.keys().next().value; if (nx) R.host = nx; else closeRoom(R); } }; // salir de la sala de espera (si era el anfitrión pasa al siguiente)
 
 wss.on('connection', ws => {
-  const id = ws.pid = nextId++; ws.token = null; ws.R = null;
+  const id = ws.pid = newPid(); ws.token = null; ws.R = null;
   send(ws, { id });
   ws.on('message', raw => {
     try {
@@ -104,7 +106,7 @@ wss.on('connection', ws => {
         relay(R, id, { t: 'fire', key: m.key.slice(0, 24), kind: m.kind, pos: m.pos, dir: m.dir, tgt: t, dmg: Number.isFinite(m.dmg) ? Math.max(1, Math.min(30, m.dmg)) : 8, tw: m.tw ? 1 : 0, spd: Number.isFinite(m.spd) ? Math.max(0.1, Math.min(50, m.spd)) : 0, rb: Number.isInteger(m.rb) ? m.rb : -1, rp: num(m.rp, 3) ? m.rp : null, ow });
       } else if (m.t === 'hit' && Number.isInteger(m.by) && num(m.pos, 3) && Number.isFinite(m.dmg) && typeof m.key === 'string')
         relay(R, id, { t: 'hit', by: m.by, key: m.key.slice(0, 24), dmg: m.dmg, pos: m.pos, dead: !!m.dead, sh: Number.isFinite(m.sh) ? m.sh : 0, v: Number.isInteger(m.v) ? m.v : undefined }); // v: víctima si no es quien envía (bots del anfitrión)
-      else if (m.t === 'ns' && id === admin(R) && Array.isArray(m.l) && m.l.length <= 32) R.nv = m.l.map(e => neuRow(R, e)).filter(Boolean); // estado de las naves neutrales
+      else if (m.t === 'ns' && id === admin(R) && Array.isArray(m.l) && m.l.length <= 48) R.nv = m.l.map(e => neuRow(R, e)).filter(Boolean); // estado de las naves neutrales
       else if (m.t === 'nhit' && id === admin(R) && Number.isInteger(m.n) && m.n >= 3000 && m.n < 4000 && Number.isInteger(m.by) && num(m.pos, 3) && typeof m.key === 'string') { // impacto en una nave neutral (lo decide el anfitrión); si muere, win = quien se lleva la recompensa
         if (m.dead && R.nv) R.nv = R.nv.filter(e => e[0] !== m.n);
         relay(R, id, { t: 'nhit', n: m.n, by: m.by, key: m.key.slice(0, 24), dmg: Number.isFinite(m.dmg) ? clampN(m.dmg, 0, 60) : 0, pos: m.pos, dead: !!m.dead, sh: m.sh ? 1 : 0, win: Number.isInteger(m.win) ? m.win : -1, lv: Number.isInteger(m.lv) ? clampN(m.lv, 1, 20) : 1, xp: Number.isInteger(m.xp) ? clampN(m.xp, 0, 100) : 0, loot: neuLoot(m.loot) });
@@ -144,7 +146,7 @@ wss.on('connection', ws => {
     } catch {}
   });
   ws.on('close', () => {
-    const R = ws.R, mem = R && ws.token && R.members.get(ws.token); if (!R) return; R.players.delete(id); R.bots.delete(id);
+    const R = ws.R, mem = R && ws.token && R.members.get(ws.token); if (!R) return; R.players.delete(id); // (R.bots va por índice de bot, no por id de jugador)
     if (mem) {
       if (R.phase === 'lobby') { if (mem.id === id) dropMember(R, ws.token); } // salir de la sala de espera
       else if (R.phase !== 'launching' && mem.id === id) { R.lobby.delete(id); R.members.delete(ws.token); if (R.hangars.delete(id)) bcast(R, { ev: { t: 'hgone', o: id, id } }); } // desconexión durante la partida

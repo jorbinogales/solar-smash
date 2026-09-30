@@ -2,7 +2,7 @@
 // Los simula el cliente del administrador; los demás ven sus naves como una nave más (id 2000 + índice) y sus bases como hangares (dueño 1000 + índice).
 const BOT = (() => {
   const bots = new Map(); // idx -> { pos, q, v, hp, sh, dead, cd, grp, ang, sendT, mode }
-  const HP = 120, SH = 60, DMG = 5, CD = 0.45, LV = 5, FWD = new THREE.Vector3(0, 0, -1); // LV: nivel que muestran los bots
+  const HP = 84, SH = 42, DMG = 3.5, CD = 0.45, LV = 5, FWD = new THREE.Vector3(0, 0, -1); // −30 % como las naves de los jugadores · LV: nivel que muestran los bots
   const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
   const spec = () => ({ t: 'halcon', a: [0, 0, 0, 0, 0, 0], c: 0xff4030 });
   function nearest(p) { let best = null, bd = 1e30; for (const b of bodies) { if (b.k === 'sun') continue; const d = dist(p, b.pos) - b.R; if (d < bd) { bd = d; best = b; } } return { b: best, alt: bd }; }
@@ -19,7 +19,7 @@ const BOT = (() => {
     for (const h of BASE.HG.values()) {
       if (h.o < 1000 || h.hp <= 0) continue; const idx = h.o - 1000; let B = bots.get(idx);
       if (!B) { B = { pos: [0, 0, 0], q: new THREE.Quaternion(), v: 0, hp: HP, sh: SH, dead: 0, cd: 0, grp: makeShip(spec()), ang: Math.random() * 6, sendT: 0, mode: 'defender' }; B.grp.gear.visible = false; scene.add(B.grp); bots.set(idx, B); respawn(B, h); }
-      if (B.dead) { B.grp.visible = false; if (now >= B.dead) respawn(B, h); else continue; }
+      B.name = 'BOT ' + h.b; if (B.dead) { B.grp.visible = false; if (now >= B.dead) respawn(B, h); else { sendState(B, idx, h, now); continue; } } // muerto: se sigue enviando (vida 0) para que nadie vea un bot congelado e invulnerable
       const nb = nearest(B.pos);
       if (nb.b && nb.alt < nb.b.R * 30 + 1000) B.pos = B.pos.map((c, i) => c + nb.b.pos[i] - nb.b.prev[i]); // en el aire de un planeta viaja con él
       B.sh = Math.min(SH, B.sh + dt * 3); B.cd -= dt; B.ang += dt * 0.5;
@@ -41,8 +41,12 @@ const BOT = (() => {
       const f = FWD.clone().applyQuaternion(B.q); B.pos = [B.pos[0] + f.x * B.v * dt, B.pos[1] + f.y * B.v * dt, B.pos[2] + f.z * B.v * dt];
       if (aimAt && B.cd <= 0) { const ad = sub(aimAt, B.pos), al = len(ad); if (al < 3.5 && (f.x * ad[0] + f.y * ad[1] + f.z * ad[2]) / al > Math.cos(0.14)) { B.cd = CD; fire(B, idx, [ad[0] / al + (Math.random() - 0.5) * 0.02, ad[1] / al + (Math.random() - 0.5) * 0.02, ad[2] / al + (Math.random() - 0.5) * 0.02]); } }
       const v = view(B.pos); B.grp.visible = true; B.grp.position.set(v.x, v.y, v.z); B.grp.scale.setScalar(Math.max(v.s, v.rd * 0.12)); B.grp.quaternion.copy(B.q); setThrust(B.grp, B.v, now); updateShipFx(B.grp, now, 0);
-      if (now - B.sendT > 66) { B.sendT = now; const n2 = nearest(B.pos), rb = n2.b && n2.alt < n2.b.R * 30 ? n2.b.i : -1; send({ t: 'bs', i: idx, name: 'BOT ' + h.b, pos: B.pos, q: B.q.toArray(), v: B.v, hp: B.hp / HP * 100, sh: B.sh / SH * 100, sp: spec(), lv: LV, pk: 0, ms: 0, rb, rp: rb >= 0 ? sub(B.pos, bodies[rb].pos) : null }); }
+      sendState(B, idx, h, now);
     }
+  }
+  function sendState(B, idx, h, now) { // estado del bot para los demás (cada 66 ms)
+    if (now - B.sendT <= 66) return; B.sendT = now; const n2 = nearest(B.pos), rb = n2.b && n2.alt < n2.b.R * 30 ? n2.b.i : -1;
+    send({ t: 'bs', i: idx, name: 'BOT ' + h.b, pos: B.pos, q: B.q.toArray(), v: B.dead ? 0 : B.v, hp: B.dead ? 0 : B.hp / HP * 100, sh: B.dead ? 0 : B.sh / SH * 100, sp: spec(), lv: LV, pk: 0, ms: 0, rb, rp: rb >= 0 ? sub(B.pos, bodies[rb].pos) : null });
   }
   function hit(old, pos, p, key, ak) { // proyectil (de humanos o torretas de humanos) contra un bot: lo decide el administrador
     if (p.owner <= -1000) return false; // las torretas de las bases bot solo disparan a humanos
@@ -57,5 +61,11 @@ const BOT = (() => {
     return false;
   }
   function nearestTo(w, range) { let best = null, bd = range; for (const [idx, B] of bots) { if (B.dead) continue; const d = dist(B.pos, w); if (d < bd) { bd = d; best = { pos: B.pos, v: B.v, q: B.q, d, id: 2000 + idx }; } } return best; }
-  return { frame, hit, nearestTo, bots };
+  function targets() { // en el anfitrión sus bots no llegan como remotos: se añaden aquí como objetivos (fijables, marcadores, Tab y recuadro)
+    const out = []; if (P.hp <= 0) return out;
+    for (const [idx, B] of bots) { if (B.dead || !B.grp.visible) continue; const v = view(B.pos); out.push({ kind: 'p', id: 2000 + idx, name: B.name || 'BOT', hp: B.hp / HP * 100, sh: B.sh / SH * 100, grp: B.grp, dist: v.d, dir: [v.rel[0] / v.d, v.rel[1] / v.d, v.rel[2] / v.d], lv: LV, st: 'halcon', sp: spec(), pos: B.pos }); }
+    return out;
+  }
+  const get = id => { const B = id >= 2000 && id < 3000 ? bots.get(id - 2000) : null; return B && !B.dead ? B : null; };
+  return { frame, hit, nearestTo, bots, targets, pos: id => (get(id) || {}).pos || null, speed: id => (get(id) || {}).v || 0, name: id => (get(id) || {}).name || null };
 })();

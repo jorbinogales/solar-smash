@@ -8,6 +8,7 @@
   const newSeed = () => 'p' + Math.random().toString(36).slice(2, 8);
   const autoName = () => `${pick(['Nebulosa', 'Cósmica', 'Estelar', 'Orbital', 'Galáctica', 'Lunar', 'Solar', 'Cuántica'])}-${pick(['Alfa', 'Kepler', 'Andrómeda', 'Orión', 'Vega', 'Sirio', 'Aurora', 'Titán'])}-${10 + rnd(90)}`;
   const COL = ['#4db8ff', '#ff6a3c', '#5dff8a', '#ffd23f', '#d06bff', '#f2f2f2', '#ff5fa2', '#3ff0e0'];
+  const ZCOL = { agua: '#4db8ff', piedra: '#8d8f94', cobre: '#d9743a', plata: '#dde3ea', oro: '#ffc22a', diamante: '#a6f3ff' }; // color de cada recurso (el mismo que RES en el juego)
   const st = { name: ls.get('pname') || '', av: ls.get('avatar') || newSeed(), room: null, msg: '', np: 4, seed: 1 + rnd(2e9), rname: autoName(), copied: false, want: null, hover: null, cands: null, view: 'home', code: (new URLSearchParams(location.search).get('sala') || '').toUpperCase().slice(0, 8) };
   st.cands = [st.av, ...Array.from({ length: 5 }, newSeed)];
   const me = () => (st.room ? st.room.members.find(m => m.hk === myHk) : null), isHost = () => !!(me() && me().host);
@@ -45,9 +46,25 @@
       const q = pr(Math.cos(ang) * rr, 0, Math.sin(ang) * rr); items.push({ p, q, r: (0.028 + 0.035 * Math.sqrt(p.R / Rmax)) * S * q.f, ang, rr, i });
     });
     items.push({ sun: true, q: pr(0, 0, 0), r: 0.075 * S, dep: 0 });
+    { // cúmulos de recursos (sysgen.genZones: los mismos que en la partida): junto a su planeta, en la dirección real de su desplazamiento, o fijos en el cinturón
+      const Z = sys._z || (sys._z = genZones(sys)), itOf = {}; items.forEach(it => { if (it.p) itOf[it.p.n] = it; });
+      for (const z of Z) {
+        const b = sys.bodies[z.anchor], ol = Math.hypot(z.off[0], z.off[1], z.off[2]) || 1; let px, py, pz, zr;
+        if (b.k === 'sun') { const d = Math.hypot(z.off[0], z.off[2]) / 0.06, rr = 0.2 + 0.8 * Math.sqrt(Math.max(0, (d - amin) / (amax - amin + 1e-9))), a = Math.atan2(z.off[2], z.off[0]); px = Math.cos(a) * rr; py = 0; pz = Math.sin(a) * rr; zr = 0.03; } // 0,06 = DIST_SCALE: 'a' de los planetas va sin escalar
+        else { const it = itOf[b.n]; if (!it) continue; const k = it.r / S / it.q.f * 3.4; px = Math.cos(it.ang) * it.rr + z.off[0] / ol * k; py = z.off[1] / ol * k; pz = Math.sin(it.ang) * it.rr + z.off[2] / ol * k; zr = 0.02; } // sigue la órbita de su planeta
+        const q = pr(px, py, pz); items.push({ zone: z, q, r: Math.max(7, zr * S * q.f) });
+      }
+    }
     items.sort((a, b) => a.q.dep - b.q.dep); hit.length = 0;
     for (const it of items) {
       const { q, r } = it;
+      if (it.zone) { // nube de rocas con halo del color de su recurso dominante
+        const z = it.zone, c1 = ZCOL[z.dominant[0].type], c2 = ZCOL[(z.dominant[1] || z.dominant[0]).type], hov = st.hover === z.name; let sd = 31 + z.id * 977; const rn = () => (sd = (sd * 1664525 + 1013904223) >>> 0) / 4294967296;
+        const gl = x.createRadialGradient(q.x, q.y, 0, q.x, q.y, r * 2); gl.addColorStop(0, c1 + '66'); gl.addColorStop(1, c1 + '00'); x.fillStyle = gl; x.beginPath(); x.arc(q.x, q.y, r * 2, 0, 7); x.fill();
+        for (let k = 0; k < 16; k++) { const a = rn() * 6.2832, d = r * Math.sqrt(rn()), s = 1.5 + 3 * rn(); x.fillStyle = rn() < 0.65 ? c1 : c2; x.strokeStyle = '#050f1c'; x.lineWidth = 1.5; x.beginPath(); x.arc(q.x + Math.cos(a) * d, q.y + Math.sin(a) * d * 0.8, s, 0, 7); x.fill(); x.stroke(); }
+        if (hov) { x.strokeStyle = '#fff'; x.lineWidth = 3; x.setLineDash([6, 5]); x.beginPath(); x.arc(q.x, q.y, r + 6, 0, 7); x.stroke(); x.setLineDash([]); }
+        hit.push({ n: z.name, x: q.x, y: q.y, r: r + 6, zone: z }); continue;
+      }
       if (it.sun) {
         const gl = x.createRadialGradient(q.x, q.y, r * 0.5, q.x, q.y, r * 3); gl.addColorStop(0, 'rgba(255,200,90,.55)'); gl.addColorStop(1, 'rgba(255,140,40,0)'); x.fillStyle = gl; x.beginPath(); x.arc(q.x, q.y, r * 3, 0, 7); x.fill();
         for (let k = 0; k < 12; k++) { const a = k / 12 * 6.2832 + t * 0.0004, l = r * (k % 2 ? 1.45 : 1.7); x.strokeStyle = '#ffd86a'; x.lineWidth = 4; x.beginPath(); x.moveTo(q.x + Math.cos(a) * r * 1.15, q.y + Math.sin(a) * r * 1.15 * 0.8); x.lineTo(q.x + Math.cos(a) * l, q.y + Math.sin(a) * l * 0.8); x.stroke(); }
@@ -67,7 +84,7 @@
       }
       hit.push({ n: p.n, x: q.x, y: q.y, r: Math.max(r + 8, 18), p });
     }
-    if (st.hover) { const p = hit.find(k => k.n === st.hover); if (p) { const b = p.p, tx = `${b.label || ''} · radio ${Math.round(b.R).toLocaleString('es')} km`; x.font = `800 ${Math.round(h * 0.024)}px ui-rounded,"Trebuchet MS",sans-serif`; const tw = x.measureText(tx).width + 24, bx = Math.min(w - tw - 8, Math.max(8, p.x - tw / 2)), by = Math.max(8, p.y - p.r - 78); x.fillStyle = '#0d2338'; x.strokeStyle = '#050f1c'; x.lineWidth = 4; x.beginPath(); x.roundRect(bx, by, tw, 34, 10); x.fill(); x.stroke(); x.fillStyle = '#e6f6ff'; x.textAlign = 'left'; x.fillText(tx, bx + 12, by + 23); } }
+    if (st.hover) { const p = hit.find(k => k.n === st.hover); if (p) { const b = p.p, tx = p.zone ? `${p.zone.name} · ${p.zone.dominant.map(d => `${d.type} ${d.budget}`).join(' · ')}` : `${b.label || ''} · radio ${Math.round(b.R).toLocaleString('es')} km`; x.font = `800 ${Math.round(h * 0.024)}px ui-rounded,"Trebuchet MS",sans-serif`; const tw = x.measureText(tx).width + 24, bx = Math.min(w - tw - 8, Math.max(8, p.x - tw / 2)), by = Math.max(8, p.y - p.r - 78); x.fillStyle = '#0d2338'; x.strokeStyle = '#050f1c'; x.lineWidth = 4; x.beginPath(); x.roundRect(bx, by, tw, 34, 10); x.fill(); x.stroke(); x.fillStyle = '#e6f6ff'; x.textAlign = 'left'; x.fillText(tx, bx + 12, by + 23); } }
   }
 
   // ---------- red ----------
@@ -156,11 +173,11 @@
   box.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.id === 'code') { e.preventDefault(); const b = box.querySelector('#joinCode'); if (b) b.click(); } });
   // arrastrar el sistema para girarlo; un clic sin arrastre elige planeta
   const canvasPt = e => { const c = box.querySelector('#pv'), b = c.getBoundingClientRect(); return { x: (e.clientX - b.left) * c.width / b.width, y: (e.clientY - b.top) * c.height / b.height }; };
-  const planetAt = e => { const q = canvasPt(e); let best = null; for (const k of hit) if (Math.hypot(q.x - k.x, q.y - k.y) < k.r) best = k; return best; };
+  const planetAt = (e, zones) => { const q = canvasPt(e); let best = null; for (const k of hit) if (!k.zone === !zones && Math.hypot(q.x - k.x, q.y - k.y) < k.r) best = k; return best; }; // zones: buscar cúmulos (solo para el aviso al pasar el ratón; no se eligen)
   box.addEventListener('pointerdown', e => { if (e.target.id !== 'pv') return; V.drag = { x: e.clientX, y: e.clientY, yaw: V.yaw, tilt: V.tilt, moved: false }; e.target.classList.add('drag'); });
   addEventListener('pointermove', e => {
     if (V.drag) { const dx = e.clientX - V.drag.x, dy = e.clientY - V.drag.y; if (Math.abs(dx) + Math.abs(dy) > 5) V.drag.moved = true; if (V.drag.moved) { V.yaw = V.drag.yaw + dx * 0.008; V.tilt = Math.max(0.15, Math.min(1.5, V.drag.tilt + dy * 0.006)); } return; }
-    if (e.target.id === 'pv') { const p = planetAt(e); st.hover = p ? p.n : null; e.target.style.cursor = p ? 'pointer' : ''; } else st.hover = null;
+    if (e.target.id === 'pv') { const p = planetAt(e), z = p ? null : planetAt(e, true); st.hover = p ? p.n : z ? z.n : null; e.target.style.cursor = p ? 'pointer' : ''; } else st.hover = null;
   });
   addEventListener('pointerup', e => { const d = V.drag; V.drag = null; const c = box.querySelector('#pv'); if (c) c.classList.remove('drag'); if (d && !d.moved && e.target.id === 'pv') { const p = planetAt(e); if (p) pickPlanet(p.n); } });
 

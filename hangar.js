@@ -24,7 +24,7 @@ const card = (iconKey, title, pipsHtml, small, ctl, pv = '') => `<div class="upc
 function applyNow() { const v = validSpec(sel); saveSpec(v); applyLoadout(v, false); refresh(); } // la nave se actualiza al momento
 const atBase = () => typeof BASE === 'undefined' || !BASE.started() || BASE.atBase(); // compras, mejoras, puntos de nivel y cambios de nave: solo en tu base
 const NOB = 'Solo en tu base';
-const lvA = t => { const a = lvlOf(t).a.slice(); if (pvs && pvs.startsWith('lv:') && t === mySpec.t) { const i = +pvs.slice(3); a[i] = Math.min(LV_PTMAX, a[i] + 1); } return a; }; // puntos de nivel (con el que se previsualiza al pasar el ratón por +10)
+const lvA = t => { const a = lvlOf(t).a.slice(); if (pvs && pvs.startsWith('lv:') && t === mySpec.t) { const i = +pvs.slice(3); a[i] = Math.min(LV_PTMAX, a[i] + 1); } return a; }; // puntos de nivel (con el que se previsualiza al pasar el ratón por un «+»)
 
 // ---------- NAVE ----------
 function renderRes() {
@@ -36,17 +36,12 @@ function renderShip() {
   $('shipList').innerHTML = Object.entries(TYPES).map(([id, t]) => { const cost = SHIP_COST[id], unl = !cost || unlocked.has(id); return `<button class="ship hasico ${id === sel.t ? 'on' : ''}" data-t="${id}" data-pv="ship:${id}">${ic(id)}<div><b>${t.name}</b><small>${t.role}</small><small>${t.desc}</small>${unl ? '' : costHtml(cost)}</div></button>`; }).join('');
   $('slots').innerHTML = `<b>Mejoras ${used}/${tot}</b> ${'▮'.repeat(used)}${'▯'.repeat(tot - used)}`;
   $('addons').innerHTML = ADDONS.map((a, i) => { const lv = sel.a[i], cost = lv < a.max ? upgradeCost(i, lv) : null; return card(a.id, a.name, pips(lv, a.max), a.desc, cost ? buyBtn(`data-a="${i}"`, cost) : '<span class="max">MÁXIMO</span>', lv < a.max ? 'add:' + i : ''); }).join('');
-  $('stats').innerHTML = [['Casco', st.hp, 260, '#5dff8a'], ['Escudo', st.sh, 240, '#4db8ff'], ['Plasma', st.plasma, 420, '#3fe6b0'], ['Misiles', st.missiles, 10, '#ffb347'], ['Velocidad (km/s)', st.vmax, 1500, '#ffd23f'], ['Maniobra', Math.round(st.agil * 100), 130, '#f5a8ff'], ['Barra luz (s)', st.warp, 240, '#b48cff']]
-    .map(([n, v, max, c]) => `<span>${n}</span>${bar(v, max, c)}<b>${v}</b>`).join('') + `<span>Daño plasma</span>${bar(st.pdmg, 20, '#3fe6b0')}<b>${st.pdmg}</b><span>Recarga plasma</span>${bar(1 / st.regen, 1.5, '#c8ff5d')}<b>${(1 / st.regen).toFixed(2)}/s</b>`;
-  renderLvl();
+  const L = lvlOf(shown.t), pts = shown.t === mySpec.t ? lvPts(L) : 0, ok = atBase(), need = L.lv < LV_MAX ? lvNeed(L.lv + 1) : 0; // nivel de la nave mostrada; los «+» solo para la nave actual
+  const lvCell = i => i < 0 ? '<span class="lvc"></span>' : `<span class="lvc">${L.a[i] ? `<em>+${L.a[i] * 2} %</em>` : ''}${pts > 0 ? `<span title="${ok ? `+2 % de ${LV_STATS[i].name.toLowerCase()} (1 punto)` : NOB}"><button class="kbp" data-lv="${i}" data-pv="lv:${i}"${ok ? '' : ' disabled'}>+</button></span>` : ''}</span>`; // + naranja: 1 punto = +2 % del valor base
+  $('stats').innerHTML = [['Casco', st.hp, 200, '#5dff8a', 1], ['Escudo', st.sh, 180, '#4db8ff', 2], ['Plasma', st.plasma, 380, '#3fe6b0', 6], ['Misiles', st.missiles, 12, '#ffb347', -1], ['Velocidad (km/s)', st.vmax, 1200, '#ffd23f', 0], ['Maniobra', Math.round(st.agil * 100), 100, '#f5a8ff', 4], ['Barra luz (s)', st.warp, 180, '#b48cff', 7], ['Daño plasma', st.pdmg, 12, '#3fe6b0', 3], ['Recarga plasma', +(1 / st.regen).toFixed(2), 1, '#c8ff5d', 5, '/s']] // máximos de las barras: los del chasis −30 % con todas las mejoras
+    .map(([n, v, max, c, li, u = '']) => `<span>${n}</span>${bar(v, max, c)}<b>${v}${u}</b>${lvCell(li)}`).join('');
+  $('pvlv').innerHTML = `${hexSvg(L.lv, '#ffd23f', 38)}<div><b>Nv ${L.lv}</b><div class="xbar"><i style="width:${need ? Math.min(100, L.xp / need * 100) : 100}%"></i></div><small>${need ? `${L.xp}/${need} XP` : 'NIVEL MÁX.'}</small>${lvPts(L) > 0 ? `<em>${lvPts(L)} punto${lvPts(L) > 1 ? 's' : ''}</em>` : ''}</div>`; // nivel sobre la vista previa
   const key = JSON.stringify(shown); if (key !== PV.key) { PV.key = key; if (PV.obj) PV.pivot.remove(PV.obj); PV.obj = makeShip(shown); PV.obj.showShield = true; setThrust(PV.obj, 500, 0); updateShipFx(PV.obj, 0); PV.pivot.add(PV.obj); PV.cam.position.set(0.05, 0.032, 0.09); PV.cam.lookAt(0, 0, 0); }
-}
-
-function renderLvl() { // nivel de la nave actual: XP, puntos sin gastar y +10 % del valor base por característica (solo en la base)
-  const t = mySpec.t, T = TYPES[t], L = lvlOf(t), pts = lvPts(L), need = L.lv < LV_MAX ? lvNeed(L.lv + 1) : 0, ok = atBase();
-  const fx = [n => `+${Math.round(T.speed * 0.1 * n)} km/s`, n => `+${Math.round(T.hp * 0.1 * n)} casco`, n => `+${Math.round(T.sh * 0.1 * n)} escudo`, n => `+${(0.8 * n).toFixed(1)} daño`, n => `+${10 * n} % giro`, n => `${(1.4 / (1 + 0.1 * n)).toFixed(2)} s/u`];
-  $('lvl').innerHTML = `<div class="lvh">${hexSvg(L.lv, '#ffd23f', 46)}<div><b>NIVEL ${L.lv} · ${T.name.toUpperCase()}</b><div class="xbar"><i style="width:${need ? Math.min(100, L.xp / need * 100) : 100}%"></i></div><small>${need ? `XP ${L.xp} / ${need}` : 'NIVEL MÁXIMO'} · <em>${pts} punto${pts === 1 ? '' : 's'} sin gastar</em></small></div></div>`
-    + `<div class="lvg">${LV_STATS.map((s, i) => `<div class="lvs" data-pv="${L.a[i] < LV_PTMAX ? 'lv:' + i : ''}"><b>${s.name}</b><small>+${L.a[i] * 10} % · ${fx[i](L.a[i])}</small><button class="kb${ok ? '' : ' nb'}" data-lv="${i}" ${ok && pts > 0 && L.a[i] < LV_PTMAX ? '' : 'disabled'}>${!ok ? NOB.toUpperCase() : L.a[i] >= LV_PTMAX ? 'MÁX' : '+10'}</button></div>`).join('')}</div>`;
 }
 
 // ---------- BASE: modelo centrado con sus estadísticas, estilos de torreta y mejoras ----------
@@ -85,7 +80,7 @@ document.addEventListener('mouseover', e => { // vista previa al pasar el ratón
 document.addEventListener('click', e => {
   const tb = e.target.closest('#hg .tabs button'), t = e.target.closest('#hg [data-t]'), eq = e.target.closest('[data-equip]'), sl = e.target.closest('[data-slot]'), lb = e.target.closest('#hg [data-lv]');
   if (tb) return setTab(tb.dataset.tab);
-  if (lb) { // +10: asigna un punto de nivel a esa característica de la nave actual
+  if (lb) { // «+»: asigna un punto de nivel (+2 %) a esa característica de la nave actual
     if (!atBase()) return say(NOB); const L = lvlOf(mySpec.t), i = +lb.dataset.lv; if (lvPts(L) <= 0) return say('Sin puntos: sube de nivel derribando naves'); if (L.a[i] >= LV_PTMAX) return;
     L.a[i]++; saveLv(); pvs = null; sel.t = mySpec.t; sel.a = mySpec.a.slice(); applyNow(); return;
   }

@@ -7,12 +7,13 @@ const MAP = (() => {
   root.innerHTML = '<div class="mh"><b>MAPA DEL SISTEMA</b></div><canvas class="m2"></canvas><div class="mc" hidden></div>'; // el canvas 3D (.m3) se crea al abrir el mapa y se destruye al cerrarlo: así no queda un segundo contexto WebGL en memoria durante la partida
   document.body.append(root);
   const c2 = root.querySelector('.m2'), g = c2.getContext('2d'), card = root.querySelector('.mc');
-  const st = { open: false, drag: null, btn: 0, moved: 0, mx: 0, my: 0, yaw: 0, pitch: -0.6, pos: new THREE.Vector3(), goal: null, keys: {}, sel: null, cardSig: '', hover: [], t: 0 };
+  const RTS_PITCH = -1.0, RTS_YAW = 0, RTS_DIST = 2.2, DIST_MAX = 80; // vista RTS: cámara alta mirando en diagonal (57° sobre el plano), rumbo fijo; distancia inicial cerca de tu nave y hasta ver todo el sistema
+  const st = { open: false, drag: null, btn: 0, moved: 0, mx: 0, my: 0, yaw: RTS_YAW, pitch: RTS_PITCH, pos: new THREE.Vector3(), goal: null, keys: {}, sel: null, cardSig: '', hover: [], t: 0, follow: true, dist: RTS_DIST }; // follow: la cámara sigue a tu nave hasta que la muevas a mano (C la vuelve a fijar)
   let sys = null, c3 = null, pmr = null;
   const K = 1e-6; // km -> unidades del mapa
   const accent = r => { try { return JSON.parse(r.spk).c; } catch { return 0xff6a3c; } };
   const hex = c => '#' + (c >>> 0).toString(16).padStart(6, '0');
-  const others = () => [...remotes.values()].filter(r => r.apos && r.hp > 0);
+  const others = () => [...remotes.values()].filter(r => r.apos && r.hp > 0).concat(typeof BOT !== 'undefined' ? [...BOT.bots.values()].filter(B => !B.dead && B.grp.visible).map(B => ({ apos: B.pos, q: B.q, name: B.name || 'BOT', spk: '{"c":16728112}' })) : []); // en el anfitrión sus bots no son remotos
 
   function ensureRenderer() {
     if (pmr) return;
@@ -24,7 +25,7 @@ const MAP = (() => {
   }
   function open() {
     st.open = true; window.MAPOPEN = true; root.style.display = 'block'; document.exitPointerLock(); ensureRenderer(); initSys(); resize();
-    focusMe(true); st.t = performance.now(); requestAnimationFrame(loop);
+    st.dist = RTS_DIST; focusMe(true); st.t = performance.now(); requestAnimationFrame(loop); // al abrir: vista RTS cercana, centrada y siguiendo a tu nave
   }
   function close() { st.open = false; window.MAPOPEN = false; root.style.display = 'none'; st.keys = {}; st.drag = null; st.sel = null; card.hidden = true; releaseRenderer(); renderer.domElement.requestPointerLock(); }
   function resize() { c2.width = innerWidth; c2.height = innerHeight; if (pmr) { pmr.setSize(innerWidth, innerHeight, false); if (sys) { sys.cam.aspect = innerWidth / innerHeight; sys.cam.updateProjectionMatrix(); } } }
@@ -50,7 +51,6 @@ const MAP = (() => {
     });
     const rockGeo = (() => { const g = new THREE.IcosahedronGeometry(1, 1), p = g.attributes.position; let sd = 7; const rn = () => (sd = (sd * 1664525 + 1013904223) >>> 0) / 4294967296, seen = {}; for (let i = 0; i < p.count; i++) { const key = p.getX(i).toFixed(3) + p.getY(i).toFixed(3) + p.getZ(i).toFixed(3); if (!seen[key]) seen[key] = 0.72 + 0.5 * rn(); const k = seen[key]; p.setXYZ(i, p.getX(i) * k, p.getY(i) * k * 0.85, p.getZ(i) * k); } g.computeVertexNormals(); return g; })(); // roca irregular (vértices desplazados de forma coherente)
     const rockMat = (col = 0xffffff) => new THREE.MeshStandardMaterial({ color: col, flatShading: true, roughness: 0.95, metalness: 0.08, emissive: 0x14100c, emissiveIntensity: 0.35 }), dm = new THREE.Object3D(), tc = new THREE.Color(), grey = new THREE.Color(0x6f6357);
-    { const n = 700, im = new THREE.InstancedMesh(rockGeo, rockMat(), n), r0 = BELT.i * K, r1 = BELT.o * K; for (let i = 0; i < n; i++) { const a = Math.random() * 6.2832, r = r0 + Math.random() * (r1 - r0), sz = 0.008 + 0.022 * Math.pow(Math.random(), 2.2); dm.position.set(Math.cos(a) * r, (Math.random() - 0.5) * 0.25, Math.sin(a) * r); dm.rotation.set(Math.random() * 6, Math.random() * 6, Math.random() * 6); dm.scale.set(sz * (0.7 + Math.random() * 0.8), sz * (0.6 + Math.random() * 0.6), sz * (0.7 + Math.random() * 0.8)); dm.updateMatrix(); im.setMatrixAt(i, dm.matrix); im.setColorAt(i, tc.copy(grey).multiplyScalar(0.7 + Math.random() * 0.5)); } sc.add(im); } // cinturón: rocas sueltas
     const zones = ZT.map(t => { // cada yacimiento es la agrupación REAL de asteroides de su zona (mismas celdas que el juego), teñida con los colores de sus recursos, con un halo suave
       const rocks = fields.zoneRocks(t.zone), d = t.zone.dominant, cA = new THREE.Color(RES[d[0].type]), cB = new THREE.Color(RES[(d[1] || d[0]).type]), g = new THREE.Group(), im = new THREE.InstancedMesh(rockGeo, rockMat(), Math.max(1, rocks.length)); let sd = 31 + t.zi * 977; const rn = () => (sd = (sd * 1664525 + 1013904223) >>> 0) / 4294967296;
       rocks.forEach((q, i) => { const sz = 0.03 + 0.085 * Math.pow(q[3], 0.7); dm.position.set(q[0], q[1] * 0.7, q[2]); dm.rotation.set(rn() * 6, rn() * 6, rn() * 6); dm.scale.set(sz * (0.75 + rn() * 0.6), sz * (0.6 + rn() * 0.5), sz * (0.75 + rn() * 0.6)); dm.updateMatrix(); im.setMatrixAt(i, dm.matrix);
@@ -59,7 +59,9 @@ const MAP = (() => {
       return { t, m: g, im, halo, p: new THREE.Vector3() };
     });
     const mk = (geo, col) => { const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: col })); sc.add(m); return m; };
-    sys = { sc, cam, objs, zones, me: mk(new THREE.ConeGeometry(0.09, 0.3, 10), 0x4db8ff), foes: [], bases: [], mk };
+    const oct = new THREE.OctahedronGeometry(1, 0), neu = new THREE.InstancedMesh(oct, new THREE.MeshBasicMaterial({ color: 0xffffff }), 48), neuO = new THREE.InstancedMesh(oct, new THREE.MeshBasicMaterial({ color: 0xf4fff0, side: THREE.BackSide }), 48); // naves neutrales: rombos (2 draw calls para todas) con contorno claro
+    neu.setColorAt(0, tc.setScalar(1)); neu.count = neuO.count = 0; neu.frustumCulled = neuO.frustumCulled = false; sc.add(neu, neuO);
+    sys = { sc, cam, objs, zones, me: mk(new THREE.ConeGeometry(0.09, 0.3, 10), 0x4db8ff), foes: [], bases: [], mk, neu, neuO, dm, tc };
     resize();
   }
   function dpos(b, out) { // posición en el mapa: planetas y estrella en su sitio real; las lunas se acercan a su planeta para verse
@@ -85,7 +87,11 @@ const MAP = (() => {
     const fw = new THREE.Vector3(-Math.sin(st.yaw), 0, -Math.cos(st.yaw)), pos = target.clone().addScaledVector(fw, -dist).add(new THREE.Vector3(0, dist * 0.55, 0));
     if (inst) { st.pos.copy(pos); lookAt(target, true); st.goal = null; } else st.goal = { pos, look: target.clone() };
   }
-  function focusMe(inst) { const p = new THREE.Vector3(); entityPos(S.pos, p); flyTo(p, 3, inst); }
+  function focusMe() { st.follow = true; st.goal = null; st.yaw = RTS_YAW; st.pitch = RTS_PITCH; } // C: recentra en tu nave y vuelve a seguirla (vista RTS)
+  const vF = new THREE.Vector3();
+  function follow() { // cámara RTS sobre tu nave: alta, mirando en diagonal, a st.dist de ella
+    entityPos(S.pos, vF); const cp = Math.cos(st.pitch); st.pos.set(vF.x + Math.sin(st.yaw) * cp * st.dist, vF.y - Math.sin(st.pitch) * st.dist, vF.z + Math.cos(st.yaw) * cp * st.dist);
+  }
   const angLerp = (a, b, k) => a + Math.atan2(Math.sin(b - a), Math.cos(b - a)) * k;
   function moveCam(dt) {
     const k = st.keys, fast = k.ShiftLeft || k.ShiftRight ? 4 : 1, sp = Math.max(0.4, Math.min(80, Math.abs(st.pos.y) * 1.2 + 0.4)) * fast * dt; // más alto = más rápido
@@ -93,7 +99,7 @@ const MAP = (() => {
     if (k.KeyW || k.ArrowUp) mv.x += fx, mv.z += fz; if (k.KeyS || k.ArrowDown) mv.x -= fx, mv.z -= fz;
     if (k.KeyD || k.ArrowRight) mv.x -= fz, mv.z += fx; if (k.KeyA || k.ArrowLeft) mv.x += fz, mv.z -= fx;
     if (k.KeyE) mv.y += 1; if (k.KeyQ) mv.y -= 1;
-    if (mv.lengthSq()) { st.goal = null; st.pos.addScaledVector(mv.normalize(), sp); }
+    if (mv.lengthSq()) { st.goal = null; st.follow = false; st.pos.addScaledVector(mv.normalize(), sp); } // mover a mano: modo libre
     if (st.goal) { const a = 1 - Math.exp(-dt * 5), la = lookAt(st.goal.look); st.pos.lerp(st.goal.pos, a); st.yaw = angLerp(st.yaw, la.yaw, a); st.pitch += (la.pitch - st.pitch) * a; if (st.pos.distanceTo(st.goal.pos) < 1e-3) st.goal = null; }
     if (st.pos.length() > 600) st.pos.setLength(600);
   }
@@ -116,6 +122,7 @@ const MAP = (() => {
   }
   function select(p) { // p: punto del mapa bajo el cursor
     if (!p) { st.sel = null; renderCard(); return; }
+    if (p.kind !== 'tú') st.follow = false;
     if (p.kind === 'zona') { const o = sys.zones[p.ref]; flyTo(o.p.clone(), Math.max(0.8, zoneR(o.t.zone) * 8)); st.sel = { kind: 'zone', i: p.ref }; }
     else if (p.body) { const o = sys.objs[p.ref]; flyTo(o.p.clone(), Math.max(1.4, dispR(o.b) * 5.5)); st.sel = { kind: 'body', i: p.ref }; }
     else if (p.kind === 'tú') { focusMe(false); st.sel = null; }
@@ -123,7 +130,7 @@ const MAP = (() => {
   }
 
   function drawSys(dt) {
-    ensureRenderer(); initSys(); moveCam(dt); const W = c2.width, H = c2.height, cam = sys.cam, now = performance.now();
+    ensureRenderer(); initSys(); moveCam(dt); if (st.follow) follow(); const W = c2.width, H = c2.height, cam = sys.cam, now = performance.now();
     cam.position.copy(st.pos); cam.rotation.set(st.pitch, st.yaw, 0);
     for (const o of sys.objs) { dpos(o.b, o.p); o.m.position.copy(o.p); o.m.rotation.y = o.b.k !== 'sun' ? now / 9000 + o.b.i : now / 30000; if (o.orbit && o.b.parent) o.orbit.position.set(o.b.parent.pos[0] * K, 0, o.b.parent.pos[2] * K); }
     const selZ = tgtObj() && tgtObj().zone ? tgtObj().zi : -1;
@@ -134,6 +141,17 @@ const MAP = (() => {
     sys.foes.forEach((m, i) => { m.visible = i < os.length; if (i < os.length) { entityPos(os[i].apos, m.position); m.material.color.setHex(accent(os[i])); m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, -1).applyQuaternion(os[i].q)); } });
     while (sys.bases.length < BASES.length) sys.bases.push(sys.mk(new THREE.BoxGeometry(0.06, 0.06, 0.06), 0xffffff));
     sys.bases.forEach((m, i) => { m.visible = i < BASES.length; if (i < BASES.length) { const bs = BASES[i], b = bodies.find(q => q.n === bs.body); if (!b) { m.visible = false; return; } dpos(b, m.position); m.position.add(new THREE.Vector3(Math.cos(bs.lat) * Math.cos(bs.lon), Math.sin(bs.lat), Math.cos(bs.lat) * Math.sin(bs.lon)).multiplyScalar(dispR(b) * 1.04)); } });
+    const nl = typeof NEU !== 'undefined' ? [...NEU.E.values()].filter(n => n.w) : [], grs = new Map(), ngl = []; for (const n of nl) { if (!grs.has(n.g)) grs.set(n.g, []); grs.get(n.g).push(n); } // naves neutrales por grupo (estado 'nv' del servidor, o la simulación si soy el anfitrión)
+    { let ni = 0; const { neu, neuO, dm, tc } = sys;
+      for (const [gi, ms] of grs) {
+        const c = [0, 0, 0]; for (const n of ms) for (let k = 0; k < 3; k++) c[k] += n.w[k] / ms.length;
+        const cp = entityPos(c, new THREE.Vector3()), hos = ms.some(n => n.h), pul = 0.5 + 0.5 * Math.sin(now / 160), k = 0.035 * Math.max(1, cp.distanceTo(st.pos) * 0.04) * (hos ? 1 + 0.3 * pul : 1); // tamaño legible a cualquier zoom; las hostiles laten
+        if (hos) tc.setRGB(1, 0.15 + 0.3 * pul, 0.12); else tc.setHSL(0.2 + (gi * 0.037) % 0.08, 0.95, 0.58); // tranquilas: verde amarillento (un matiz por grupo) · hostiles: rojo pulsante
+        ms.forEach((n, i) => { if (ni >= 48) return; const a = i / ms.length * 6.2832, off = ms.length > 1 ? k * 1.8 : 0; dm.position.set(cp.x + Math.cos(a) * off, cp.y + k, cp.z + Math.sin(a) * off); dm.rotation.set(0, now / 700, 0); dm.scale.set(k, k * 1.4, k); dm.updateMatrix(); neu.setMatrixAt(ni, dm.matrix); neu.setColorAt(ni, tc); dm.scale.multiplyScalar(1.45); dm.updateMatrix(); neuO.setMatrixAt(ni, dm.matrix); ni++; });
+        ngl.push({ p: cp, ms, hos, col: '#' + tc.getHexString(), k });
+      }
+      neu.count = neuO.count = ni; neu.instanceMatrix.needsUpdate = neuO.instanceMatrix.needsUpdate = true; if (neu.instanceColor) neu.instanceColor.needsUpdate = true;
+    }
     pmr.render(sys.sc, cam); g.clearRect(0, 0, W, H);
     const pts = []; let hover = null, hd = 22; g.textAlign = 'left';
     const proj = v => { vTmp.copy(v).project(cam); if (vTmp.z > 1 || Math.abs(vTmp.x) > 1.05 || Math.abs(vTmp.y) > 1.05) return null; return [(vTmp.x * 0.5 + 0.5) * W, (-vTmp.y * 0.5 + 0.5) * H]; };
@@ -144,6 +162,7 @@ const MAP = (() => {
       const p = lab(top, o.t.n + (empty ? ' · agotada' : ''), o.t.zi === selZ ? '#ffd23f' : empty ? '#8899aa' : RES[res[0].type], 'zona', o.t.pos, o.t.zi === selZ, { ref: i, res }); if (!p) return;
       let cx = p.x + 10; g.font = `bold 11px ${MONO}`; for (const it of res) { const im = icoImg(it.type); g.globalAlpha = it.n ? 1 : 0.35; if (im && im.complete && im.naturalWidth) g.drawImage(im, cx, p.y + 9, 14, 14); g.fillStyle = '#fff'; g.strokeText(String(it.n), cx + 16, p.y + 20); g.fillText(String(it.n), cx + 16, p.y + 20); cx += 26 + 7 * String(it.n).length; } g.globalAlpha = 1;
     });
+    for (const q of ngl) { if (q.p.distanceTo(st.pos) > 9) continue; const lvs = q.ms.map(n => n.lv), l1 = Math.min(...lvs), l2 = Math.max(...lvs); lab(q.p.clone().add(new THREE.Vector3(0, q.k * 3.2, 0)), `${q.hos ? 'HOSTILES' : 'Neutrales'} · Nv ${l1 === l2 ? l1 : l1 + '-' + l2} · ${q.ms.length} naves`, q.hos ? '#ff5a4a' : q.col, 'grupo de naves neutrales', q.ms[0].w, q.hos); } // nivel al acercar el zoom
     lab(sys.me.position.clone().add(new THREE.Vector3(0, 0.25, 0)), myName + ' (tú)', '#4db8ff', 'tú', S.pos, true);
     os.forEach((r, i) => lab(sys.foes[i].position.clone().add(new THREE.Vector3(0, 0.22, 0)), r.name || 'Piloto', hex(accent(r)), 'jugador', r.apos, true));
     for (const p of pts) { const dd = Math.hypot(p.x - st.mx, p.y - st.my); if (dd < hd) { hd = dd; hover = p; } }
@@ -152,8 +171,8 @@ const MAP = (() => {
       g.fillStyle = 'rgba(0,10,20,0.85)'; g.fillRect(hover.x + 14, hover.y + 26, 300, 48); g.fillStyle = '#fff'; g.font = `bold 12px ${MONO}`; g.fillText(`${hover.n} · ${hover.kind}`, hover.x + 20, hover.y + 42); g.font = `11px ${MONO}`; g.fillStyle = '#9fd4ee'; g.fillText(hover.body || hover.kind === 'zona' ? l2 + ' · clic: ficha' : l2, hover.x + 20, hover.y + 60);
     }
     const nz = ZT.filter(t => zoneRes(t.zi).every(it => !it.n)).length;
-    g.textAlign = 'right'; g.font = `11px ${MONO}`; g.fillStyle = '#7fb6d4'; g.fillText(`Cuerpos: ${bodies.length - 1} · Zonas de recursos: ${ZT.length}${nz ? ` (${nz} agotadas)` : ''} · Jugadores aparte de ti: ${os.length} · Hangares: ${BASES.length}`, W - 24, 30);
-    g.textAlign = 'center'; g.fillText('Arrastrar: desplazarse · Clic der. + arrastrar: mirar · WASD/flechas: mover · E/Q: subir/bajar · Rueda: acercar al cursor · Shift: rápido · Clic: ficha · C: centrar en ti · M / Esc: cerrar', W / 2, H - 18);
+    g.textAlign = 'right'; g.font = `11px ${MONO}`; g.fillStyle = '#7fb6d4'; g.fillText(`Cuerpos: ${bodies.length - 1} · Zonas de recursos: ${ZT.length}${nz ? ` (${nz} agotadas)` : ''} · Jugadores aparte de ti: ${os.length} · Hangares: ${BASES.length} · Neutrales: ${nl.length}${nl.some(n => n.h) ? ` (${nl.filter(n => n.h).length} hostiles)` : ''}`, W - 24, 30);
+    g.textAlign = 'center'; g.fillText(`${st.follow ? 'SIGUIENDO TU NAVE · Rueda: acercar/alejar · ' : 'Rueda: acercar al cursor · '}Arrastrar: desplazarse · Clic der. + arrastrar: mirar · WASD/flechas: mover · E/Q: subir/bajar · Shift: rápido · Clic: ficha · C: centrar y seguir tu nave · M / Esc: cerrar`, W / 2, H - 18);
     st.hover = pts; if (st.sel) renderCard();
   }
   function loop() { if (!st.open) return; requestAnimationFrame(loop); const now = performance.now(), dt = Math.min(0.1, (now - st.t) / 1000); st.t = now; drawSys(dt); }
@@ -163,7 +182,7 @@ const MAP = (() => {
     if (e.target && e.target.tagName === 'INPUT') return;
     if (e.code === 'KeyM' && !e.repeat) { if (!st.open && ov.style.display !== 'none') return; e.preventDefault(); e.stopImmediatePropagation(); st.open ? close() : open(); return; }
     if (!st.open) return; e.stopImmediatePropagation(); if (e.code === 'Tab' || e.code.startsWith('Arrow')) e.preventDefault();
-    if (e.code === 'Escape') close(); else if (e.code === 'KeyC') focusMe(false); else st.keys[e.code] = true;
+    if (e.code === 'Escape') close(); else if (e.code === 'KeyC') focusMe(); else st.keys[e.code] = true;
   }, true);
   addEventListener('keyup', e => { st.keys[e.code] = false; }, true);
   root.addEventListener('click', e => {
@@ -174,6 +193,7 @@ const MAP = (() => {
   });
   root.addEventListener('wheel', e => { // acercar/alejar hacia el punto bajo el cursor
     e.preventDefault(); if (!sys) return; st.goal = null;
+    if (st.follow) { st.dist = Math.max(0.35, Math.min(DIST_MAX, st.dist * (e.deltaY < 0 ? 0.85 : 1 / 0.85))); return; } // siguiendo tu nave: acerca/aleja sobre ella (hasta ver todo el sistema)
     const ray = new THREE.Raycaster(); ray.setFromCamera({ x: e.clientX / innerWidth * 2 - 1, y: -(e.clientY / innerHeight) * 2 + 1 }, sys.cam);
     const dir = ray.ray.direction, hit = dir.y * st.pos.y < 0 ? -st.pos.y / dir.y : Math.abs(st.pos.y) + 2, step = Math.min(hit, 300) * 0.18 * (e.deltaY < 0 ? 1 : -1);
     st.pos.addScaledVector(dir, step); if (st.pos.length() > 600) st.pos.setLength(600);
@@ -182,7 +202,7 @@ const MAP = (() => {
   addEventListener('mouseup', () => st.drag = null);
   addEventListener('mousemove', e => {
     if (!st.open) return; st.mx = e.clientX; st.my = e.clientY; if (!st.drag) return;
-    const dx = e.clientX - st.drag[0], dy = e.clientY - st.drag[1]; st.drag = [e.clientX, e.clientY]; st.moved += Math.abs(dx) + Math.abs(dy); if (st.moved < 5) return; st.goal = null;
+    const dx = e.clientX - st.drag[0], dy = e.clientY - st.drag[1]; st.drag = [e.clientX, e.clientY]; st.moved += Math.abs(dx) + Math.abs(dy); if (st.moved < 5) return; st.goal = null; st.follow = false;
     if (st.btn === 2) { st.yaw -= dx * 0.005; st.pitch = Math.max(-1.55, Math.min(1.55, st.pitch - dy * 0.005)); return; } // mirar
     const k = (Math.abs(st.pos.y) + 0.5) * 0.0022, fx = -Math.sin(st.yaw), fz = -Math.cos(st.yaw); // desplazarse: se arrastra el plano del sistema
     st.pos.x += (-dx * -fz + dy * fx) * k; st.pos.z += (-dx * fx + dy * fz) * k;

@@ -5,11 +5,13 @@ const bolt = new THREE.CylinderGeometry(1, 1, 1, 6).rotateX(PI / 2), ball = new 
 const rndOf = seed => { let a = seed >>> 0; return () => { a = a + 0x6D2B79F5 >>> 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; };
 
 const TYPES = {
-  saeta:  { name: 'Saeta',  role: 'Interceptor', hp: 70,  sh: 60,  plasma: 160, missiles: 2, slots: 3, size: 0.9, agil: 1.3, speed: 1300, warp: 45, desc: 'Fuselaje de aguja, canards y cola en V. Ligera y frágil.' },
-  halcon: { name: 'Halcón', role: 'Caza',        hp: 100, sh: 80,  plasma: 200, missiles: 2, slots: 4, size: 1.0, agil: 1.0, speed: 1100, warp: 60, desc: 'Alas en delta y doble motor. Equilibrado en todo.' },
-  coloso: { name: 'Coloso', role: 'Cañonera',    hp: 160, sh: 100, plasma: 260, missiles: 4, slots: 5, size: 1.3, agil: 0.65, speed: 750, warp: 90, desc: 'Casco grueso, torreta dorsal y triple motor.' },
-  nomada: { name: 'Nómada', role: 'Explorador',  hp: 80,  sh: 120, plasma: 120, missiles: 2, slots: 4, size: 1.1, agil: 0.85, speed: 950, warp: 120, desc: 'Plato sensor, cúpula panorámica y paneles solares.' },
+  // estadísticas del chasis un 30 % por debajo de las originales (casco, escudo, plasma, misiles redondeados, maniobra, velocidad y barra luz); ver también CH_DMG y CH_REGEN
+  saeta:  { name: 'Saeta',  role: 'Interceptor', hp: 49,  sh: 42, plasma: 112, missiles: 1, slots: 3, size: 0.9, agil: 0.91, speed: 910, warp: 32, desc: 'Fuselaje de aguja, canards y cola en V. Ligera y frágil.' },
+  halcon: { name: 'Halcón', role: 'Caza',        hp: 70,  sh: 56, plasma: 140, missiles: 1, slots: 4, size: 1.0, agil: 0.7, speed: 770, warp: 42, desc: 'Alas en delta y doble motor. Equilibrado en todo.' },
+  coloso: { name: 'Coloso', role: 'Cañonera',    hp: 112, sh: 70, plasma: 182, missiles: 3, slots: 5, size: 1.3, agil: 0.46, speed: 525, warp: 63, desc: 'Casco grueso, torreta dorsal y triple motor.' },
+  nomada: { name: 'Nómada', role: 'Explorador',  hp: 56,  sh: 84, plasma: 84,  missiles: 1, slots: 4, size: 1.1, agil: 0.6, speed: 665, warp: 84, desc: 'Plato sensor, cúpula panorámica y paneles solares.' },
 };
+const CH_DMG = 5.6, CH_REGEN = 2.0, LV_K = 0.02; // chasis −30 %: daño de plasma base 8 → 5,6 y recarga 1 unidad cada 1,4 s → cada 2 s · LV_K: cada punto de nivel = +2 % del valor base del chasis
 const ADDONS = [
   { id: 'armor',    name: 'Blindaje', max: 2, desc: '+30 casco · placas de armadura sobre el fuselaje' },
   { id: 'shield',   name: 'Escudo',   max: 2, desc: '+40 escudo · campo resplandeciente al frente' },
@@ -25,15 +27,15 @@ function validSpec(s) {
   const a = ADDONS.map((d, i) => Math.max(0, Math.min(d.max, Math.round(Number(s && s.a && s.a[i]) || 0))));
   return { t, a, c: Number.isFinite(s && s.c) ? (s.c >>> 0) & 0xffffff : 0x4db8ff };
 }
-function statsOf(spec, lvA) { // lvA: puntos de nivel asignados a cada característica de LV_STATS (cada punto = +10 % del valor BASE del chasis)
-  const T = TYPES[spec.t], [ar, sh, pl, mi, en, am = 0] = spec.a, [bv = 0, bh = 0, bs = 0, bd = 0, ba = 0, br = 0] = lvA || [];
-  return { hp: T.hp + 30 * ar + Math.round(T.hp * 0.1 * bh), sh: T.sh + 40 * sh + Math.round(T.sh * 0.1 * bs), plasma: T.plasma + 60 * am, pdmg: Math.round((8 + 2 * pl + 0.8 * bd) * 10) / 10, missiles: T.missiles + 2 * mi + am, flameMul: 1 + 0.3 * en, pitch: 1 - 0.1 * en, agil: Math.round(T.agil * (1 + 0.1 * ba) * 100) / 100, vmax: Math.min(1500, Math.round(T.speed * (1 + 0.1 * en))) + Math.round(T.speed * 0.1 * bv), warp: Math.round(T.warp * (1 + 0.5 * en)), regen: 1.4 / (1 + 0.1 * br) }; // regen: segundos por unidad de plasma recargada
+function statsOf(spec, lvA) { // lvA: puntos de nivel asignados a cada característica de LV_STATS (cada punto = +2 % del valor BASE del chasis)
+  const T = TYPES[spec.t], [ar, sh, pl, mi, en, am = 0] = spec.a, [bv = 0, bh = 0, bs = 0, bd = 0, ba = 0, br = 0, bp = 0, bw = 0] = lvA || [];
+  return { hp: T.hp + 30 * ar + Math.round(T.hp * LV_K * bh), sh: T.sh + 40 * sh + Math.round(T.sh * LV_K * bs), plasma: T.plasma + 60 * am + Math.round(T.plasma * LV_K * bp), pdmg: Math.round((CH_DMG * (1 + LV_K * bd) + 2 * pl) * 10) / 10, missiles: T.missiles + 2 * mi + am, flameMul: 1 + 0.3 * en, pitch: 1 - 0.1 * en, agil: Math.round(T.agil * (1 + LV_K * ba) * 100) / 100, vmax: Math.min(1500, Math.round(T.speed * (1 + 0.1 * en))) + Math.round(T.speed * LV_K * bv), warp: Math.round(T.warp * (1 + 0.5 * en)) + Math.round(T.warp * LV_K * bw), regen: CH_REGEN / (1 + LV_K * br) }; // regen: segundos por unidad de plasma recargada
 }
 // ---------- niveles por nave: cada chasis tiene su propio nivel (0-20) y experiencia, independientes ----------
 // XP para pasar del nivel n-1 al n: need(n) = 10 + 15(n-1) + 5(n-1)(n-2)/2 → 10, 25, 45, 70, 100, 135… (la barra muestra la XP dentro del nivel actual)
-// Cada nivel da 1 punto de mejora; cada punto suma +10 % del valor base del chasis en la característica elegida (tope: 10 puntos = +100 % por característica).
-const LV_MAX = 20, LV_PTMAX = 10;
-const LV_STATS = [{ id: 'vel', name: 'Velocidad' }, { id: 'hp', name: 'Casco' }, { id: 'sh', name: 'Escudo' }, { id: 'dmg', name: 'Daño' }, { id: 'agil', name: 'Maniobra' }, { id: 'rec', name: 'Recarga' }];
+// Cada nivel da 1 punto de mejora; cada punto suma +2 % del valor base del chasis en la característica elegida (se pueden poner los 20 puntos en la misma).
+const LV_MAX = 20, LV_PTMAX = LV_MAX;
+const LV_STATS = [{ id: 'vel', name: 'Velocidad' }, { id: 'hp', name: 'Casco' }, { id: 'sh', name: 'Escudo' }, { id: 'dmg', name: 'Daño' }, { id: 'agil', name: 'Maniobra' }, { id: 'rec', name: 'Recarga' }, { id: 'plasma', name: 'Munición' }, { id: 'warp', name: 'Barra luz' }]; // el orden es el de los puntos guardados (no cambiar)
 const lvNeed = n => 10 + 15 * (n - 1) + 5 * (n - 1) * (n - 2) / 2;
 const LVL = (() => { try { return JSON.parse(localStorage.getItem('shipLv')) || {}; } catch { return {}; } })(); // { tipo: { lv, xp, a: [6 puntos asignados] } } durante la partida
 function lvlOf(t) { const o = LVL[t] || (LVL[t] = {}); o.lv = Math.max(0, Math.min(LV_MAX, o.lv | 0)); o.xp = Math.max(0, o.xp | 0); o.a = LV_STATS.map((_, i) => Math.max(0, Math.min(LV_PTMAX, (o.a && o.a[i]) | 0))); return o; }

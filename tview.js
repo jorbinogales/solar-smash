@@ -14,7 +14,8 @@ const TV = (() => {
     const o = new THREE.Group(); o.add(h); h.scale.setScalar(k); h.position.copy(c.multiplyScalar(-k)); return o;
   };
   function build(a) { // modelo de vista previa según el tipo de objetivo
-    if (a.type === 'p') { const r = remotes.get(a.t.id); return ship({ spec: r.grp && r.spk ? JSON.parse(r.spk) : { t: 'halcon', a: [0, 0, 0, 0, 0], c: 0xff6a3c } }); }
+    if (a.type === 'p') { const k = pspk(a); return ship({ spec: k ? JSON.parse(k) : { t: 'halcon', a: [0, 0, 0, 0, 0], c: 0xff6a3c } }); }
+    if (a.type === 'z') { const g = new THREE.Group(), rocks = fields.zoneRocks(a.z.zone).slice(0, 60); for (const q of rocks) { const m = new THREE.Mesh(fields.geos[q[4]], fields.mats.rock); m.position.set(q[0], q[1] * 0.7, q[2]); m.scale.setScalar(0.03 + 0.09 * Math.pow(q[3], 0.7)); g.add(m); } return fitted(g); } // cúmulo: sus asteroides reales (mismas celdas que el juego)
     if (a.type === 'n') return ship({ spec: { t: a.t.st, a: [0, 0, 0, 0, 0, 0], c: 0x9dff6a }, hull: 0x6f7b6c }); // nave neutral: mismos colores que en el mundo (neutral.js)
     if (a.type === 'w') { const w = wrecks[a.t.id]; return ship({ spec: { t: Object.keys(TYPES)[w.i % 4], a: [0, 0, 0, 0, 0], c: 0x333333 }, hull: 0x4a4f55 }); }
     if (a.type === 'h') { const g = new THREE.Group(), st = new THREE.MeshStandardMaterial({ color: 0x9a9da3, roughness: 0.9 }), dk = new THREE.MeshStandardMaterial({ color: 0x4a4f57, roughness: 0.6 }); g.add(new THREE.Mesh(new THREE.CylinderGeometry(1, 1.04, 0.12, 32), st)); const bl = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.25, 0.22), dk); bl.position.set(0, 0.18, -0.7); g.add(bl); for (const [x, z] of [[.62, .62], [-.62, .62], [.62, -.62], [-.62, -.62]]) { const t = new THREE.Group(), c = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.07, 0.4, 8), dk); c.position.y = 0.26; const hd = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.08, 0.16), dk); hd.position.y = 0.5; t.add(c, hd); t.position.set(x, 0, z); g.add(t); } return fitted(g); }
@@ -25,10 +26,12 @@ const TV = (() => {
     if (ATMO[b.n]) g.add(new THREE.Mesh(new THREE.SphereGeometry(1.05, 32, 20), new THREE.MeshBasicMaterial({ color: ATMO[b.n].c, transparent: true, opacity: 0.2, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.BackSide })));
     return fitted(g);
   }
-  const key = a => a.type === 'h' ? 'h' : a.type === 'n' ? 'n:' + a.t.st : a.type === 'p' ? 'p:' + (remotes.get(a.t.id) || {}).spk : a.type === 'w' ? 'w:' + a.t.id : a.type === 'r' ? 'r:' + a.ob.m : 'b:' + a.b.n;
+  const pspk = a => { const r = remotes.get(a.t.id); return r && r.spk ? r.spk : a.t.sp ? JSON.stringify(a.t.sp) : ''; }; // modelo de otra nave: la del remoto o, en el anfitrión, la de su bot
+  const key = a => a.type === 'h' ? 'h' : a.type === 'n' ? 'n:' + a.t.st : a.type === 'z' ? 'z:' + a.z.zi : a.type === 'p' ? 'p:' + pspk(a) : a.type === 'w' ? 'w:' + a.t.id : a.type === 'r' ? 'r:' + a.ob.m : 'b:' + a.b.n;
   const info = a => {
     if (a.type === 'n') return [`<b>${TYPES[a.t.st].name} · Nv ${a.t.lv}</b> · nave neutral`, `${a.t.hostile ? 'HOSTIL' : 'NEUTRAL'} · ESC ${Math.round(a.t.sh || 0)}% · CASCO ${Math.round(a.t.hp)}% · ${fD(a.dist)}`, a.t.hostile ? '#ff5a4a' : '#c8ff5d'];
-    if (a.type === 'p') { const r = remotes.get(a.t.id), sp = r && r.spk ? JSON.parse(r.spk) : null; return [`<b>${a.t.name}</b> · ${sp ? TYPES[sp.t].name : 'nave'} · Nv ${a.t.lv || 0}`, `ESC ${Math.round(a.t.sh || 0)}% · CASCO ${Math.round(a.t.hp)}% · ${fD(a.dist)}`, '#ff6a3c']; }
+    if (a.type === 'z') { const res = zoneRes(a.z.zi).filter(it => it.n > 0); return [`<b>${a.z.n}</b> · cúmulo`, `${res.length ? res.map(it => `${it.type} ${it.n}`).join(' · ') : 'agotado'} · ${fD(a.dist)} al borde · G: rumbo · Shift: salto`, '#ffd23f']; }
+    if (a.type === 'p') { const k = pspk(a), sp = k ? JSON.parse(k) : null; return [`<b>${a.t.name}</b> · ${sp ? TYPES[sp.t].name : 'nave'} · Nv ${a.t.lv || 0}`, `ESC ${Math.round(a.t.sh || 0)}% · CASCO ${Math.round(a.t.hp)}% · ${fD(a.dist)}`, '#ff6a3c']; }
     if (a.type === 'h') return [`<b>Hangar de ${a.t.name}</b>`, `ESC ${Math.round(a.t.sh || 0)}% · VIDA ${Math.round(a.t.hp)}% · ${fD(a.dist)}`, '#ff6a3c'];
     if (a.type === 'w') return ['<b>Casco a la deriva</b> · nave sin tripulación', `destrúyelo: munición y recursos · ${fD(a.dist)}`, '#5dff8a'];
     if (a.type === 'r') { const r = astInfo(a.ob), left = astLeft(a.ob), txt = resText(left) || (r.list.length ? 'zona agotada' : 'sin recursos'), hp = Math.max(0, Math.round(r.hp - ((AST.get(a.ob.id) || {}).dmg || 0))); return a.ob.m < fields.rockCount ? [`<b>Asteroide ${ROCK[a.ob.m]}</b> · ${txt}`, `radio ≈ ${a.ob.vis.toFixed(1)} km · VIDA ${hp}/${r.hp} · ${fD(a.dist)}`, '#ffb347'] : [`<b>Basura espacial</b> · ${DEB[a.ob.m - fields.rockCount]} · ${txt}`, `tamaño ≈ ${(a.ob.vis * 1000).toFixed(0)} m · VIDA ${hp}/${r.hp} · ${fD(a.dist)}`, '#ffb347']; }

@@ -5,7 +5,7 @@ const DIST_SCALE = 0.06, C = 299792.458, AU = 149597870.7 * DIST_SCALE, DAY = 86
 const SYS = genSystem(SEED, NPL); Object.assign(SURF, SYS.surf); Object.assign(ATMO, SYS.atmo); const DATA = SYS.bodies, BELT = SYS.belt;
 // Zonas de recursos (sysgen.genZones, las mismas que calcula el servidor): solo sus asteroides dan recursos y lo que queda (ZR) lo dicta el servidor en cada tick
 const ZONES = genZones(SYS); let ZR = ZONES.map(z => z.dominant.map(d => d.budget)), LOOTED = new Set(); // LOOTED: cascos ya saqueados en la sala
-const ZT = ZONES.map((z, i) => ({ zi: i, zone: z, n: z.name, R: z.radius, pos: [0, 0, 0] })); // destinos de zona (Tab, mapa, salto luz); pos se actualiza cada cuadro
+const ZT = ZONES.map((z, i) => ({ zi: i, zone: z, n: z.name, R: z.radius, pos: [0, 0, 0] })); // destinos de zona (N, mapa, salto luz); pos se actualiza cada cuadro
 const zoneLeft = (zi, type) => { const k = ZONES[zi] ? ZONES[zi].dominant.findIndex(d => d.type === type) : -1; return k < 0 || !ZR[zi] ? 0 : ZR[zi][k] || 0; };
 const zoneRes = zi => ZONES[zi].dominant.map((d, k) => ({ type: d.type, n: (ZR[zi] && ZR[zi][k]) || 0 })); // [{type, n}] con lo que queda
 const ZONE_ARR = 3000; // el salto luz hacia una zona se corta a esta distancia de su borde
@@ -74,15 +74,17 @@ function updateBodies() {
   }
   for (const t of ZT) { const p = bodies[t.zone.anchor].pos, f = t.zone.off; t.pos = [p[0] + f[0], p[1] + f[1], p[2] + f[2]]; } // las zonas siguen a su planeta
 }
-const tgtObj = () => S.tgt < bodies.length ? bodies[S.tgt] : ZT[S.tgt - bodies.length]; // destino seleccionado con Tab o desde el mapa: cuerpo o zona
-let lastTargets = []; const TAB_R = 60000; // objetivos del último cuadro (para Tab) y alcance de Tab para naves (km)
+const tgtObj = () => S.tgt < bodies.length ? bodies[S.tgt] : ZT[S.tgt - bodies.length]; // destino seleccionado con N o desde el mapa: cuerpo o zona
+const lockObj = () => S.lockB == null ? null : S.lockB < bodies.length ? bodies[S.lockB] : ZT[S.lockB - bodies.length]; // rumbo fijado con G: cuerpo o cúmulo (mismo índice que S.tgt)
+let lastTargets = []; const SEL_R = 60000; // objetivos del último cuadro (para B) y alcance de B para elegir naves (km)
 const shipTag = t => `${TYPES[t.st] ? TYPES[t.st].name : 'Nave'} · Nv ${t.lv || 0}`; // «Halcón · Nv 7»
-function tabNext() { // Tab: primero las naves enemigas o neutrales visibles y cercanas (de la más cercana a la más lejana); tras la última, el siguiente planeta o zona
-  const ships = lastTargets.filter(t => (t.kind === 'p' || t.kind === 'n') && t.dist < TAB_R && !losBlocked(t)).sort((a, b) => a.dist - b.dist).slice(0, 8);
+function nextShip() { // B: siguiente nave enemiga o neutral visible y cercana (de la más cercana a la más lejana); tras la última, ninguna. Su nave y nivel se ven en el recuadro del objetivo
+  const ships = lastTargets.filter(t => (t.kind === 'p' || t.kind === 'n') && t.dist < SEL_R && !losBlocked(t)).sort((a, b) => a.dist - b.dist).slice(0, 8);
   const i = S.tship ? ships.findIndex(t => t.kind === S.tship.kind && t.id === S.tship.id) : -1;
   if (i + 1 < ships.length) { const t = ships[i + 1]; S.tship = { kind: t.kind, id: t.id }; return say(`Objetivo: ${t.kind === 'n' ? 'nave neutral' : t.name} · ${shipTag(t)}`); }
-  S.tship = null; S.tgt = (S.tgt + 1) % (bodies.length + ZT.length); const t = tgtObj(); if (t.zone) say(`Destino: ${t.n} · Shift: salto luz`);
+  S.tship = null; say(ships.length ? 'Sin nave elegida' : 'No hay naves cerca');
 }
+function nextDest() { S.tgt = (S.tgt + 1) % (bodies.length + ZT.length); const t = tgtObj(); say(`Destino: ${t.n} · Shift: salto luz`); } // N: siguiente destino (planetas y zonas de recursos)
 
 // ---------- nave ----------
 let mySpec = loadSpec(), ship = makeShip(mySpec); scene.add(ship); // modelo según el hangar (ships.js)
@@ -111,11 +113,13 @@ function fitBox(box, W) { if (!box) return; box.style.zoom = 1; box.style.width 
 const keys = {}; let mdx = 0, mdy = 0;
 addEventListener('keydown', e => {
   keys[e.code] = true;
-  if (e.code === 'Tab') { e.preventDefault(); tabNext(); } // Tab: naves cercanas y luego planetas y zonas de recursos
+  if (e.code === 'Tab') { e.preventDefault(); if (!e.repeat) scoreboard(true); } // Tab mantenida: estadísticas de los jugadores
+  if (e.code === 'KeyN' && !e.repeat) nextDest();
+  if (e.code === 'KeyB' && !e.repeat) nextShip();
   if (e.code === 'KeyX') { S.v = 0; S.auto = false; }
-  if (e.code === 'KeyG' && !S.foot.on && !S.warp.on && P.hp > 0) { // G: fija el rumbo del salto luz hacia el planeta bajo la mira (otra vez: libera)
+  if (e.code === 'KeyG' && !S.foot.on && !S.warp.on && P.hp > 0) { // G: fija el rumbo (y el salto luz) hacia el planeta o el cúmulo bajo la mira (otra vez: libera)
     if (S.lockB != null) { S.lockB = null; say('Vuelo directo cancelado'); }
-    else if (aimT && aimT.type === 'b') { S.lockB = aimT.b.i; S.tgt = aimT.b.i; say(`Vuelo directo hacia ${aimT.b.n}: solo W/S`); }
+    else if (aimT && (aimT.type === 'b' || aimT.type === 'z')) { S.lockB = aimT.type === 'b' ? aimT.b.i : bodies.length + aimT.z.zi; S.tgt = S.lockB; say(`Vuelo directo hacia ${lockObj().n}: solo W/S`); }
   }
   if (e.code === 'KeyT' && ((S.park.on && !S.park.water) || S.canPark)) togglePark();
   if (e.code === 'KeyV' && !e.repeat && P.hp > 0) { S.scanT = S.scanT ? 0 : performance.now(); say(S.scanT ? 'Escáner de recursos activado (V: apagar)' : 'Escáner apagado'); } // V: muestra los recursos alrededor con flechas
@@ -125,7 +129,8 @@ addEventListener('keydown', e => {
   const gi = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5'].indexOf(e.code); // en la atmósfera las marchas son km/h
   if (gi >= 0 && !S.warp.on) S.v = Math.min(S.atm || S.low ? [100, 500, 1000, 2000, 3500][gi] / 3600 : [10, 100, 500, 1000, P.vmax][gi], P.vmax);
 });
-addEventListener('keyup', e => keys[e.code] = false);
+addEventListener('keyup', e => { keys[e.code] = false; if (e.code === 'Tab') scoreboard(false); });
+addEventListener('blur', () => scoreboard(false));
 addEventListener('mousedown', e => { if (!document.pointerLockElement) return; if (e.button === 0) firing = true; if (e.button === 2) fireMissile(); });
 addEventListener('mouseup', e => { if (e.button === 0) firing = false; });
 addEventListener('contextmenu', e => e.preventDefault());
@@ -219,7 +224,7 @@ function notifyRes(type, n) { // recurso obtenido: icono + cantidad (las gananci
   if (r && r.el.isConnected && now - r.t < 1600) { r.n += n; r.t = now; r.el.querySelector('b').textContent = '+' + r.n; return; }
   ntRes[type] = { el: notifyEl(`<i class="ico">${typeof ICONS !== 'undefined' ? ICONS[type] : ''}</i><b>+${n}</b><span>${type}</span>`, 6500, 'res'), n, t: now };
 }
-const QUIET = /luz|salto|atmósfera|exosfera|planeta|Ruedas|estacionada|Amerizaje|flota|despegar|impulso/i; // entradas/salidas de planeta y velocidad luz: solo texto central, sin notificación
+const QUIET = /luz|salto|atmósfera|exosfera|planeta|Ruedas|estacionada|Amerizaje|flota|despegar|impulso|despeg|aterriz|Partida iniciada|toma(r)? el control|preparando|Escáner|BAJO ATAQUE|atacando|te disparan/i; // planeta, velocidad luz, despegue/aterrizaje, inicio de partida, escáner y ataques: solo texto central, sin notificación
 const say = t => { const now = performance.now(); P.msg = t; P.msgT = now + 2500; if ((t !== lastSay || now - lastSayT > 3000) && !QUIET.test(t)) notifyEl(`<span>${t}</span>`, 5500); lastSay = t; lastSayT = now; };
 // ---------- experiencia y niveles de la nave actual (datos y fórmula en ships.js: LVL, lvNeed, LV_MAX) ----------
 function gainXp(n, why) { // XP para la nave que pilotas ahora; cada nivel da 1 punto de mejora para esa nave
@@ -227,19 +232,20 @@ function gainXp(n, why) { // XP para la nave que pilotas ahora; cada nivel da 1 
   while (L.lv < LV_MAX && L.xp >= lvNeed(L.lv + 1)) { L.xp -= lvNeed(L.lv + 1); L.lv++; up++; }
   if (L.lv >= LV_MAX) L.xp = 0; saveLv();
   notifyEl(`<i class="ico">★</i><span><b>+${n} XP</b> ${why}</span>`, 5000, 'xp');
-  if (up) levelUp(L.lv);
+  if (up) { notifyEl(`<i class="ico">★</i><span><b>¡Nivel ${L.lv}!</b> Ve a tu base para mejorar</span>`, 9000, 'xp'); [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => tone('square', f, f * 1.01, 0.18, 0.06), i * 110)); } // aviso normal (sin banner) y sonido
 }
-function levelUp(lv) { // aviso grande en el centro con sonido
-  const el = document.createElement('div'); el.className = 'lvup'; el.innerHTML = `${hexSvg(lv, '#fff3b0', 70)}<div><b>¡NIVEL ${lv}!</b><span>${typeof atBase === 'function' && atBase() ? 'Abre el menú (Esc) para mejorar tu nave' : 'Ve a tu base para mejorar'}</span></div>`;
-  document.body.append(el); setTimeout(() => el.classList.add('out'), 3400); setTimeout(() => el.remove(), 4000);
-  [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => tone('square', f, f * 1.01, 0.18, 0.06), i * 110));
-}
-const xpEl = document.createElement('div'); xpEl.id = 'xph'; document.body.append(xpEl); let xpSig = '';
-function xpHud() { // NV y barra de XP de la nave actual, bajo el panel de mi base (arriba a la izquierda)
-  const on = typeof BASE !== 'undefined' && BASE.started() && !BASE.loading() && !S.foot.on, bh = document.getElementById('bh'), top = bh && bh.style.display !== 'none' ? bh.offsetTop + bh.offsetHeight + 8 : 60;
-  const L = lvlOf(mySpec.t), need = L.lv < LV_MAX ? lvNeed(L.lv + 1) : 0, pts = lvPts(L), sg = [on, top, mySpec.t, L.lv, L.xp, pts].join();
-  if (sg === xpSig) return; xpSig = sg; xpEl.style.display = on ? 'flex' : 'none'; if (!on) return; xpEl.style.top = top + 'px';
-  xpEl.innerHTML = `${hexSvg(L.lv, '#ffd23f', 30)}<div class="xb"><div class="xt"><span>NV ${L.lv} · ${TYPES[mySpec.t].name.toUpperCase()}</span>${pts ? `<em>+${pts} PT</em>` : ''}</div><div class="xbar"><i style="width:${need ? Math.min(100, L.xp / need * 100) : 100}%"></i></div><div class="xt"><span>${need ? `${L.xp}/${need} XP` : 'NIVEL MÁXIMO'}</span></div></div>`;
+// ---------- Tab mantenida: estadísticas por jugador (humanos primero y luego bots; por nivel y bajas) sin soltar el ratón ----------
+const sbEl = document.createElement('div'); sbEl.id = 'sb'; document.body.append(sbEl); let sbOn = false, sbT = 0;
+function scoreboard(on) { sbOn = on; sbEl.style.display = on ? 'block' : 'none'; if (on) { sbT = 0; scoreboardTick(performance.now()); } }
+function scoreboardTick(now) {
+  if (!sbOn || now - sbT < 300) return; sbT = now;
+  const hg = id => (typeof BASE !== 'undefined' ? BASE.HG.get(id) : null) || null, hex = c => '#' + ((c >>> 0) & 0xffffff).toString(16).padStart(6, '0'), rows = [];
+  rows.push({ me: true, bot: false, nm: myName, col: mySpec.c, t: mySpec.t, lv: lvlOf(mySpec.t).lv, k: P.kills, d: P.deaths || 0, h: hg(myId), alive: P.hp > 0 });
+  for (const r of remotes.values()) { const bot = r.id >= 2000; let c = 0xff6a3c; try { c = JSON.parse(r.spk).c; } catch {} rows.push({ bot, nm: r.name || 'Piloto', col: c, t: r.st, lv: r.lv || 0, k: bot ? null : r.k || 0, d: bot ? null : r.d || 0, h: hg(bot ? r.id - 1000 : r.id), alive: r.hp > 0 }); } // un bot (2000+i) tiene su base en 1000+i
+  if (typeof BOT !== 'undefined') for (const [i, B] of BOT.bots) rows.push({ bot: true, nm: B.name || 'BOT', col: 0xff4030, t: 'halcon', lv: 5, k: null, d: null, h: hg(1000 + i), alive: !B.dead }); // en el anfitrión sus bots no son remotos
+  rows.sort((a, b) => (a.bot - b.bot) || (b.lv - a.lv) || ((b.k || 0) - (a.k || 0)));
+  const bar = h => { if (!h) return '<span class="sbn">—</span>'; const f = Math.max(0, Math.min(1, h.hp / h.st.hpMax)); return `<div class="sbb"><i style="width:${f * 100}%;background:${f > 0.35 ? '#5dff8a' : '#ff5a4a'}"></i></div>`; };
+  sbEl.innerHTML = `<div class="sbx"><h3>JUGADORES DE LA SALA · ${rows.length}</h3><table><tr><th></th><th>Piloto</th><th>Nave</th><th>Nivel</th><th>Bajas</th><th>Muertes</th><th>Base</th><th>Estado</th></tr>${rows.map(r => `<tr class="${r.me ? 'me' : ''}${r.bot ? ' bot' : ''}"><td><span class="sbav" style="background:${hex(r.col)}">${(r.nm || '?').replace(/^BOT /, '').charAt(0).toUpperCase()}</span></td><td>${r.nm}${r.me ? ' <small>(tú)</small>' : ''}${r.bot ? ' <small>BOT</small>' : ''}</td><td>${TYPES[r.t] ? TYPES[r.t].name : '—'}</td><td>${hexSvg(r.lv, r.me ? '#4db8ff' : '#ffd23f', 26)}</td><td>${r.k ?? '—'}</td><td>${r.d ?? '—'}</td><td>${bar(r.h)}</td><td class="${r.alive ? 'ok' : r.h ? 'rs' : 'ko'}">${r.alive ? 'EN VUELO' : r.h ? 'REAPARECE' : 'DERROTADO'}</td></tr>`).join('')}</table><small>Suelta Tab para cerrar</small></div>`;
 }
 let CARRY = [0, 0, 0]; // desplazamiento orbital del planeta cercano en este cuadro (lo que está en su aire viaja con él)
 const AST = new Map(), ZONE_PER = { agua: 12, piedra: 14, cobre: 8, plata: 5, oro: 4, diamante: 2 }; // unidades medias por asteroide de zona del recurso dominante principal (el secundario, el 60 %)
@@ -352,7 +358,7 @@ function parkStep(dt) { // en tierra: desciende sobre las ruedas y sigue el terr
 }
 function burn(dmg, now) { // daño por calor (sin destello): el escudo primero, luego el casco
   const over = dmg - P.sh; P.sh = Math.max(0, P.sh - dmg); if (over > 0) P.hp -= over; P.shT = now;
-  if (P.hp <= 0) { P.cause = P.cause || (P.heatStar ? 'la radiación de la estrella destruyó la nave' : 'te desintegraste al entrar a la atmósfera a demasiada velocidad'); P.deadUntil = now + 10000; S.v = 0; boom(S.pos, 60); }
+  if (P.hp <= 0) { P.cause = P.cause || (P.heatStar ? 'la radiación de la estrella destruyó la nave' : 'te desintegraste al entrar a la atmósfera a demasiada velocidad'); P.deaths = (P.deaths || 0) + 1; P.deadUntil = now + 10000; S.v = 0; boom(S.pos, 60); }
 }
 
 // ---------- velocidad luz: 5 c en línea recta, con barra de motor; se corta a 5000 km de cualquier cuerpo ----------
@@ -375,17 +381,20 @@ function toggleWarp() {
   if (inCombat(performance.now())) return say('No puedes activar la velocidad luz en combate');
   if (w.lock || w.bar < 2) return say('Motor de velocidad luz recargando…');
   { const blk = warpBlock(); if (blk) return say(blk.k === 'sun' ? `Demasiado cerca de ${blk.n} para velocidad luz` : `Cerca de ${blk.n}: sal de su atmósfera y mira hacia fuera del planeta para saltar`); }
-  if (!warpTarget()) return say('Sin destino para el salto'); say(`Salto hacia ${warpTarget().n}`);
+  if (!warpTarget()) return say('Sin destino para el salto'); w.pick = warpTarget(); say(`Salto hacia ${w.pick.n}`); // el destino queda fijado durante la cuenta atrás
   w.cd = 5; w.n = 6; // cuenta atrás de 5 s con pitido por número; al llegar a 0 se activa el salto (ver startWarp)
 }
-function warpTarget() { // destino del salto: el rumbo fijado con G, la zona elegida con Tab o en el mapa (si aún no estás en ella) o, si no, el cuerpo más cercano a la dirección de la mira (nunca sales del sistema)
-  if (S.lockB != null) return bodies[S.lockB];
-  { const t = tgtObj(); if (t && t.zone && len(sub(t.pos, S.pos)) > t.R + ZONE_ARR + 500) return t; }
+function warpTarget() { // destino del salto: el rumbo fijado con G, el elegido al empezar la cuenta atrás, el cúmulo bajo la mira, la zona elegida con N o en el mapa (si aún no estás en ella) o, si no, el cuerpo más cercano a la dirección de la mira (nunca sales del sistema)
+  if (S.lockB != null) return lockObj();
+  if (S.warp.cd > 0 && S.warp.pick) return S.warp.pick;
+  const far = t => t && t.zone && len(sub(t.pos, S.pos)) > t.R + ZONE_ARR + 500;
+  if (aimT && aimT.type === 'z' && far(aimT.z)) return aimT.z;
+  { const t = tgtObj(); if (far(t)) return t; }
   const f = new THREE.Vector3(0, 0, -1).applyQuaternion(S.q); let best = null, ba = 9;
   for (const b of bodies) { const d = sub(b.pos, S.pos), l = len(d); if (l - b.R < 5000) continue; const a = Math.acos(Math.max(-1, Math.min(1, (f.x * d[0] + f.y * d[1] + f.z * d[2]) / l))); if (a < ba) { ba = a; best = b; } }
   return best;
 }
-function startWarp() { const w = S.warp, tb = warpTarget(); if (!tb) { w.cd = 0; return say('Sin destino para el salto'); } { const blk = warpBlock(); if (blk) { w.cd = 0; return say(`Cerca de ${blk.n}: mira hacia fuera del planeta para saltar`); } } w.tb = tb; const dd = nrm(sub(tb.pos, S.pos)); w.on = true; w.dir = dd; w.v = Math.max(S.v, 1000); w.goT = performance.now(); sfx('warp'); }
+function startWarp() { const w = S.warp, tb = w.pick || warpTarget(); w.pick = null; if (!tb) { w.cd = 0; return say('Sin destino para el salto'); } { const blk = warpBlock(); if (blk) { w.cd = 0; return say(`Cerca de ${blk.n}: mira hacia fuera del planeta para saltar`); } } w.tb = tb; const dd = nrm(sub(tb.pos, S.pos)); w.on = true; w.dir = dd; w.v = Math.max(S.v, 1000); w.goT = performance.now(); sfx('warp'); }
 function warpStep(dt) { // avanza en tramos de 2500 km para no saltarse un planeta a 1,5 millones de km/s
   const w = S.warp; let left = w.v * dt; if (w.tb) w.dir = nrm(sub(w.tb.pos, S.pos)); // la trayectoria sigue al destino (los planetas orbitan)
   while (left > 0) {
@@ -400,8 +409,8 @@ function fireMissile() {
   P.missiles--; P.cdM = WPN.m.cd; shoot('m', lockT ? { k: lockT.kind, id: lockT.id } : null);
 }
 applyLoadout(mySpec, false);
-const targetSpeed = t => t.k === 'p' ? (t.id === myId ? S.ve : remotes.get(t.id)?.v || 0) : t.k === 'n' && typeof NEU !== 'undefined' ? NEU.speed(t.id) : 0;
-function targetPos(t) { if (t.k === 'h') return typeof BASE !== 'undefined' ? BASE.targetPos(t.id) : null; if (t.k === 'p') return t.id === myId ? S.pos : remotes.get(t.id)?.apos; if (t.k === 'n') return typeof NEU !== 'undefined' ? NEU.pos(t.id) : null; const w = wrecks[t.id]; return w && !dead.has(w.i) ? w.pos : null; }
+const targetSpeed = t => t.k === 'p' ? (t.id === myId ? S.ve : remotes.get(t.id)?.v || (typeof BOT !== 'undefined' ? BOT.speed(t.id) : 0)) : t.k === 'n' && typeof NEU !== 'undefined' ? NEU.speed(t.id) : 0;
+function targetPos(t) { if (t.k === 'h') return typeof BASE !== 'undefined' ? BASE.targetPos(t.id) : null; if (t.k === 'p') return t.id === myId ? S.pos : remotes.get(t.id)?.apos || (typeof BOT !== 'undefined' ? BOT.pos(t.id) : null); if (t.k === 'n') return typeof NEU !== 'undefined' ? NEU.pos(t.id) : null; const w = wrecks[t.id]; return w && !dead.has(w.i) ? w.pos : null; }
 
 function applyLoadout(spec, reset = true) {
   mySpec = spec; const st = statsOf(spec, lvlOf(spec.t).a); scene.remove(ship); ship = makeShip(spec); scene.add(ship); // con los puntos de nivel de ESTA nave
@@ -458,8 +467,8 @@ ws.onmessage = ev => {
     let r = remotes.get(p.id);
     if (!r) { r = { id: p.id, q: new THREE.Quaternion() }; remotes.set(p.id, r); }
     const spk = JSON.stringify(p.sp); // el rival cambió de nave o de mejoras: reconstruir su modelo
-    if (r.spk !== spk) { if (r.grp) scene.remove(r.grp); r.grp = makeShip(p.sp); scene.add(r.grp); r.spk = spk; }
-    Object.assign(r, { rb: p.rb ?? -1, rp: p.rp, bt: p.bt || 0, name: p.name, pos: p.pos, v: p.v, hp: p.hp, sh: p.sh, ms: p.ms, pk: p.pk, lv: p.lv || 0, st: p.sp && p.sp.t, t: Date.now() }); r.q.fromArray(p.q); // lv/st: nivel y tipo de su nave
+    if (r.spk !== spk) { if (r.grp) scene.remove(r.grp); r.grp = makeShip(p.sp); r.grp.visible = false; scene.add(r.grp); r.spk = spk; } // oculta hasta que el cuadro la coloque (si no, asomaría un instante sobre mi nave)
+    Object.assign(r, { rb: p.rb ?? -1, rp: p.rp, bt: p.bt || 0, name: p.name, pos: p.pos, v: p.v, hp: p.hp, sh: p.sh, ms: p.ms, pk: p.pk, lv: p.lv || 0, st: p.sp && p.sp.t, k: p.k || 0, d: p.d || 0, t: Date.now() }); r.q.fromArray(p.q); // lv/st: nivel y tipo de su nave · k/d: bajas y muertes
   }
   for (const [id, r] of remotes) if (!seen.has(id)) { scene.remove(r.grp); remotes.delete(id); }
 };
@@ -512,22 +521,22 @@ function flightInstr(W, H, now) {
   const g = Math.max(0, planets.info.on && planets.info.name === nb.n ? planets.info.ground : na), dv = sub(S.pos, nb.pos), dl = len(dv), up = [dv[0] / dl, dv[1] / dl, dv[2] / dl];
   _fi.f.set(0, 0, -1).applyQuaternion(S.q); _fi.r.set(1, 0, 0).applyQuaternion(S.q); _fi.u.set(0, 1, 0).applyQuaternion(S.q);
   const sinP = Math.max(-1, Math.min(1, _fi.f.x * up[0] + _fi.f.y * up[1] + _fi.f.z * up[2])), pitch = Math.asin(sinP), roll = Math.atan2(_fi.r.x * up[0] + _fi.r.y * up[1] + _fi.r.z * up[2], _fi.u.x * up[0] + _fi.u.y * up[1] + _fi.u.z * up[2]);
-  const vz = S.ve * sinP, tti = vz < -0.03 && g > 0 && !S.park.on ? g / -vz : Infinity, thr = 2.5 + Math.min(4.5, S.ve * 0.3); // más rápido = avisa antes (hasta 7 s); apuntar al planeta desde lejos no la activa
+  const vz = S.ve * sinP, tti = vz < -0.03 && g > 0 && !S.park.on ? g / -vz : Infinity, thr = 1.5; // la alerta de choque (y el anillo rojo) solo a ≤ 1,5 s del impacto bajando deprisa; apuntar al planeta desde lejos no la activa
   const cx = W - 96, cy = H * 0.5 + 30, R = 52;
   g2.save(); g2.textAlign = 'center';
   g2.beginPath(); g2.arc(cx, cy, R, 0, 7); g2.save(); g2.clip(); g2.translate(cx, cy); g2.rotate(-roll); const py = pitch * 180 / Math.PI * 1.3;
   g2.fillStyle = '#2a6aa8'; g2.fillRect(-90, -200 + py, 180, 200); g2.fillStyle = '#7a5530'; g2.fillRect(-90, py, 180, 200); g2.fillStyle = '#ffffffcc'; g2.fillRect(-90, py - 1, 180, 2);
   g2.strokeStyle = '#ffffff99'; g2.lineWidth = 1; g2.font = `9px ${MONO}`; g2.fillStyle = '#ffffffcc'; for (let a = -30; a <= 30; a += 10) { if (!a) continue; const y = py - a * 1.3, w = a % 20 ? 10 : 18; g2.beginPath(); g2.moveTo(-w, y); g2.lineTo(w, y); g2.stroke(); if (!(a % 20)) g2.fillText(Math.abs(a), w + 10, y + 3); }
   g2.restore();
-  g2.strokeStyle = tti < thr && vz < -0.3 ? '#ff3b30' : '#8fd8ff'; g2.lineWidth = 3; g2.beginPath(); g2.arc(cx, cy, R, 0, 7); g2.stroke();
+  g2.strokeStyle = tti <= thr && vz < -0.3 ? '#ff3b30' : '#8fd8ff'; g2.lineWidth = 3; g2.beginPath(); g2.arc(cx, cy, R, 0, 7); g2.stroke();
   g2.strokeStyle = '#ffd23f'; g2.lineWidth = 3; g2.beginPath(); g2.moveTo(cx - 30, cy); g2.lineTo(cx - 10, cy); g2.lineTo(cx - 5, cy + 6); g2.moveTo(cx + 30, cy); g2.lineTo(cx + 10, cy); g2.lineTo(cx + 5, cy + 6); g2.moveTo(cx, cy - 3); g2.lineTo(cx, cy + 1); g2.stroke(); // avión fijo
   const deg = Math.round(pitch * 180 / Math.PI), mine = typeof BASE !== 'undefined' ? BASE.mine() : null, bd = mine ? len(sub(BASE.worldOf(mine), S.pos)) : null;
   g2.font = `bold 12px ${MONO}`; g2.fillStyle = '#e6f6ff'; g2.strokeStyle = '#000'; g2.lineWidth = 3;
   const lines = [[`ALTURA ${g < 1 ? Math.round(g * 1000) + ' m' : fD(g)}`, '#e6f6ff'], [`INCLINACIÓN ${deg > 0 ? '+' : ''}${deg}°`, deg < -8 ? '#ffb347' : '#e6f6ff']];
-  if (bd !== null) lines.push([`BASE ${fD(bd)}`, '#5dff8a']); if (tti < 60) lines.push([`IMPACTO ${tti.toFixed(1)} s`, tti < thr ? '#ff5a4a' : '#ffd23f']);
+  if (bd !== null) lines.push([`BASE ${fD(bd)}`, '#5dff8a']); if (tti < 60) lines.push([`IMPACTO ${tti.toFixed(1)} s`, tti <= thr ? '#ff5a4a' : '#ffd23f']);
   lines.forEach(([t, c], i) => { g2.fillStyle = c; g2.strokeText(t, cx, cy + R + 18 + i * 15); g2.fillText(t, cx, cy + R + 18 + i * 15); });
   g2.restore();
-  if (tti < thr && vz < -0.3) crashAlert(W, H, now, tti); // aterrizajes suaves (< 430 km/h de caída) no disparan la alerta
+  if (tti <= thr && vz < -0.3) crashAlert(W, H, now, tti); // aterrizajes suaves (< 430 km/h de caída) no disparan la alerta
 }
 function crashAlert(W, H, now, tti) { // triángulo de peligro parpadeante en el centro de la pantalla; parpadea y pita más rápido cuanto menos falta
   const fast = tti < 3, ph = now / (fast ? 90 : 170), a = 0.5 + 0.5 * Math.sin(ph), x = W / 2, y = H * 0.3, s = 62 * (1 + 0.06 * Math.sin(ph));
@@ -547,10 +556,9 @@ function crashAlert(W, H, now, tti) { // triángulo de peligro parpadeante en el
 const ATK = { t: 0, kind: '', name: '', pos: null, nt: {}, beep: 0 };
 function attackAlert(kind, name, pos) { // kind: 't' torretas enemigas · 'p' nave enemiga · 'b' daño a mi base
   const now = performance.now(); ATK.t = now; ATK.kind = kind; ATK.name = name || ''; ATK.pos = pos ? [...pos] : ATK.pos;
-  if (!ATK.nt[kind] || now - ATK.nt[kind] > 5000) { ATK.nt[kind] = now; notifyEl(`<i class="ico">⚠</i><span>${kind === 't' ? `Las torretas de <b>${name}</b> te disparan` : kind === 'p' ? `<b>${name}</b> te está atacando` : 'Tu <b>base</b> está recibiendo daño'}</span>`, 5000, 'atk'); }
 }
-const ownerName = o => o >= 3000 && typeof NEU !== 'undefined' ? NEU.name(o) : (remotes.get(o) || {}).name || 'Un piloto'; // autor de un disparo: piloto, bot (2000+) o nave neutral (3000+)
-const ownerPos = o => o >= 3000 && typeof NEU !== 'undefined' ? NEU.pos(o) : (remotes.get(o) || {}).pos;
+const ownerName = o => o >= 3000 && typeof NEU !== 'undefined' ? NEU.name(o) : (remotes.get(o) || {}).name || (typeof BOT !== 'undefined' && BOT.name(o)) || 'Un piloto'; // autor de un disparo: piloto, bot (2000+) o nave neutral (3000+)
+const ownerPos = o => o >= 3000 && typeof NEU !== 'undefined' ? NEU.pos(o) : (remotes.get(o) || {}).pos || (typeof BOT !== 'undefined' ? BOT.pos(o) : null);
 function attackHud(W, H, now, cm) {
   const dt = now - ATK.t; if (dt > 2600) return; const k = 1 - dt / 2600, pulse = 0.5 + 0.5 * Math.sin(now / 110);
   const gr = g2.createRadialGradient(W / 2, H / 2, H * 0.32, W / 2, H / 2, H * 0.85); gr.addColorStop(0, 'rgba(255,0,0,0)'); gr.addColorStop(1, `rgba(255,20,10,${(0.25 + 0.3 * pulse) * k})`); g2.fillStyle = gr; g2.fillRect(0, 0, W, H); // viñeta roja pulsante
@@ -577,7 +585,7 @@ function gauge(H) { // medidor curvo: arco azul = escudo (exterior), arco verde 
 function hurt(dmg, dir, now) { // el escudo absorbe primero; lo que sobra va al casco
   const over = dmg - P.sh, had = P.sh > 0; P.sh = Math.max(0, P.sh - dmg); if (over > 0) P.hp -= over;
   P.shT = now; P.lastCombat = now; P.flash = 1; P.shake = dmg > 20 ? 1 : 0.5; if (had) P.sf = 1; impact(dir, dmg > 20); sfx(over > 0 ? 'hit' : 'shield');
-  if (P.hp <= 0) { P.deadUntil = now + 10000; S.v = 0; boom(S.pos, 60); }
+  if (P.hp <= 0) { P.deaths = (P.deaths || 0) + 1; P.deadUntil = now + 10000; S.v = 0; boom(S.pos, 60); } // muertes: se ven en la tabla de Tab
 }
 function impact(dir, big) { // fogonazo y chispas sobre mi nave, del lado de donde vino el proyectil
   for (let i = 0; i < (big ? 6 : 3); i++)
@@ -609,27 +617,36 @@ function asteroidMarks(W, H, now) { // recursos de los asteroides cercanos (icon
   }
 }
 const wreckInfo = i => LOOTED.has(i) ? [] : wreckLoot(i); // recursos de un casco a la deriva (sysgen.wreckLoot, igual que en el servidor); ya saqueado en la sala: nada
-function scanMarks(W, H, now) { // V: todos los recursos a tu alrededor con una flecha hacia donde están, en un círculo centrado en la nave
+function scanMarks(W, H, now) { // V: recursos al alcance (máx. 8): encima del propio objeto si se ve en pantalla; si está fuera o detrás, en un círculo con una flecha hacia él
   if (!S.scanT || P.hp <= 0) return; if (now - S.scanT > 30000) { S.scanT = 0; return; }
   const items = [];
   for (const o of fields.active) { if (o.z == null) continue; const d = Math.hypot(o.pos[0] - S.pos[0], o.pos[1] - S.pos[1], o.pos[2] - S.pos[2]); if (d < RANGE) { const list = astLeft(o); if (list.length) items.push({ pos: o.pos, d, list }); } } // solo lo que está al alcance de la nave y aún tiene recursos (zonas no agotadas)
   for (const w of wrecks) if (!dead.has(w.i) && !LOOTED.has(w.i)) { const d = Math.hypot(w.pos[0] - S.pos[0], w.pos[1] - S.pos[1], w.pos[2] - S.pos[2]); if (d < RANGE) items.push({ pos: w.pos, d, list: wreckInfo(w.i), wreck: true }); }
-  items.sort((a, b) => a.d - b.d); const show = items.slice(0, 8);
-  tv.set(0, 0, 0).project(camera); const cx = (tv.x * 0.5 + 0.5) * W, cy = (-tv.y * 0.5 + 0.5) * H, R = Math.min(W, H) * 0.27, cm = new THREE.Vector3();
-  show.forEach(it => { const v = view(it.pos); cm.set(v.x, v.y, v.z).applyMatrix4(camera.matrixWorldInverse); let dx = cm.x, dy = -cm.y; const l = Math.hypot(dx, dy); if (l < 1e-9) { dx = 0; dy = -1; } else { dx /= l; dy /= l; } it.a = Math.atan2(dy, dx); });
-  show.sort((a, b) => a.a - b.a); for (let k = 0; k < 6; k++) for (let i = 0; i < show.length; i++) { const j = (i + 1) % show.length; let gap = show[j].a - show[i].a; if (j === 0) gap += Math.PI * 2; const need = 0.16; if (show.length > 1 && gap < need) { const push = (need - gap) / 2; show[i].a -= push; show[j].a += push; } } // separa los marcadores que se solapan
-  g2.save(); g2.textAlign = 'center'; g2.strokeStyle = 'rgba(93,255,138,0.25)'; g2.lineWidth = 1.5; g2.setLineDash([4, 8]); g2.beginPath(); g2.arc(cx, cy, R, 0, 7); g2.stroke(); g2.setLineDash([]);
-  g2.font = `bold 11px ${MONO}`; g2.fillStyle = '#5dff8a'; g2.fillText(`ESCÁNER · ${items.length} con recursos · V: apagar`, cx, cy - R - 40);
-  for (const it of show) {
-    const ux = Math.cos(it.a), uy = Math.sin(it.a), px = cx + ux * R, py = cy + uy * R, sz = 16, w = it.list.length * (sz + 3) + 10, col = RES[it.list[0] ? it.list[0].type : 'piedra'];
-    g2.save(); g2.translate(px + ux * (w / 2 + 6), py + uy * 12); g2.rotate(Math.atan2(uy, ux)); g2.fillStyle = col; g2.beginPath(); g2.moveTo(12, 0); g2.lineTo(-4, -8); g2.lineTo(-4, 8); g2.closePath(); g2.fill(); g2.restore(); // flecha hacia el recurso
+  items.sort((a, b) => a.d - b.d); const show = items.slice(0, 8), off = [], cm = new THREE.Vector3();
+  tv.set(0, 0, 0).project(camera); const cx = (tv.x * 0.5 + 0.5) * W, cy = (-tv.y * 0.5 + 0.5) * H, R = Math.min(W, H) * 0.27;
+  const capsule = (px, py, it) => { // cápsula con icono + cantidad de cada recurso y la distancia debajo
+    const sz = 16, col = RES[it.list[0] ? it.list[0].type : 'piedra'], w = it.list.reduce((s, r) => s + sz + 6 + 7 * String(r.n).length, 0) + 8; let x = px - w / 2 + 5;
     g2.fillStyle = 'rgba(0,10,20,0.78)'; g2.strokeStyle = col; g2.lineWidth = 2; g2.beginPath(); g2.roundRect(px - w / 2, py - 13, w, 26, 9); g2.fill(); g2.stroke();
-    it.list.forEach((r, i) => { const im = icoImg(r.type); if (im && im.complete && im.naturalWidth) g2.drawImage(im, px - w / 2 + 5 + i * (sz + 3), py - sz / 2, sz, sz); });
-    g2.font = `10px ${MONO}`; g2.fillStyle = '#dff4ff'; g2.strokeStyle = '#000'; g2.lineWidth = 3; const tx = it.d < 1e4 ? Math.round(it.d).toLocaleString('es') + ' km' : (it.d / 1000).toFixed(0) + ' mil km'; g2.strokeText(tx, px, py + 26); g2.fillText(tx, px, py + 26);
+    g2.textAlign = 'left'; g2.font = `bold 11px ${MONO}`; for (const r of it.list) { const im = icoImg(r.type); if (im && im.complete && im.naturalWidth) g2.drawImage(im, x, py - sz / 2, sz, sz); g2.fillStyle = '#fff'; g2.fillText(String(r.n), x + sz + 2, py + 4); x += sz + 6 + 7 * String(r.n).length; }
+    g2.textAlign = 'center'; g2.font = `10px ${MONO}`; g2.fillStyle = '#dff4ff'; g2.strokeStyle = '#000'; g2.lineWidth = 3; const tx = it.d < 1e4 ? Math.round(it.d).toLocaleString('es') + ' km' : (it.d / 1000).toFixed(0) + ' mil km'; g2.strokeText(tx, px, py + 26); g2.fillText(tx, px, py + 26);
+    return w;
+  };
+  g2.save(); g2.textAlign = 'center';
+  for (const it of show) { // delante y en pantalla: encima del propio objeto (misma proyección que asteroidMarks); si no, al círculo con flecha
+    const v = view(it.pos); tv.set(v.x, v.y, v.z).project(camera);
+    if (tv.z < 1 && Math.abs(tv.x) < 0.95 && Math.abs(tv.y) < 0.95) { capsule((tv.x * 0.5 + 0.5) * W, (-tv.y * 0.5 + 0.5) * H - 46, it); continue; }
+    cm.set(v.x, v.y, v.z).applyMatrix4(camera.matrixWorldInverse); let dx = cm.x, dy = -cm.y; const l = Math.hypot(dx, dy); if (l < 1e-9) { dx = 0; dy = 1; } else { dx /= l; dy /= l; } it.a = Math.atan2(dy, dx); off.push(it); // dirección en el espacio de la cámara (como el aviso de ataque)
+  }
+  off.sort((a, b) => a.a - b.a); for (let k = 0; k < 6; k++) for (let i = 0; i < off.length; i++) { const j = (i + 1) % off.length; let gap = off[j].a - off[i].a; if (j === 0) gap += Math.PI * 2; const need = 0.16; if (off.length > 1 && gap < need) { const push = (need - gap) / 2; off[i].a -= push; off[j].a += push; } } // separa los marcadores que se solapan
+  if (off.length) { g2.strokeStyle = 'rgba(93,255,138,0.25)'; g2.lineWidth = 1.5; g2.setLineDash([4, 8]); g2.beginPath(); g2.arc(cx, cy, R, 0, 7); g2.stroke(); g2.setLineDash([]); }
+  g2.font = `bold 11px ${MONO}`; g2.fillStyle = '#5dff8a'; g2.fillText(`ESCÁNER · ${items.length} con recursos · V: apagar`, cx, cy - R - 40);
+  for (const it of off) {
+    const ux = Math.cos(it.a), uy = Math.sin(it.a), px = cx + ux * R, py = cy + uy * R, w = capsule(px, py, it), col = RES[it.list[0] ? it.list[0].type : 'piedra'];
+    g2.save(); g2.translate(px + ux * (w / 2 + 6), py + uy * 12); g2.rotate(Math.atan2(uy, ux)); g2.fillStyle = col; g2.beginPath(); g2.moveTo(12, 0); g2.lineTo(-4, -8); g2.lineTo(-4, 8); g2.closePath(); g2.fill(); g2.restore(); // flecha hacia el recurso
   }
   g2.restore();
 }
-function zoneMarks(W, H, now) { // zonas de recursos en el HUD: rombo con nombre, distancia al borde e iconos de lo que queda; la seleccionada (Tab / mapa) en amarillo y con flecha si está fuera de la vista
+function zoneMarks(W, H, now) { // zonas de recursos en el HUD: rombo con nombre, distancia al borde e iconos de lo que queda; la seleccionada (N / mapa) en amarillo y con flecha si está fuera de la vista
   if (P.hp <= 0) return; const sel = S.tgt - bodies.length, cm = new THREE.Vector3(); g2.save(); g2.lineWidth = 2;
   const chips = (x, y, res, sz) => { // icono + cantidad restante de cada recurso dominante (atenuado si ya no queda)
     let cx = x; const a0 = g2.globalAlpha; g2.textAlign = 'left'; g2.font = `bold 11px ${MONO}`; g2.strokeStyle = '#000'; g2.lineWidth = 3;
@@ -709,10 +726,10 @@ function drawHud(fwd, now, targets) {
   if (!S.warp.on && S.warp.cd <= 0 && P.hp > 0) { // rumbo del salto: G sobre la mira cuando apuntas a un planeta; marcador fijo cuando ya está fijado
     const cy = H / 2 - 84;
     if (S.lockB != null) {
-      const lb = bodies[S.lockB]; g2.save(); g2.textAlign = 'center'; g2.font = `bold 13px ${MONO}`; g2.fillStyle = '#ffd23f';
-      tv.copy(lb.rp).project(camera); if (tv.z < 1) { const x = (tv.x * 0.5 + 0.5) * W, y = (-tv.y * 0.5 + 0.5) * H; g2.strokeStyle = '#ffd23f'; g2.lineWidth = 2; g2.beginPath(); g2.moveTo(x, y - 20); g2.lineTo(x + 20, y); g2.lineTo(x, y + 20); g2.lineTo(x - 20, y); g2.closePath(); g2.stroke(); g2.fillText(lb.n, x, y - 28); }
+      const lb = lockObj(), lv = view(lb.pos); g2.save(); g2.textAlign = 'center'; g2.font = `bold 13px ${MONO}`; g2.fillStyle = '#ffd23f';
+      tv.set(lv.x, lv.y, lv.z).project(camera); if (tv.z < 1) { const x = (tv.x * 0.5 + 0.5) * W, y = (-tv.y * 0.5 + 0.5) * H; g2.strokeStyle = '#ffd23f'; g2.lineWidth = 2; g2.beginPath(); g2.moveTo(x, y - 20); g2.lineTo(x + 20, y); g2.lineTo(x, y + 20); g2.lineTo(x - 20, y); g2.closePath(); g2.stroke(); g2.fillText(lb.n, x, y - 28); }
       g2.restore(); g2.globalAlpha = 0.6 + 0.4 * Math.sin(now / 200); keycap(W / 2, cy, 'G', 'Al pulsar la tecla dejará de seguir'); g2.globalAlpha = 1;
-    } else if (aimT && aimT.type === 'b') { g2.globalAlpha = 0.6 + 0.4 * Math.sin(now / 200); keycap(W / 2, cy, 'G', `Vuelo directo hacia ${aimT.b.n}`); g2.globalAlpha = 1; }
+    } else if (aimT && (aimT.type === 'b' || aimT.type === 'z')) { g2.globalAlpha = 0.6 + 0.4 * Math.sin(now / 200); keycap(W / 2, cy, 'G', `Vuelo directo hacia ${aimT.type === 'b' ? aimT.b.n : aimT.z.n}${aimT.type === 'z' ? ' · Shift: salto luz' : ''}`); g2.globalAlpha = 1; }
   }
   if ((S.canPark || S.park.on) && P.hp > 0 && !S.foot.on) {
     tv.set(0, 0, 0).project(camera); const kx = (tv.x * 0.5 + 0.5) * W, ky = (-tv.y * 0.5 + 0.5) * H - 70 + Math.sin(now / 300) * 3;
@@ -723,13 +740,13 @@ function drawHud(fwd, now, targets) {
   const nearest = Math.min(Infinity, ...targets.filter(t => t.kind === 'p').map(t => t.dist)); // enemigo más cercano (solo naves de jugadores)
   for (const t of targets) {
     if ((t.kind === 'w' && t.dist > 300000) || losBlocked(t)) continue; // sin línea de visión (planeta de por medio) no se dibuja
-    const lock = t === lockT, sel = t === S.tsel, col = sel ? '#ffd23f' : t.kind === 'n' ? (t.hostile ? (lock ? '#ff2a2a' : '#ff5a4a') : (lock ? '#ffee55' : '#c8ff5d')) : t.kind === 'p' || t.kind === 'h' ? (lock ? '#ff2a2a' : '#ff8a4c') : (lock ? '#ffee55' : '#5dff8a'); // neutrales: verde amarillento (rojo si están hostiles); elegida con Tab: amarillo
+    const lock = t === lockT, sel = t === S.tsel, col = sel ? '#ffd23f' : t.kind === 'n' ? (t.hostile ? (lock ? '#ff2a2a' : '#ff5a4a') : (lock ? '#ffee55' : '#c8ff5d')) : t.kind === 'p' || t.kind === 'h' ? (lock ? '#ff2a2a' : '#ff8a4c') : (lock ? '#ffee55' : '#5dff8a'); // neutrales: verde amarillento (rojo si están hostiles); elegida con B: amarillo
     tv.copy(t.grp.position).project(camera);
     let x = (tv.x * 0.5 + 0.5) * W, y = (-tv.y * 0.5 + 0.5) * H; const behind = tv.z > 1;
     if (behind) { x = W - x; y = H - y; }
     g2.strokeStyle = g2.fillStyle = col;
     if (behind || x < 40 || x > W - 40 || y < 40 || y > H - 40) {
-      if ((t.kind === 'w' && !lowAmmo) || (t.kind === 'n' && !sel && !t.hostile && t.dist > TAB_R)) continue; // neutrales lejanas y tranquilas: sin flecha en el borde
+      if ((t.kind === 'w' && !lowAmmo) || (t.kind === 'n' && !sel && !t.hostile && t.dist > SEL_R)) continue; // neutrales lejanas y tranquilas: sin flecha en el borde
       const dx = x - W / 2, dy = y - H / 2, k = Math.min((W / 2 - 40) / (Math.abs(dx) || 1e-6), (H / 2 - 40) / (Math.abs(dy) || 1e-6));
       g2.save(); g2.translate(W / 2 + dx * k, H / 2 + dy * k); g2.rotate(Math.atan2(dy, dx));
       g2.beginPath(); g2.moveTo(14, 0); g2.lineTo(-10, -9); g2.lineTo(-10, 9); g2.closePath(); g2.fill(); g2.restore();
@@ -740,7 +757,7 @@ function drawHud(fwd, now, targets) {
       g2.stroke();
       const bw = 68, bx = x - bw / 2, by = y - s - 13, hbar = (yy, f, c) => { g2.fillStyle = 'rgba(0,0,0,0.6)'; g2.fillRect(bx - 1, yy - 1, bw + 2, 7); g2.fillStyle = c; g2.fillRect(bx, yy, bw * Math.max(0, Math.min(1, f)), 5); };
       if (t.kind === 'p' || t.kind === 'h' || t.kind === 'n') { hbar(by - 8, t.sh / 100, '#4db8ff'); hbar(by, t.hp / 100, t.hp > 25 ? '#5dff8a' : '#ff4b3b'); } else hbar(by, t.hp / 100, t.hp > 40 ? '#5dff8a' : '#ff8a4c'); // vida sobre el objetivo
-      if (sel) { g2.beginPath(); g2.moveTo(x, y - s - 24); g2.lineTo(x + s + 10, y); g2.lineTo(x, y + s + 24); g2.lineTo(x - s - 10, y); g2.closePath(); g2.stroke(); } // rombo de la nave elegida con Tab
+      if (sel) { g2.beginPath(); g2.moveTo(x, y - s - 24); g2.lineTo(x + s + 10, y); g2.lineTo(x, y + s + 24); g2.lineTo(x - s - 10, y); g2.closePath(); g2.stroke(); } // rombo de la nave elegida con B
       g2.fillStyle = col; g2.fillText(t.kind === 'n' ? `${t.hostile ? 'HOSTIL' : 'NEUTRAL'} · ${shipTag(t)} · ${fD(t.dist)}` : t.kind === 'p' ? `${t.name} · ${shipTag(t)} · ${fD(t.dist)}` : `${t.name} · ${fD(t.dist)}`, x, y + s + 14);
     }
   }
@@ -819,7 +836,7 @@ function frame(now) {
     const f = new THREE.Vector3(0, 0, -1).applyQuaternion(S.q); f.addScaledVector(up, -f.dot(up)).normalize(); S.q.setFromRotationMatrix(new THREE.Matrix4().lookAt(new THREE.Vector3(), f, up));
   } else if (!warp.on) S.q.multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(pitch, yaw, roll, 'YXZ')));
   if ((warp.on || warp.cd > 0) && !S.park.on) { const tb = warp.on ? warp.tb : warpTarget(); if (tb) S.q.slerp(lookQ(nrm(sub(tb.pos, S.pos))), 1 - Math.exp(-dt * (warp.on ? 10 : 3))); }
-  if (lockFly) { const tb = bodies[S.lockB], dl = len(sub(tb.pos, S.pos)) - tb.R; if (dl < 3000) { S.lockB = null; say('Has llegado: control manual'); } else S.q.slerp(lookQ(nrm(sub(tb.pos, S.pos))), 1 - Math.exp(-dt * 2.5)); }
+  if (lockFly) { const tb = lockObj(), dl = len(sub(tb.pos, S.pos)) - tb.R; if (dl < 3000) { S.lockB = null; say(tb.zone ? `Has llegado a ${tb.n}` : 'Has llegado: control manual'); } else S.q.slerp(lookQ(nrm(sub(tb.pos, S.pos))), 1 - Math.exp(-dt * 2.5)); } // llegada: a 3000 km de la superficie o del borde del cúmulo
   if (S.auto && !warp.on && !S.park.on) S.q.slerp(lookQ(nrm(sub(tgtObj().pos, S.pos))), 1 - Math.exp(-dt * 2));
   S.q.normalize();
 
@@ -845,6 +862,7 @@ function frame(now) {
     S.v = Math.min(S.v, P.vmax, hardV, S.atm ? (manual ? LOWCAP : ATM_MAX * bmul) : S.entry ? ENTRY_MAX * (1 + 0.5 * S.boost) : Infinity);
   }
   fields.update(S.pos); // asteroides/basura cercanos; la nave también frena ante ellos
+  if (now - (S.emptyT || 0) > 500) { S.emptyT = now; for (let i = fields.active.length - 1; i >= 0; i--) { const o = fields.active[i]; if (astLeft(o).length) continue; fields.gone.add(o.id); fields.active.splice(i, 1); AST.delete(o.id); if (len(sub(o.pos, S.pos)) < 40000) puff(o.pos, Math.min(40, Math.max(3, o.vis * 0.6)), 0xb0a48f, 1.4, 0.004); } } // su zona se agotó: el asteroide se desvanece (no quedan asteroides vacíos)
   const vEff = S.park.on ? 0 : warp.on ? warp.v : Math.min(S.v, Math.max(0.02, Math.min(capAll, 2 * fields.near))), fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(S.q);
   const oldPos = S.pos;
   if (S.park.on) parkStep(dt); else if (warp.on) warpStep(dt); else S.pos = [S.pos[0] + fwd.x * vEff * dt, S.pos[1] + fwd.y * vEff * dt, S.pos[2] + fwd.z * vEff * dt];
@@ -909,7 +927,7 @@ function frame(now) {
   if (alive && P.hp < 40 && (P.smoke -= dt) <= 0) { P.smoke = 0.06; puff(S.pos.map((c, j) => c - fwd.getComponent(j) * 0.03 + (Math.random() - 0.5) * 0.01), 0.012, 0xff7a30, 1.4, 0.004); } // casco dañado: humo
   if (alive && P.plasma < MAXA.plasma && now - (P.fireT || 0) > 1500) { P.pAcc = (P.pAcc || 0) + dt; const rg = P.regen || 1.4; if (P.pAcc >= rg) { P.pAcc -= rg; P.plasma++; } } // la munición de plasma se recarga muy lentamente (1 cada 1,4 s; menos con puntos de nivel en Recarga) si no disparas
   if (alive && firing && !S.warp.on && !S.foot.on && S.warp.cd <= 0 && P.cdP <= 0 && P.plasma > 0) { P.fireT = now; P.plasma--; P.cdP = WPN.p.cd; shoot('p', lockT ? { k: lockT.kind, id: lockT.id } : null); }
-  if (now - lastSend > 66) { lastSend = now; send({ t: 's', rb: S.refB, rp: S.refB >= 0 ? sub(S.foot.on ? S.shipPos : S.pos, bodies[S.refB].pos) : null, name: myName, pos: S.foot.on ? S.shipPos : S.pos, q: S.q.toArray(), v: alive ? vEff : 0, hp: P.hp / P.hpMax * 100, sh: P.sh / P.shMax * 100, sp: mySpec, lv: lvlOf(mySpec.t).lv, ms: P.missiles, pk: S.park.on ? 1 : 0, bt: Math.round(S.boost * 100) / 100 }); }
+  if (now - lastSend > 66) { lastSend = now; send({ t: 's', rb: S.refB, rp: S.refB >= 0 ? sub(S.foot.on ? S.shipPos : S.pos, bodies[S.refB].pos) : null, name: myName, pos: S.foot.on ? S.shipPos : S.pos, q: S.q.toArray(), v: alive ? vEff : 0, hp: P.hp / P.hpMax * 100, sh: P.sh / P.shMax * 100, sp: mySpec, lv: lvlOf(mySpec.t).lv, k: P.kills, d: P.deaths || 0, ms: P.missiles, pk: S.park.on ? 1 : 0, bt: Math.round(S.boost * 100) / 100 }); }
   S.ve = alive ? vEff : 0; engine(S.ve, (keys.KeyW && alive) || S.warp.on || S.boost > 0.05); if (S.boost > 0.02) P.shake = Math.max(P.shake, 0.1 + 0.15 * S.boost);
   const targets = [];
   for (const r of remotes.values()) {
@@ -923,6 +941,7 @@ function frame(now) {
   }
   if (typeof BASE !== 'undefined') for (const t of BASE.targets()) targets.push(t); // las bases enemigas también son objetivos: se pueden fijar y guiar los disparos hacia ellas
   if (typeof NEU !== 'undefined') for (const t of NEU.targets()) targets.push(t); // naves neutrales
+  if (typeof BOT !== 'undefined') for (const t of BOT.targets()) targets.push(t); // anfitrión: sus propios bots (antes se veían pero no eran objetivo: naves fantasma)
   for (const w of wrecks) {
     w.pos = [w.parent.pos[0] + w.off[0], w.parent.pos[1] + w.off[1], w.parent.pos[2] + w.off[2]];
     const v = view(w.pos), isDead = dead.has(w.i); w.grp.visible = !isDead;
@@ -931,7 +950,7 @@ function frame(now) {
     w.dist = v.d; w.dir = [v.rel[0] / v.d, v.rel[1] / v.d, v.rel[2] / v.d];
     if (!isDead) targets.push({ kind: 'w', id: w.i, name: 'Casco a la deriva', hp: w.hp / WRECK_HP * 100, grp: w.grp, dist: v.d, dir: w.dir });
   }
-  lastTargets = targets; S.tsel = S.tship ? targets.find(t => t.kind === S.tship.kind && t.id === S.tship.id) || null : null; if (S.tship && !S.tsel) S.tship = null; // nave elegida con Tab (se suelta si muere o se pierde)
+  lastTargets = targets; S.tsel = S.tship ? targets.find(t => t.kind === S.tship.kind && t.id === S.tship.id) || null : null; if (S.tship && !S.tsel) S.tship = null; // nave elegida con B (se suelta si muere o se pierde)
   lockT = null; let bestA = CONE;
   if (alive) for (const t of targets) {
     const a = Math.acos(Math.min(1, fwd.x * t.dir[0] + fwd.y * t.dir[1] + fwd.z * t.dir[2]));
@@ -952,6 +971,11 @@ function frame(now) {
       if (ang < rad + (b === lastAimB ? 0.06 : 0.04)) { if (b === lastAimB) keepB = b; if (d - b.R < bestBd) { bestBd = d - b.R; bestB = b; } }
     }
     const pickB = keepB || bestB; lastAimB = pickB; if (pickB) { const dd = Math.hypot(pickB.pos[0] - S.pos[0], pickB.pos[1] - S.pos[1], pickB.pos[2] - S.pos[2]) - pickB.R; bd = dd; aimT = { type: 'b', b: pickB, dist: dd }; }
+    for (const t of ZT) { // cúmulo bajo la mira (su área o su marcador, +1,7°): G fija el rumbo y Shift salta hacia él; manda sobre un planeta más lejano
+      const rx = t.pos[0] - S.pos[0], ry = t.pos[1] - S.pos[1], rz = t.pos[2] - S.pos[2], d = Math.hypot(rx, ry, rz), dz = d - t.R; if (dz <= 3000 || dz >= bd) continue;
+      if (Math.acos(Math.min(1, (fwd.x * rx + fwd.y * ry + fwd.z * rz) / d)) > Math.atan(t.R / d) + 0.03 || losBlocked({ dir: [rx / d, ry / d, rz / d], dist: d, kind: 'z' })) continue;
+      bd = dz; aimT = { type: 'z', z: t, dist: dz };
+    }
   }
   for (const [key, p] of projs) {
     p.life -= dt; if (p.life <= 0) { killProj(key); continue; }
@@ -1033,8 +1057,7 @@ function frame(now) {
   }
   { const sg = JSON.stringify(INV); if (sg !== rsSig) { rsSig = sg; rsEl.innerHTML = Object.keys(RES).map(k => `<span class="cost"><i>${ICONS[k]}</i>${INV[k]}</span>`).join(''); } } // recursos recogidos: arriba a la izquierda, con su icono
   hud.style.display = S.foot.on ? 'none' : ''; // a pie se ocultan los paneles de la nave
-  drawHud(fwd, now, targets); FOOT.hud(now); if (typeof BASE !== 'undefined') BASE.hud(now); if (typeof TV !== 'undefined') TV.update(S.foot.on ? null : aimT && (aimT.type === 'p' || aimT.type === 'n') ? aimT : S.tsel ? { type: S.tsel.kind, t: S.tsel, dist: S.tsel.dist } : aimT, now); // la nave bajo la mira manda; si no, la elegida con Tab; si no, lo que haya en la mira
-  xpHud();
+  scoreboardTick(now); drawHud(fwd, now, targets); FOOT.hud(now); if (typeof BASE !== 'undefined') BASE.hud(now); if (typeof TV !== 'undefined') TV.update(S.foot.on ? null : aimT && (aimT.type === 'p' || aimT.type === 'n') ? aimT : S.tsel ? { type: S.tsel.kind, t: S.tsel, dist: S.tsel.dist } : aimT, now); // la nave bajo la mira manda; si no, la elegida con B; si no, lo que haya en la mira
   hud.textContent = planets.info.on ? `SUELO      ${fD(Math.max(0, planets.info.ground))} sobre ${planets.info.water ? 'el agua' : 'tierra'} de ${planets.info.name}` : ''; // el panel solo muestra el suelo: velocidad e impulso van en el medidor y los avisos en notificaciones
   if (ov.style.display !== 'none' && typeof hangarFrame === 'function') hangarFrame(now);
 }
