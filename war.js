@@ -51,7 +51,7 @@ const WAR = (() => {
     for (const r of rows) {
       if (!Array.isArray(r) || r.length !== 9 || !bodies[r[3]]) continue; const [id, o, zi, a, x, y, z, hp, e] = r; seen.add(id); let s = M.get(id);
       if (!s || s.o !== o) { if (s) dropS(s); s = { id, o, zi, a, off: [x, y, z], k }; M.set(id, s); build(s); }
-      if (s.w && s.hp !== undefined && (hp < s.hp || (k === 'W' && e < s.sh - 0.5)) && !(performance.now() - (s.fxT || 0) < 400)) { if (k === 'W') { const fx = shieldFx(s.sh || 0, e, C.ws.sh, s.shBr); s.shBr = fx === 'break' || (fx === 'hull' && !!s.shBr); if (fx === 'shield') s.shBr = false; shieldHitW(s, null, fx); } else puff(s.w, 0.1, 0xffb050, 0.5, 0.02); } // impacto visible a distancia (lo ve todo el mundo por el tick)
+      if (s.w && s.hp !== undefined && (hp < s.hp || (k === 'W' && e < s.sh - 0.5)) && !(performance.now() - (s.hitT || 0) < 400)) { if (k === 'W') { const fx = shieldFx(s.sh || 0, e, C.ws.sh, s.shBr); s.shBr = fx === 'break' || (fx === 'hull' && !!s.shBr); if (fx === 'shield') s.shBr = false; shieldHitW(s, null, fx); } else puff(s.w, 0.1, 0xffb050, 0.5, 0.02); } // impacto visible a distancia (lo ve todo el mundo por el tick)
       s.hp = hp; if (k === 'W') s.sh = e; else s.on = e;
     }
     for (const [id, s] of [...M]) if (!seen.has(id)) { dropS(s); M.delete(id); if (pref === id) pref = 'base'; }
@@ -358,7 +358,7 @@ const WAR = (() => {
     const d = new THREE.Mesh(DOMEG, m); d.visible = false; d.frustumCulled = false; d.position.set(...DOMEB.c); d.scale.set(...DOMEB.h); if (s.g) s.g.add(d); s.dome = d; return d;
   }
   function shieldHitW(s, pos, fx) { // fx de sysgen.shieldFx · pos: punto de impacto (mundo) si se conoce; si no, un punto al azar de la cúpula
-    if (!s.w || !s.q) return; s.fxT = performance.now(); const wp = pos || s.w;
+    if (!s.w || !s.q) return; s.hitT = performance.now(); const wp = pos || s.w;
     if (fx === 'hull') { puff(wp, 0.25 * SCW, 0xff8a3c, 0.6, 0.012); puff(wp, 0.4 * SCW, 0x5a4a3a, 1.6, 0.008); return; } // casco: fogonazo naranja, chispas y humo
     if (!s.g) return; const d = domeOf(s), u = d.material.uniforms;
     if (pos) { _v.set(pos[0] - s.w[0], pos[1] - s.w[1], pos[2] - s.w[2]).applyQuaternion(_qi.copy(s.q).invert()).divideScalar(SCW); u.uHit.value.set((_v.x - DOMEB.c[0]) / DOMEB.h[0], (_v.y - DOMEB.c[1]) / DOMEB.h[1], (_v.z - DOMEB.c[2]) / DOMEB.h[2]).normalize(); }
