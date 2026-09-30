@@ -116,7 +116,7 @@ const MAP = (() => {
     const s = st.sel; if (!s) { card.hidden = true; return; }
     const sig = JSON.stringify([s.kind, s.i, ZR, S.tgt, s.kind === 'cz' ? [WAR.CZS[s.i], WAR.look(s.i).txt] : 0]); if (sig === st.cardSig && !card.hidden) return; st.cardSig = sig; card.hidden = false;
     if (s.kind === 'zone') { card.innerHTML = zoneBlock(s.i); return; }
-    const b = bodies[s.i], d = Math.hypot(b.pos[0] - S.pos[0], b.pos[1] - S.pos[1], b.pos[2] - S.pos[2]) - b.R, zs = b.k === 'sun' ? [] : ZT.filter(t => t.zone.anchor === b.i), occ = BASES.find(x => x.body === b.n);
+    const b = bodies[s.i], d = Math.hypot(b.pos[0] - S.pos[0], b.pos[1] - S.pos[1], b.pos[2] - S.pos[2]) - b.R, zs = b.k === 'sun' || typeof WAR === 'undefined' ? [] : ZT.filter(t => t.zone.cz === czAt(SYS, WAR.CZ, b.pos)), occ = BASES.find(x => x.body === b.n);
     card.innerHTML = `<h3>${b.n}</h3><small>${b.k === 'sun' ? 'estrella' : b.parent ? 'luna de ' + b.parent.n : (b.label || 'planeta')} · ${fD(Math.max(0, d))}${d > 1 ? ' · a 5 c: ' + fT(d / (5 * C)) : ''}${occ ? ' · hangar de ' + occ.owner : ''}</small>`
       + (zs.length ? zs.map(t => zoneBlock(t.zi)).join('') : '<div class="zb"><small>Sin zona de recursos cercana.</small></div>');
   }
@@ -237,11 +237,11 @@ const MAP = (() => {
     if (Math.abs(d.y) < 1e-6) return null; const t = -o.y / d.y; return t > 0 ? [(o.x + d.x * t) / K, 0, (o.z + d.z * t) / K] : null;
   }
   function czDraw(pts, now, Q) { // Q: cola de etiquetas de drawSys
-    const pl = st.place, mp = czMouse(), hz = mp ? czAt(SYS, WAR.CZ, mp) : -1, sz = st.sel && st.sel.kind === 'cz' ? st.sel.i : -1, P = [];
+    const pl = st.place, mp = czMouse(), hz = mp ? czAt(SYS, WAR.CZ, mp) : -1, pd = pl && hz >= 0 ? WAR.deploy(pl.k, hz) : null, plOk = !!pd && !pd.why, sz = st.sel && st.sel.kind === 'cz' ? st.sel.i : -1, P = [];
     g.save(); g.lineJoin = 'round';
     WAR.CZ.forEach((z, zi) => { const sp = projPoly(czPoly(z)); if (sp.length >= 3) P.push({ zi, sp, L: WAR.look(zi), hi: zi === hz || zi === sz }); });
     const path = sp => { g.beginPath(); sp.forEach(([x, y], k) => { if (k) g.lineTo(x, y); else g.moveTo(x, y); }); g.closePath(); };
-    for (const q of P) { path(q.sp); g.globalAlpha = q.hi ? 0.3 : q.L.cap ? 0.2 + 0.08 * Math.sin(now / 250) : q.L.sun ? 0.1 : 0.11; g.fillStyle = q.L.col; g.fill(); g.globalAlpha = 1; g.lineWidth = 6; g.strokeStyle = '#050f1c'; g.stroke(); // 1.ª pasada: relleno y borde negro
+    for (const q of P) { path(q.sp); g.globalAlpha = q.hi ? 0.3 : q.L.cap ? 0.2 + 0.08 * Math.sin(now / 250) : q.L.sun ? 0.1 : 0.11; g.fillStyle = pl && q.zi === hz ? (plOk ? '#5dff8a' : '#ff3b30') : q.L.col; g.fill(); // en colocación, la zona bajo el cursor: verde válida / roja inválida g.globalAlpha = 1; g.lineWidth = 6; g.strokeStyle = '#050f1c'; g.stroke(); // 1.ª pasada: relleno y borde negro
       if (q.L.sun) { g.save(); g.clip(); const xs = q.sp.map(p => p[0]), ys = q.sp.map(p => p[1]), x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys); g.strokeStyle = 'rgba(255,159,28,0.18)'; g.lineWidth = 6; g.beginPath(); for (let x = x0 - (y1 - y0); x < x1; x += 22) { g.moveTo(x, y1); g.lineTo(x + (y1 - y0), y0); } g.stroke(); g.restore(); } } // zona solar: franjas de peligro, no reclamable
     P.sort((x, y) => x.hi - y.hi); for (const q of P) { path(q.sp); g.lineWidth = q.hi ? 3.5 : 2; g.strokeStyle = q.L.col; if (q.L.cap) { g.setLineDash([12, 8]); g.lineDashOffset = -now / 30; } g.stroke(); g.setLineDash([]); } // 2.ª: borde de color (la resaltada encima)
     const ring = (Date.now() / 1000 % WARCFG.gain.every) / WARCFG.gain.every; // anillo de 10 s sincronizado con el reloj real (el servidor entrega al cambiar de franja)
@@ -260,24 +260,24 @@ const MAP = (() => {
     for (const s of WAR.all()) { // buques (rombo grande) y satélites (pequeño) en su sitio real: están anclados a la estrella · azul míos, rojo ajenos
       if (!s.w) continue; const q = projU(czV.set(s.w[0] * K, 0, s.w[2] * K)); if (!q) continue; const mine = s.o === myId, col = mine ? '#4db8ff' : '#ff3b30', r = s.k === 'W' ? 8 : 5;
       g.beginPath(); g.moveTo(q[0], q[1] - r); g.lineTo(q[0] + r, q[1]); g.lineTo(q[0], q[1] + r); g.lineTo(q[0] - r, q[1]); g.closePath(); g.fillStyle = col; g.fill(); g.lineWidth = 3; g.strokeStyle = '#050f1c'; g.stroke();
+      if (s.k === 'W') { const fh = Math.max(0, Math.min(1, s.hp / WARCFG.ws.hp)), fs = Math.max(0, Math.min(1, s.sh / WARCFG.ws.sh)); g.fillStyle = '#050f1c'; g.fillRect(q[0] - 20, q[1] + 11, 40, 9); g.fillStyle = fh > 0.35 ? '#5dff8a' : '#ff5a4a'; g.fillRect(q[0] - 19, q[1] + 12, 38 * fh, 4); g.fillStyle = '#4db8ff'; g.fillRect(q[0] - 19, q[1] + 16, 38 * fs, 3); } // vida y escudo del buque en el mapa
       Q(q[0], q[1], `${s.k === 'W' ? 'BUQUE' : 'SATÉLITE'} · ${mine ? 'TUYO' : WAR.nmOf(s.o)}`, mine ? '#9fd8ff' : '#ff8a7a', 6, { bold: true, size: 10 });
       pts.push({ x: q[0], y: q[1], n: `${s.k === 'W' ? 'Buque' : 'Satélite'} de ${WAR.nmOf(s.o)}`, kind: s.k === 'W' ? 'buque de guerra' : 'satélite defensivo', pos: s.w });
     }
     st.ghost = null;
     if (pl) { // fantasma bajo el cursor: verde = válido, rojo = inválido (con el motivo); el clic lo confirma
-      if (mp) {
-        const off = [Math.round(mp[0]), 0, Math.round(mp[2])], why = WAR.check(pl.k, hz, off), col = why ? '#ff3b30' : '#5dff8a', x = st.mx, y = st.my; st.ghost = { zi: hz, off, why };
-        g.beginPath(); g.arc(x, y, 11 + 2 * Math.sin(now / 150), 0, 7); g.globalAlpha = 0.35; g.fillStyle = col; g.fill(); g.globalAlpha = 1; g.lineWidth = 5; g.strokeStyle = '#050f1c'; g.stroke(); g.lineWidth = 2; g.strokeStyle = col; g.stroke();
-        g.beginPath(); g.moveTo(x, y - 6); g.lineTo(x + 4, y + 5); g.lineTo(x - 4, y + 5); g.closePath(); g.fillStyle = col; g.fill();
-        g.textAlign = 'center'; g.font = `bold 12px ${MONO}`; g.lineWidth = 4; g.strokeStyle = '#000'; g.fillStyle = col; const tx = why || `CLIC: ${pl.k === 'W' ? 'DESPLEGAR EL BUQUE' : 'CONSTRUIR EL SATÉLITE'} AQUÍ`; g.strokeText(tx, x, y + 30); g.fillText(tx, x, y + 30);
-        
+      if (pd) { // la posición NO se elige: el buque/satélite va junto al cúmulo de la zona (sysgen.czDeployPoint); aquí se marca dónde caerá
+        const col = plOk ? '#5dff8a' : '#ff3b30'; st.ghost = { zi: hz, why: pd.why };
+        const q = pd.off && projU(czV.set(pd.off[0] * K, 0, pd.off[2] * K));
+        if (q) { g.beginPath(); g.arc(q[0], q[1], 9 + 3 * Math.sin(now / 150), 0, 7); g.globalAlpha = 0.4; g.fillStyle = col; g.fill(); g.globalAlpha = 1; g.lineWidth = 5; g.strokeStyle = '#050f1c'; g.stroke(); g.lineWidth = 2; g.strokeStyle = col; g.stroke(); g.beginPath(); g.moveTo(q[0], q[1] - 6); g.lineTo(q[0] + 6, q[1]); g.lineTo(q[0], q[1] + 6); g.lineTo(q[0] - 6, q[1]); g.closePath(); g.fillStyle = col; g.fill(); g.setLineDash([5, 5]); g.beginPath(); g.moveTo(st.mx, st.my); g.lineTo(q[0], q[1]); g.stroke(); g.setLineDash([]); }
+        g.textAlign = 'center'; g.font = `bold 12px ${MONO}`; g.lineWidth = 4; g.strokeStyle = '#000'; g.fillStyle = col; const tx = pd.why || `CLIC: ${pl.k === 'W' ? 'DESPLEGAR EL BUQUE' : 'CONSTRUIR EL SATÉLITE'} JUNTO AL CÚMULO`; g.strokeText(tx, st.mx, st.my + 30); g.fillText(tx, st.mx, st.my + 30);
       }
-      const W = c2.width, tx = `${pl.k === 'W' ? 'DESPLIEGUE · BUQUE DE GUERRA' : 'CONSTRUCCIÓN · SATÉLITE DEFENSIVO'} — clic en un punto de una zona AZUL (tuya) y segura · Esc: cancelar`; g.font = `bold 13px ${MONO}`; const w = g.measureText(tx).width + 36;
+      const W = c2.width, tx = `${pl.k === 'W' ? 'DESPLIEGUE · BUQUE DE GUERRA' : 'CONSTRUCCIÓN · SATÉLITE DEFENSIVO'} — clic en una zona AZUL (tuya): se posiciona junto a su cúmulo · Esc: cancelar`; g.font = `bold 13px ${MONO}`; const w = g.measureText(tx).width + 36;
       g.fillStyle = '#050f1c'; g.fillRect(W / 2 - w / 2 + 4, 52, w, 34); g.fillStyle = '#0b2233'; g.fillRect(W / 2 - w / 2, 48, w, 34); g.lineWidth = 3; g.strokeStyle = '#050f1c'; g.strokeRect(W / 2 - w / 2, 48, w, 34); g.textAlign = 'center'; g.fillStyle = '#ffd23f'; g.fillText(tx, W / 2, 70);
     }
     g.restore();
   }
-  function placeClick() { const gh = st.ghost; if (!gh) return say('Elige un punto dentro de una zona de control tuya (azul)'); if (gh.why) return say(gh.why); send({ t: 'wdep', k: st.place.k, zi: gh.zi, off: gh.off }); close(); }
+  function placeClick() { const gh = st.ghost; if (!gh) return say('Elige un punto dentro de una zona de control tuya (azul)'); if (gh.why) return say(gh.why); send({ t: 'wdep', k: st.place.k, zi: gh.zi }); close(); }
   function loop() { if (!st.open) return; requestAnimationFrame(loop); const now = performance.now(), dt = Math.min(0.1, (now - st.t) / 1000); st.t = now; drawSys(dt); }
 
   // ---------- entrada ----------

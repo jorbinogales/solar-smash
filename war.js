@@ -5,8 +5,9 @@
 const WAR = (() => {
   const C = WARCFG, CZ = genControlZones(SYS), CZS = CZ.map(() => ({ o: 0, c: 0, p: 0 })), WS = new Map(), SA = new Map(), stock = { W: 0, S: 0 }; // stock: comprados y aún sin desplegar (los recursos ya se gastaron)
   let pref = 'base', synced = false; // pref: punto de reaparición elegido ('base' o id de uno de mis buques)
+  const RESN = ['agua', 'piedra', 'cobre', 'plata', 'oro', 'diamante'], SCW = C.ws.scale || 1; // SCW: escala del buque (×2)
   const all = () => [...WS.values(), ...SA.values()], mineW = () => [...WS.values()].filter(s => s.o === myId), T = s => s.k === 'W' ? C.ws : C.sat;
-  const nmOf = o => o === myId ? myName : ((BASE.LB.list.find(x => x.id === o) || {}).nm || (remotes.get(o) || {}).name || 'Piloto');
+  const nmOf = o => o >= 1000 ? ((BASE.HG.get(o) || {}).nm || 'BOT') : o === myId ? myName : ((BASE.LB.list.find(x => x.id === o) || {}).nm || (remotes.get(o) || {}).name || 'Piloto');
   const wpos = s => { const A = bodies[s.a].pos; return [A[0] + s.off[0], A[1] + s.off[1], A[2] + s.off[2]]; };
   const czPos = zi => czCenter(CZ[zi]); // zonas fijas respecto a la estrella (en el origen)
   const fwdOf = s => { const f = new THREE.Vector3(0, 0, -1).applyQuaternion(s.q); return [f.x, f.y, f.z]; };
@@ -73,7 +74,7 @@ const WAR = (() => {
   }
   function sync(m) {
     if (Array.isArray(m.cz) && m.cz.length === CZ.length) m.cz.forEach((r, i) => {
-      const Z = CZS[i], [o, c, p] = r;
+      const Z = CZS[i], [o, c, p, rs] = r; if (typeof rs === 'string' && RESN.includes(rs)) CZ[i].res = rs; // recurso forzado por el servidor (zona del planeta inicial: agua)
       if (synced && Z.o !== o) { if (o === myId) say(`¡Zona reclamada! Da +${C.gain.n} ${CZ[i].res} cada ${C.gain.every} s y ya puedes desplegar en ella`); else if (Z.o === myId) say('Has perdido una zona de control'); }
       Z.o = o; Z.c = c; Z.p = p;
     });
@@ -95,7 +96,7 @@ const WAR = (() => {
     return false;
   }
   function fire(s, t, tg) { // buque: plasma con puntería adelantada (precisión moderada) · satélite: misil guiado de largo alcance
-    const homing = s.k === 'S', c = [s.w[0], s.w[1] + (homing ? 0 : 0.5), s.w[2]], d0 = nrm(sub(tg.pos, c)), mp = c.map((x, i) => x + d0[i] * (homing ? 0.5 : 0.3));
+    const homing = s.k === 'S', c = [s.w[0], s.w[1] + (homing ? 0 : 0.5 * SCW), s.w[2]], d0 = nrm(sub(tg.pos, c)), mp = c.map((x, i) => x + d0[i] * (homing ? 0.5 : 0.3 * SCW)); // bocas: sobre la cubierta del buque (escalado)
     let ap = tg.pos; if (!homing) { const fw = new THREE.Vector3(0, 0, -1).applyQuaternion(tg.q); for (let k = 0; k < 2; k++) { const tt = len(sub(ap, mp)) / t.spd; ap = tg.pos.map((x, i) => x + fw.getComponent(i) * tg.v * tt); } }
     const l = len(sub(ap, mp)); if (l < 0.01) return; const dir = sub(ap, mp).map(x => x / l), kind = homing ? 'm' : 'p', tgt = homing ? { k: tg.id >= 3000 ? 'n' : 'p', id: tg.id } : null, key = `${myId ?? 0}:x${++seq}`, sn = (s.k === 'W' ? 'Buque de ' : 'Satélite de ') + nmOf(s.o);
     spawnProj(-s.o, key, kind, mp, dir, tgt, t.dmg, { spd: t.spd, col: homing ? 0x9fe8ff : 0xff8a3c, life: Math.min(60, l / t.spd * 1.5 + 3) }); const q = projs.get(key); if (q) q.sn = sn; // sn: nombre para el aviso de ataque
@@ -106,7 +107,7 @@ const WAR = (() => {
   function frame(dt) {
     for (const s of all()) {
       s.w = wpos(s); const v = view(s.w); s.d = v.d; s.g.visible = v.d < 300000;
-      if (s.g.visible) { s.g.position.set(v.x, v.y, v.z); s.g.scale.setScalar(v.s); s.g.quaternion.copy(s.q); }
+      if (s.g.visible) { s.g.position.set(v.x, v.y, v.z); s.g.scale.setScalar(v.s * (s.k === 'W' ? SCW : 1)); s.g.quaternion.copy(s.q); }
     }
     if (!BASE.started() || BASE.loading() || BASE.LB.phase !== 'playing') return;
     const alive = P.hp > 0 && !S.warp.on && !S.foot.on, host = BASE.isHost() && typeof NEU !== 'undefined';
@@ -121,9 +122,9 @@ const WAR = (() => {
   }
   function hit(old, pos, p) { // mi proyectil contra un buque o satélite ajeno: el daño lo decide el servidor ('wh'); aquí solo se descuenta para verlo al momento
     for (const s of all()) {
-      if (s.o === myId || !s.w || segDist(old, pos, s.w) > 2.5) continue;
+      if (s.o === myId || !s.w || segDist(old, pos, s.w) > 2.5 * SCW) continue;
       let ok = s.k === 'S' && segDist(old, pos, s.w) < 0.3;
-      if (s.k === 'W') { const f = fwdOf(s); for (const z of [1.35, 0.45, -0.45, -1.25]) if (segDist(old, pos, s.w.map((c, i) => c + f[i] * z)) < 0.5) ok = true; } // 4 esferas a lo largo del casco
+      if (s.k === 'W') { const f = fwdOf(s); for (const z of [1.35, 0.45, -0.45, -1.25]) if (segDist(old, pos, s.w.map((c, i) => c + f[i] * z * SCW)) < 0.5 * SCW) ok = true; } // 4 esferas a lo largo del casco (escaladas)
       if (!ok) continue;
       send({ t: 'wh', k: s.k, i: s.id, dmg: p.dmg }); const a = Math.min(s.sh || 0, p.dmg); if (s.k === 'W') s.sh -= a; s.hp -= p.dmg - a; boom(pos, p.kind === 'm' ? 0.08 : 0.02); P.lastCombat = performance.now(); return true;
     }
@@ -161,11 +162,18 @@ const WAR = (() => {
         const x = (tv.x * 0.5 + 0.5) * W, y = (-tv.y * 0.5 + 0.5) * H - (dl < 40 ? 70 : 0), col = mine ? '#4db8ff' : '#ff3b30', r = s.k === 'W' ? 13 : 10, t = T(s), f = Math.max(0, Math.min(1, s.hp / t.hp));
         g2.beginPath(); g2.moveTo(x, y - r); g2.lineTo(x + r, y); g2.lineTo(x, y + r); g2.lineTo(x - r, y); g2.closePath(); g2.fillStyle = col; g2.fill(); g2.lineWidth = 3; g2.strokeStyle = '#050f1c'; g2.stroke();
         g2.fillStyle = '#050f1c'; g2.font = `900 ${r}px ${MONO}`; g2.fillText(s.k === 'W' ? 'B' : 'S', x, y + r * 0.35);
-        const tx = `${s.k === 'W' ? 'BUQUE' : 'SATÉLITE'} · ${mine ? 'TUYO' : nmOf(s.o).toUpperCase()}${s.k === 'S' && !s.on ? ' · INACTIVO' : ''}`; g2.font = `bold 10px ${MONO}`; g2.lineWidth = 3; g2.strokeStyle = '#000'; g2.fillStyle = mine ? '#9fd8ff' : '#ff8a7a'; g2.strokeText(tx, x, y + r + 13); g2.fillText(tx, x, y + r + 13);
-        g2.fillStyle = '#050f1c'; g2.fillRect(x - 27, y + r + 17, 54, 7); g2.fillStyle = f > 0.35 ? '#5dff8a' : '#ff5a4a'; g2.fillRect(x - 26, y + r + 18, 52 * f, 5);
-        g2.font = `10px ${MONO}`; g2.fillStyle = '#dff4ff'; g2.strokeText(fD(dl), x, y + r + 36); g2.fillText(fD(dl), x, y + r + 36);
+        g2.fillStyle = '#050f1c'; g2.fillRect(x - 36, y + r + 17, 72, 7); g2.fillStyle = f > 0.35 ? '#5dff8a' : '#ff5a4a'; g2.fillRect(x - 35, y + r + 18, 70 * f, 5); let yy = y + r + 34; // vida SIEMPRE visible (y escudo en los buques) con cifras
+        if (s.k === 'W') { const fs = Math.max(0, Math.min(1, s.sh / C.ws.sh)); g2.fillStyle = '#050f1c'; g2.fillRect(x - 36, y + r + 25, 72, 6); g2.fillStyle = '#4db8ff'; g2.fillRect(x - 35, y + r + 26, 70 * fs, 4); yy += 7; }
+        if (dl < (s.k === 'W' ? LABEL_KM.buque : LABEL_KM.satelite) && !aimedIs(s.k, s.id)) hudText(x, yy, [[`${s.k === 'W' ? 'BUQUE' : 'SATÉLITE'} · ${mine ? 'TUYO' : nmOf(s.o).toUpperCase()}${s.k === 'S' && !s.on ? ' · INACTIVO' : ''}`, mine ? '#9fd8ff' : '#ff8a7a', `bold 10px ${MONO}`], [`${Math.max(0, Math.round(s.hp))}/${t.hp}${s.k === 'W' ? ` · ESC ${Math.max(0, Math.round(s.sh))}` : ''} · ${fDs(dl)}`, '#dff4ff', `bold 10px ${MONO}`]], 6); // barras SIEMPRE; nombre y cifras solo cerca (o en la etiqueta del objeto apuntado)
       }
       const zi = czAt(SYS, CZ, S.pos, simT); if (CZS[zi].c && CZS[zi].p > 0) banner(zi, W, now); // solo mientras se reclama o se disputa (al llegar al 100 % desaparece: aviso puntual en #nt)
+    }
+    const my = mineW(); if (my.length) { // panel fijo con la vida y el escudo de MIS buques (bajo «MI BASE»)
+      const bh = document.getElementById('bh'), x = 16, y = 60 + (bh && bh.style && bh.style.display === 'block' ? (bh.offsetHeight || 0) + 10 : 0), w = 210, h = 16 + my.length * 30;
+      g2.textAlign = 'left'; g2.fillStyle = '#050f1c'; g2.fillRect(x + 3, y + 3, w, h); g2.fillStyle = '#00121fcc'; g2.fillRect(x, y, w, h); g2.lineWidth = 2; g2.strokeStyle = '#1d4a66'; g2.strokeRect(x, y, w, h);
+      my.forEach((s, i) => { const yy = y + 14 + i * 30, fh = Math.max(0, Math.min(1, s.hp / C.ws.hp)), fs = Math.max(0, Math.min(1, s.sh / C.ws.sh)); g2.font = `bold 11px ${MONO}`; g2.fillStyle = '#8fb8d0'; g2.fillText(`BUQUE ${i + 1}`, x + 10, yy); g2.textAlign = 'right'; g2.fillStyle = fh > 0.35 ? '#5dff8a' : '#ff5a4a'; g2.fillText(`${Math.round(s.hp)}/${C.ws.hp} · ESC ${Math.round(s.sh)}`, x + w - 10, yy); g2.textAlign = 'left';
+        g2.fillStyle = '#050f1c'; g2.fillRect(x + 10, yy + 4, w - 20, 6); g2.fillStyle = fh > 0.35 ? '#5dff8a' : '#ff5a4a'; g2.fillRect(x + 11, yy + 5, (w - 22) * fh, 4); g2.fillStyle = '#050f1c'; g2.fillRect(x + 10, yy + 11, w - 20, 5); g2.fillStyle = '#4db8ff'; g2.fillRect(x + 11, yy + 12, (w - 22) * fs, 3); });
+      g2.textAlign = 'center';
     }
     if (P.hp <= 0 && mineW().length) { // selector de reaparición: teclas 1-3
       const o = spawnOpts(), cur = curPref(), tx = 'REAPARECER EN:  ' + o.map((x, i) => `[${i + 1}] ${x.n}${x.id === cur ? ' ◀' : ''}`).join('   ');
@@ -176,9 +184,12 @@ const WAR = (() => {
   addEventListener('keydown', e => { if (P.hp > 0 || !BASE.started()) return; const i = ['Digit1', 'Digit2', 'Digit3'].indexOf(e.code), o = spawnOpts(); if (i >= 0 && o[i]) { pref = o[i].id; say(`Reaparecerás en: ${o[i].n}`); } });
   function spawn(noBase) { // reaparecer en la cubierta de mi buque elegido (o en el primero si no tengo base): true si lo hizo
     const my = mineW(); let s = my.find(x => x.id === pref); if (!s && noBase) s = my[0]; if (!s) return false;
-    const w = wpos(s), f = fwdOf(s), p = [w[0] + f[0] * 0.8, w[1] + 0.5, w[2] + f[2] * 0.8];
+    const w = wpos(s), f = fwdOf(s), p = [w[0] + f[0] * 0.8 * SCW, w[1] + 0.5 * SCW, w[2] + f[2] * 0.8 * SCW]; // cubierta del buque (escalado)
     S.pos = p.slice(); S.shipPos = p.slice(); S.v = 0; S.foot.on = false; S.park.on = false; S.auto = false; S.gearK = 0; S.q.copy(s.q); camQ.copy(S.q); S.w.p = S.w.y = S.w.r = 0;
     say('Despegas desde la cubierta de tu buque de guerra'); return true;
+  }
+  function deploy(k, zi) { // punto AUTOMÁTICO junto al cúmulo de la zona (sysgen.czDeployPoint, igual que el servidor) y si es válido
+    const off = czDeployPoint(SYS, CZ, ZONES, zi, all().filter(s => s.zi === zi).length); return { off, why: off ? check(k, zi, off) : 'Zona solar: no se puede desplegar' };
   }
   const near = () => { const p = S.foot.on ? S.shipPos : S.pos; return mineW().some(s => s.w && len(sub(s.w, p)) < C.ws.near); }; // junto a mi buque cuenta como «en base»
 
@@ -191,11 +202,11 @@ const WAR = (() => {
     const myS = [...SA.values()].filter(s => s.o === myId), myZ = CZ.filter((z, i) => CZS[i].o === myId), fullW = mineW().length + stock.W >= C.ws.max;
     const st = rows => `<div class="fst">${rows.map(([k, v]) => `<span>${k}</span><b>${v}</b>`).join('')}</div>`;
     const dep = (k, label, extra) => `<div class="fbuy"><button class="up" data-wdep="${k}"${stock[k] ? '' : ' disabled'}><b>${label}</b></button><span style="font-size:11px;color:#9fd4ee">En reserva: <b style="color:#fff">${stock[k]}</b> · ${extra}</span></div>`;
-    eW.innerHTML = `<div class="fhd"><i class="fico">${SVG_W}</i><div><b>BUQUE DE GUERRA</b><small>Nave capital de ~3,4 km. Reapareces en su cubierta y junto a él (&lt; ${C.ws.near} km) puedes comprar como en la base. Se despliega en una zona de control tuya y segura.</small></div></div>`
+    eW.innerHTML = `<div class="fhd"><i class="fico">${SVG_W}</i><div><b>BUQUE DE GUERRA</b><small>Nave capital de ~6,9 km. Reapareces en su cubierta y junto a él (&lt; ${C.ws.near} km) puedes comprar como en la base. Elige una zona reclamada: el buque se posiciona junto a su cúmulo.</small></div></div>`
       + st([['Casco', C.ws.hp], ['Escudo', C.ws.sh], ['Torretas', `6 × ${C.ws.dmg} daño`], ['Alcance', `${C.ws.range} km`], ['Cadencia', `${C.ws.cd} s`], ['Máximo', C.ws.max]])
       + `<div class="fbuy">${fullW ? '<span class="max">MÁXIMO ALCANZADO</span>' : buyBtn('data-war="W"', C.ws.cost)}</div>`
       + dep('W', 'DESPLEGAR', `desplegados ${mineW().length}/${C.ws.max}`) + mineW().map((s, i) => row(`Buque ${i + 1}`, s.hp / C.ws.hp, s.sh / C.ws.sh)).join('');
-    eS.innerHTML = `<div class="fhd"><i class="fico">${SVG_S}</i><div><b>SATÉLITE DEFENSIVO</b><small>Base flotante estática de ~1 km con misiles guiados de largo alcance. Solo en tus zonas reclamadas; si pierdes la zona, se desactiva.</small></div></div>`
+    eS.innerHTML = `<div class="fhd"><i class="fico">${SVG_S}</i><div><b>SATÉLITE DEFENSIVO</b><small>Base flotante estática de ~1 km con misiles guiados de largo alcance. Elige una zona reclamada: se construye junto a su cúmulo. Si pierdes la zona, se desactiva.</small></div></div>`
       + st([['Vida', C.sat.hp], ['Misiles', `${C.sat.dmg} daño`], ['Alcance', `${C.sat.range} km`], ['Cadencia', `${C.sat.cd} s`], ['Radar enemigo', '1,5 M km'], ['Por zona', C.sat.maxZone]])
       + `<div class="fbuy">${buyBtn('data-war="S"', C.sat.cost)}</div>`
       + dep('S', 'CONSTRUIR', `construidos ${myS.length}`) + myS.map((s, i) => row(`Satélite ${i + 1}${s.on ? '' : ' (inactivo)'}`, s.hp / C.sat.hp)).join('');
@@ -218,5 +229,5 @@ const WAR = (() => {
   });
   const sig = () => JSON.stringify([stock, pref, CZS.map(Z => Z.o), all().map(s => [s.id, s.o, s.hp, s.sh, s.on])]);
 
-  return { CZ, CZS, look, owner, check, czPos, frame, sync, onEvent, onOk, hit, targets, pos: (k, id) => { const s = (k === 'W' ? WS : SA).get(id); return s && s.w ? s.w : null; }, hud, spawn, near, mine: mineW, menu, buy, sig, model, nmOf, all };
+  return { CZ, CZS, look, owner, check, deploy, czPos, frame, sync, onEvent, onOk, hit, targets, pos: (k, id) => { const s = (k === 'W' ? WS : SA).get(id); return s && s.w ? s.w : null; }, hud, spawn, near, mine: mineW, menu, buy, sig, model, nmOf, all };
 })();

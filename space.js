@@ -158,10 +158,10 @@ function createFields(scene, bodies) {
   };
   const zoneCache = {};
   function zoneRocks(z) { // rocas del cúmulo de una zona en coordenadas normalizadas (radio de la zona = 1): [x, y, z, tamaño 0-1, tipo de roca]; mismas celdas y semillas que el juego
-    if (zoneCache[z.id]) return zoneCache[z.id]; const out = [], n = Math.ceil(z.radius / ZCELL), rt = ZROCK[z.dominant[0].type];
+    if (zoneCache[z.id]) return zoneCache[z.id]; const zc = z.cell || ZCELL, out = [], n = Math.ceil(z.radius / zc), rt = ZROCK[z.dominant[0].type]; // zc: celda del cúmulo (menor en los cúmulos pequeños: misma densidad)
     for (let i = -n; i < n; i++) for (let j = -n; j < n; j++) for (let k = -n; k < n; k++) {
       const r = rndOf(((i * 73856093) ^ (j * 19349663) ^ (k * 83492791) ^ Math.imul(z.id + 1, 668265263)) >>> 0); if (r() > 0.5) continue;
-      const ox = (i + r()) * ZCELL, oy = (j + r()) * ZCELL, oz = (k + r()) * ZCELL, u = r(), size = 1.5 + 45 * u * u * u; if (Math.hypot(ox, oy, oz) > z.radius) continue;
+      const ox = (i + r()) * zc, oy = (j + r()) * zc, oz = (k + r()) * zc, u = r(), size = 1.5 + 45 * u * u * u; if (Math.hypot(ox, oy, oz) > z.radius) continue;
       out.push([ox / z.radius, oy / z.radius, oz / z.radius, u, r() < 0.6 ? rt : (r() * ROCKS.length) | 0]);
     }
     return (zoneCache[z.id] = out);
@@ -184,11 +184,11 @@ function createFields(scene, bodies) {
       for (const z of ZONES) { // cúmulo denso de cada zona de recursos (ZONES, game.js): mismas celdas deterministas, pero en coordenadas de la zona, que sigue a su planeta
         const par = bodies[z.anchor], lx = P[0] - par.pos[0] - z.off[0], ly = P[1] - par.pos[1] - z.off[1], lz = P[2] - par.pos[2] - z.off[2];
         if (Math.hypot(lx, ly, lz) > RA + z.radius) continue;
-        const n = Math.ceil(z.radius / ZCELL), lo = v => Math.max(-n, Math.floor((v - RA) / ZCELL)), hi = v => Math.min(n - 1, Math.floor((v + RA) / ZCELL)), rt = ZROCK[z.dominant[0].type];
+        const zc = z.cell || ZCELL, n = Math.ceil(z.radius / zc), lo = v => Math.max(-n, Math.floor((v - RA) / zc)), hi = v => Math.min(n - 1, Math.floor((v + RA) / zc)), rt = ZROCK[z.dominant[0].type];
         for (let i = lo(lx); i <= hi(lx); i++) for (let j = lo(ly); j <= hi(ly); j++) for (let k = lo(lz); k <= hi(lz); k++) {
           const r = rndOf(((i * 73856093) ^ (j * 19349663) ^ (k * 83492791) ^ Math.imul(z.id + 1, 668265263)) >>> 0);
           if (r() > 0.5) continue; const id = 'z' + z.id + ':' + i + ':' + j + ':' + k; if (gone.has(id)) continue;
-          const ox = (i + r()) * ZCELL, oy = (j + r()) * ZCELL, oz = (k + r()) * ZCELL, u = r(), size = 1.5 + 45 * u * u * u;
+          const ox = (i + r()) * zc, oy = (j + r()) * zc, oz = (k + r()) * zc, u = r(), size = 1.5 + 45 * u * u * u;
           if (Math.hypot(ox, oy, oz) > z.radius || Math.hypot(ox - lx, oy - ly, oz - lz) > RA) continue;
           const off = [z.off[0] + ox, z.off[1] + oy, z.off[2] + oz], pos = [par.pos[0] + off[0], par.pos[1] + off[1], par.pos[2] + off[2]];
           if (bodies.some(b => Math.hypot(pos[0] - b.pos[0], pos[1] - b.pos[1], pos[2] - b.pos[2]) < b.R * 1.5 + 200)) continue;

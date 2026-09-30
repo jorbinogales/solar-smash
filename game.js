@@ -125,7 +125,7 @@ addEventListener('keydown', e => {
   }
   if (e.code === 'KeyT' && ((S.park.on && !S.park.water) || S.canPark)) togglePark();
   if (e.code === 'KeyV' && !e.repeat && P.hp > 0) { S.scanT = S.scanT ? 0 : performance.now(); say(S.scanT ? 'Escáner de recursos activado (V: apagar)' : 'Escáner apagado'); } // V: muestra los recursos alrededor con flechas
-  if ((e.code === 'ShiftLeft' || e.code === 'ShiftRight') && !e.repeat && !S.foot.on && !S.entry) toggleWarp(); // dentro de la atmósfera, Shift es el impulso de combustión (se mantiene pulsado)
+  if ((e.code === 'ShiftLeft' || e.code === 'ShiftRight') && !e.repeat && !S.foot.on && !S.entry) toggleWarp(e.ctrlKey); // dentro de la atmósfera, Shift es el impulso de combustión (se mantiene pulsado)
   if (e.code === 'KeyH') document.exitPointerLock(); // volver al hangar
   if (e.code === 'Space') { e.preventDefault(); fireMissile(); }
   const gi = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5'].indexOf(e.code); // en la atmósfera las marchas son km/h
@@ -237,7 +237,20 @@ function nqNext() { const x = NQ.q.shift() || null; NQ.cur = x; if (!x) return; 
 const nqEl = key => NQ.cur && NQ.cur.key === key ? NQ.cur.el : null;
 function nqDone(key) { NQ.q = NQ.q.filter(x => x.key !== key); const c = NQ.cur; if (c && c.key === key) setTimeout(() => { if (NQ.cur === c) nqNext(); }, 1500); } // ya comprada: fuera de la cola (y la visible deja paso a la siguiente)
 const QUIET = /luz|salto|atmósfera|exosfera|planeta|Ruedas|estacionada|Amerizaje|flota|despegar|impulso|despeg|aterriz|Partida iniciada|toma(r)? el control|preparando|Escáner|BAJO ATAQUE|atacando|te disparan/i; // planeta, velocidad luz, despegue/aterrizaje, inicio de partida, escáner y ataques: solo texto central, sin notificación
-const say = t => { const now = performance.now(); P.msg = t; P.msgT = now + 2500; if ((t !== lastSay || now - lastSayT > 3000) && !QUIET.test(t)) notifyEl(`<span>${t}</span>`, 5500); lastSay = t; lastSayT = now; };
+const SAYEL = new Map(); // aviso -> su tarjeta: el mismo aviso no se apila mientras siga visible
+const say = t => { const now = performance.now(); P.msg = t; P.msgT = now + 2500; const e0 = SAYEL.get(t); if (!QUIET.test(t) && !(e0 && e0.isConnected)) { if (SAYEL.size > 60) SAYEL.clear(); SAYEL.set(t, notifyEl(`<span>${t}</span>`, 5500)); } lastSay = t; lastSayT = now; };
+// ---------- ETIQUETAS DEL HUD: un solo sitio para los umbrales y una cola anti-solape ----------
+const LABEL_KM = { nave: 3000, jugador: 5000, base: 5000, buque: 20000, satelite: 20000, cumulo: 15000, planeta: 300000, estrella: 1500000 }; // más lejos solo se ve el ICONO; el objeto apuntado / fijado / elegido muestra siempre su etiqueta (solo ese)
+const HLQ = []; function hudText(x, y, lines, pri, align = 'center') { HLQ.push({ x, y, lines, pri, align }); } // lines: [[texto, color, fuente]] · prioridad: apuntado 10 > hostil 8 > base 7 > buque/satélite 6 > cúmulo 5 > planeta 4
+function hudFlush() { // al final del HUD: de mayor a menor prioridad; si una etiqueta tapa a otra ya colocada, no se dibuja (queda solo el icono)
+  HLQ.sort((a, b) => b.pri - a.pri); const placed = []; g2.save(); g2.lineJoin = 'round';
+  for (const L of HLQ) { let w = 0; for (const [t, , fo] of L.lines) { g2.font = fo; w = Math.max(w, g2.measureText(t).width); } const h = L.lines.length * 13, x0 = L.align === 'center' ? L.x - w / 2 : L.x, y0 = L.y - 11;
+    if (placed.some(r => x0 < r[0] + r[2] && x0 + w > r[0] && y0 < r[1] + r[3] && y0 + h > r[1])) continue; placed.push([x0, y0, w, h]); g2.textAlign = L.align;
+    L.lines.forEach(([t, col, fo], i) => { g2.font = fo; g2.lineWidth = 3; g2.strokeStyle = '#000'; g2.fillStyle = col; g2.strokeText(t, L.x, L.y + i * 13); g2.fillText(t, L.x, L.y + i * 13); }); }
+  g2.restore(); HLQ.length = 0;
+}
+const fDs = km => km < 1e4 ? km.toFixed(1) + ' km' : km < 1e6 ? Math.round(km / 1000) + ' mil km' : (km / 1e6).toFixed(1) + ' M km'; // distancia corta (sin «s-luz»; esa solo en el objeto apuntado)
+const aimedIs = (kind, id) => !!((lockT && lockT.kind === kind && lockT.id === id) || (aimT && aimT.t && aimT.t.kind === kind && aimT.t.id === id) || (S.tsel && S.tsel.kind === kind && S.tsel.id === id));
 // ---------- experiencia y niveles de la nave actual (datos y fórmula en ships.js: LVL, lvNeed, LV_MAX) ----------
 const HEXI = new Map(); function hexImg(lv, col) { const k = lv + col; let im = HEXI.get(k); if (!im) { im = new Image(); im.src = 'data:image/svg+xml;utf8,' + encodeURIComponent(hexSvg(lv, col, 40).replace('<svg ', '<svg xmlns="http://www.w3.org/2000/svg" ')); HEXI.set(k, im); if (HEXI.size > 80) HEXI.delete(HEXI.keys().next().value); } return im; } // hexágono de nivel (ships.js) como imagen para el canvas del HUD
 function lvBadge(W, now) { // nivel del jugador arriba al centro: aparece al ganar XP (~4 s) y mientras el escáner (V) está activo; al subir de nivel, brilla
@@ -398,14 +411,19 @@ function warpBlock() { // null = se puede saltar; si no, el cuerpo que lo impide
   }
   S.warp.ex = ex; return null;
 }
-function toggleWarp() {
+function clusterNear(b) { // cúmulo de la zona de control que contiene ese planeta (a < 1,5 M km de él y aún sin haber llegado): el salto luz va a él
+  if (!b || b.zone || b.k === 'sun' || typeof WAR === 'undefined') return null; const czi = czAt(SYS, WAR.CZ, b.pos), t = ZT.find(q => q.zone.cz === czi);
+  return t && len(sub(t.pos, b.pos)) < 1.5e6 && len(sub(t.pos, S.pos)) > t.R + ZONE_ARR + 500 ? t : null;
+}
+function toggleWarp(ctrl) { // ctrl: Ctrl+Shift = directo al planeta (sin desviar al cúmulo)
   const w = S.warp; if (w.on) return endWarp('Velocidad luz desactivada');
   if (w.cd > 0) { w.cd = 0; return say('Cuenta atrás cancelada'); }
   if (P.hp <= 0 || S.park.on) return;
   if (inCombat(performance.now())) return say('No puedes activar la velocidad luz en combate');
   if (w.lock || w.bar < 2) return say('Motor de velocidad luz recargando…');
   { const blk = warpBlock(); if (blk) return say(blk.k === 'sun' ? `Demasiado cerca de ${blk.n} para velocidad luz` : `Cerca de ${blk.n}: sal de su atmósfera y mira hacia fuera del planeta para saltar`); }
-  if (!warpTarget()) return say('Sin destino para el salto'); w.pick = warpTarget(); say(`Salto hacia ${w.pick.n}`); // el destino queda fijado durante la cuenta atrás
+  if (!warpTarget()) return say('Sin destino para el salto'); w.pick = warpTarget();
+  { const pl = w.pick, zc = !ctrl && S.lockB == null ? clusterNear(pl) : null; if (zc) { w.pick = zc; say(`Rumbo al cúmulo ${zc.n} junto a ${pl.n} · Ctrl+Shift: directo al planeta`); } else say(`Salto hacia ${w.pick.n}`); } // rumbo fijado con G (vuelo directo) o Ctrl: al planeta // el destino queda fijado durante la cuenta atrás
   w.cd = 5; w.n = 6; S.v = 0; // cuenta atrás de 5 s con pitido por número; al llegar a 0 se activa el salto (ver startWarp)
 }
 function warpTarget() { // destino del salto: el rumbo fijado con G, el elegido al empezar la cuenta atrás, el cúmulo bajo la mira, la zona elegida con N o en el mapa (si aún no estás en ella) o, si no, el cuerpo más cercano a la dirección de la mira (nunca sales del sistema)
@@ -704,7 +722,8 @@ function zoneMarks(W, H, now) { // zonas de recursos en el HUD: rombo con nombre
     for (const it of res) { const im = icoImg(it.type); g2.globalAlpha = a0 * (it.n ? 1 : 0.35); if (im && im.complete && im.naturalWidth) g2.drawImage(im, cx, y - sz / 2, sz, sz); g2.fillStyle = it.n ? '#fff' : '#889'; g2.strokeText(String(it.n), cx + sz + 2, y + 4); g2.fillText(String(it.n), cx + sz + 2, y + 4); cx += sz + 8 + 7 * String(it.n).length; }
     g2.globalAlpha = a0;
   };
-  for (const t of ZT) {
+  const near6 = ZT.map(t => [t, len(sub(t.pos, S.pos))]).sort((a, b) => a[1] - b[1]).slice(0, 6).map(x => x[0]); if (sel >= 0 && ZT[sel] && !near6.includes(ZT[sel])) near6.push(ZT[sel]); // hay un cúmulo por zona: solo los 6 más cercanos (y el elegido) para no saturar el HUD
+  for (const t of near6) {
     const v = view(t.pos), d = v.d, res = zoneRes(t.zi), isSel = t.zi === sel, empty = res.every(it => !it.n), col = isSel ? '#ffd23f' : empty ? '#8899aa' : RES[res[0].type];
     g2.strokeStyle = '#000';
     if (d < t.R) { g2.textAlign = 'center'; g2.font = `bold 13px ${MONO}`; g2.fillStyle = col; const tx = `ZONA ${t.n.toUpperCase()}${empty ? ' · AGOTADA' : ''}`; g2.lineWidth = 3; g2.strokeText(tx, W / 2, 160); g2.fillText(tx, W / 2, 160); chips(W / 2 - 60, 180, res, 16); continue; } // dentro de la zona: cartel arriba
@@ -713,8 +732,7 @@ function zoneMarks(W, H, now) { // zonas de recursos en el HUD: rombo con nombre
     if (losBlocked({ dir: [v.rel[0] / d, v.rel[1] / d, v.rel[2] / d], dist: d, kind: 'z' })) continue; // tapada por un planeta
     const x = (tv.x * 0.5 + 0.5) * W, y = (-tv.y * 0.5 + 0.5) * H, s = isSel ? 11 + Math.sin(now / 200) : 8;
     g2.globalAlpha = isSel ? 1 : 0.78; g2.strokeStyle = col; g2.beginPath(); g2.moveTo(x, y - s); g2.lineTo(x + s, y); g2.lineTo(x, y + s); g2.lineTo(x - s, y); g2.closePath(); g2.stroke();
-    g2.textAlign = 'left'; g2.font = `${isSel ? 'bold ' : ''}11px ${MONO}`; g2.fillStyle = col; g2.strokeStyle = '#000'; g2.lineWidth = 3; const tx = `${t.n} · ${fD(Math.max(0, d - t.R))}${empty ? ' · agotada' : ''}`; g2.strokeText(tx, x + s + 6, y - 2); g2.fillText(tx, x + s + 6, y - 2);
-    chips(x + s + 6, y + 13, res, 14); g2.globalAlpha = 1;
+    { const zAim = isSel || (aimT && aimT.type === 'z' && aimT.z === t), de = Math.max(0, d - t.R); if (zAim || de < LABEL_KM.cumulo) { hudText(x + s + 6, y - 2, [[`${t.n} · ${zAim ? fD(de) : fDs(de)}${empty ? ' · agotada' : ''}`, col, `${isSel ? 'bold ' : ''}11px ${MONO}`]], zAim ? 10 : 5, 'left'); chips(x + s + 6, y + 13, res, 14); } } g2.globalAlpha = 1; // lejos: solo el rombo
   }
   g2.restore();
 }
@@ -810,7 +828,8 @@ function drawHud(fwd, now, targets) {
       if (t.kind === 'p' || t.kind === 'h' || t.kind === 'n' || t.kind === 'W') { hbar(by - 8, t.sh / 100, '#4db8ff'); hbar(by, t.hp / 100, t.hp > 25 ? '#5dff8a' : '#ff4b3b'); } else hbar(by, t.hp / 100, t.hp > 40 ? '#5dff8a' : '#ff8a4c'); // vida sobre el objetivo
       if ((t.kind === 'p' || t.kind === 'n') && t.lv !== undefined) { const hi = hexImg(t.lv || 0, t.kind === 'n' ? (t.hostile ? '#ff5a4a' : '#c8ff5d') : '#ff5a4a'); if (hi.complete && hi.naturalWidth) g2.drawImage(hi, x - s - 16, y - s - 18, 22, 24); } // nivel en la esquina superior izquierda del recuadro
       if (sel) { g2.beginPath(); g2.moveTo(x, y - s - 24); g2.lineTo(x + s + 10, y); g2.lineTo(x, y + s + 24); g2.lineTo(x - s - 10, y); g2.closePath(); g2.stroke(); } // rombo de la nave elegida con B
-      g2.fillStyle = col; g2.fillText(t.kind === 'n' ? `${t.hostile ? 'HOSTIL' : 'NEUTRAL'} · ${shipTag(t)} · ${fD(t.dist)}` : t.kind === 'p' ? `${t.name} · ${shipTag(t)} · ${fD(t.dist)}` : `${t.name} · ${fD(t.dist)}`, x, y + s + 14);
+      { const aimed = lock || sel || (aimT && aimT.t === t), near = (t.kind === 'n' || t.kind === 'w') && t.dist < LABEL_KM.nave; // UNA etiqueta: jugadores, bots, bases, buques y satélites ya tienen marcador con icono (con su texto de cerca); aquí solo el objeto apuntado (completa) o una neutral/casco cercanos
+        if (aimed || near) hudText(x, y + s + 14, [[t.kind === 'n' ? `${t.hostile ? 'HOSTIL' : 'NEUTRAL'} · ${shipTag(t)} · ${aimed ? fD(t.dist) : fDs(t.dist)}` : t.kind === 'p' ? `${t.name} · ${shipTag(t)} · ${fD(t.dist)}` : `${t.name} · ${aimed ? fD(t.dist) : fDs(t.dist)}`, col, `12px ${MONO}`]], aimed ? 10 : t.kind === 'n' && t.hostile ? 8 : 5); }
       if (lock && needLock(t)) { const k = Math.min(1, S.lk ? S.lk.t / LOCK_T : 0); g2.save(); if (!lockOn && Math.floor(now / 120) % 2) g2.globalAlpha = 0.35; g2.strokeStyle = g2.fillStyle = lockOn ? '#ff2a2a' : '#ffb347'; g2.lineWidth = 3; g2.beginPath(); g2.arc(x, y, s + 9, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * k); g2.stroke(); g2.font = `bold 11px ${MONO}`; g2.fillText(lockOn ? '◆ BLOQUEADO · MISIL GUIADO' : `◇ ADQUIRIENDO ${Math.round(k * 100)} %`, x, y + s + 28); g2.restore(); } // indicador de bloqueo (parpadea mientras se adquiere)
     }
   }
@@ -1115,19 +1134,15 @@ function frame(now) {
   renderer.render(scene, camera);
 
   // etiquetas y HUD
-  for (const b of bodies) {
-    tv.copy(b.rp).project(camera);
-    const vis = tv.z < 1 && Math.abs(tv.x) < 1.1 && Math.abs(tv.y) < 1.1 && b.dist > b.R * 0.5 && !S.foot.on && !occluded(b); // un planeta tapado por otro no muestra su información
-    b.el.style.display = vis ? '' : 'none';
-    if (vis) {
-      b.el.style.transform = `translate(${(tv.x * 0.5 + 0.5) * innerWidth + 8}px,${(-tv.y * 0.5 + 0.5) * innerHeight}px)`;
-      b.el.className = 'lb' + (b.i === S.tgt ? ' t' : '');
-      b.el.textContent = `${b.n} · ${fD(b.dist - b.R)}`;
-    }
+  for (const b of bodies) { // etiquetas de planetas, lunas y estrella: a la cola del HUD (anti-solape); solo cerca (LABEL_KM) o si es el destino / está en la mira
+    if (b.el.style.display !== 'none') b.el.style.display = 'none';
+    tv.copy(b.rp).project(camera); const alt = b.dist - b.R, aimed = b.i === S.tgt || S.lockB === b.i || (aimT && aimT.type === 'b' && aimT.b === b);
+    if (tv.z < 1 && Math.abs(tv.x) < 1.1 && Math.abs(tv.y) < 1.1 && b.dist > b.R * 0.5 && !S.foot.on && !occluded(b) && (aimed || alt < (b.k === 'sun' ? LABEL_KM.estrella : LABEL_KM.planeta)))
+      hudText((tv.x * 0.5 + 0.5) * innerWidth + 8, (-tv.y * 0.5 + 0.5) * innerHeight, [[`${b.n} · ${aimed ? fD(alt) : fDs(alt)}`, aimed ? '#ffd23f' : '#8fd', `11px ${MONO}`]], aimed ? 10 : 4, 'left');
   }
   { const sg = JSON.stringify(INV); if (sg !== rsSig) { rsSig = sg; rsEl.innerHTML = Object.keys(RES).map(k => `<span class="cost"><i>${ICONS[k]}</i>${FOOT.creative ? '∞' : INV[k]}</span>`).join(''); } } // recursos recogidos: arriba a la izquierda, con su icono
   hud.style.display = S.foot.on ? 'none' : ''; // a pie se ocultan los paneles de la nave
-  scoreboardTick(now); drawHud(fwd, now, targets); FOOT.hud(now); if (typeof BASE !== 'undefined') BASE.hud(now); if (typeof WAR !== 'undefined') WAR.hud(now); if (typeof TV !== 'undefined') TV.update(S.foot.on ? null : aimT && (aimT.type === 'p' || aimT.type === 'n') ? aimT : S.tsel ? { type: S.tsel.kind, t: S.tsel, dist: S.tsel.dist } : aimT, now); // la nave bajo la mira manda; si no, la elegida con B; si no, lo que haya en la mira
+  scoreboardTick(now); drawHud(fwd, now, targets); FOOT.hud(now); if (typeof BASE !== 'undefined') BASE.hud(now); if (typeof WAR !== 'undefined') WAR.hud(now); hudFlush(); if (typeof TV !== 'undefined') TV.update(S.foot.on ? null : aimT && (aimT.type === 'p' || aimT.type === 'n') ? aimT : S.tsel ? { type: S.tsel.kind, t: S.tsel, dist: S.tsel.dist } : aimT, now); // la nave bajo la mira manda; si no, la elegida con B; si no, lo que haya en la mira
   hud.textContent = planets.info.on ? `SUELO      ${fD(Math.max(0, planets.info.ground))} sobre ${planets.info.water ? 'el agua' : 'tierra'} de ${planets.info.name}` : ''; // el panel solo muestra el suelo: velocidad e impulso van en el medidor y los avisos en notificaciones
   if (ov.style.display !== 'none' && typeof hangarFrame === 'function') hangarFrame(now);
 }
