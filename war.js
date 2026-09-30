@@ -1,4 +1,4 @@
-// Zonas de control (estilo mapa galáctico de Helldivers), buques de guerra y satélites defensivos.
+// Zonas de control (estilo mapa galáctico de Helldivers: teselan TODO el sistema en sectores anulares fijos respecto a la estrella), buques de guerra y satélites defensivos.
 // El servidor es la autoridad (tick: cz, wb, sa · mensajes wdep / wh · evento wdead). Aquí: modelos 3D cacheados (piezas fusionadas con kit()), marcadores y aviso de captura en el HUD,
 // disparos de sus torretas (cada cliente simula las ENEMIGAS contra sí mismo, como las torretas de las bases; el anfitrión, además, las propias contra neutrales hostiles a su dueño),
 // impactos de mis proyectiles, reaparición en un buque y la sección BUQUES / SATÉLITES del menú BASE. Usa bodies, S, P, view, spawnProj... de game.js y MAP (colocación).
@@ -8,15 +8,15 @@ const WAR = (() => {
   const all = () => [...WS.values(), ...SA.values()], mineW = () => [...WS.values()].filter(s => s.o === myId), T = s => s.k === 'W' ? C.ws : C.sat;
   const nmOf = o => o === myId ? myName : ((BASE.LB.list.find(x => x.id === o) || {}).nm || (remotes.get(o) || {}).name || 'Piloto');
   const wpos = s => { const A = bodies[s.a].pos; return [A[0] + s.off[0], A[1] + s.off[1], A[2] + s.off[2]]; };
-  const czPos = zi => { const z = CZ[zi], A = bodies[z.anchor].pos; return [A[0] + z.off[0], A[1] + z.off[1], A[2] + z.off[2]]; };
+  const czPos = zi => czCenter(CZ[zi]); // zonas fijas respecto a la estrella (en el origen)
   const fwdOf = s => { const f = new THREE.Vector3(0, 0, -1).applyQuaternion(s.q); return [f.x, f.y, f.z]; };
 
   // ---------- estado de las zonas visto por mí: AZUL mía · ROJO enemiga o peligrosa · ÁMBAR reclamándose · GRIS neutral ----------
-  function dangerOf(zi) { const z = CZ[zi]; return (z.planet && [...BASE.HG.values()].some(h => h.o !== myId && h.b === z.planet)) || [...WS.values()].some(s => s.o !== myId && s.zi === zi); }
+  const dangerOf = zi => czDanger(SYS, CZ, zi, myId, [...BASE.HG.values()], [...WS.values()], simT); // ZONA ROJA: contiene (o roza) un planeta con hangar enemigo o un buque enemigo
   function look(zi) {
     const Z = CZS[zi], dg = dangerOf(zi);
     if (Z.c && Z.p > 0) return { col: '#ffb347', txt: `${Z.c === myId ? 'RECLAMANDO' : 'EN DISPUTA · ' + nmOf(Z.c).toUpperCase()} ${Z.p} %`, cap: true, p: Z.p };
-    if (Z.o === myId) return { col: '#4db8ff', txt: dg ? 'TUYA · ENEMIGOS CERCA' : 'TUYA · SEGURA', p: 100 };
+    if (Z.o === myId) return { col: '#4db8ff', txt: dg ? 'TUYA · ZONA ROJA' : 'TUYA · SEGURA', p: 100 };
     if (Z.o) return { col: '#ff3b30', txt: 'ENEMIGA · ' + nmOf(Z.o).toUpperCase(), p: 100 };
     return dg ? { col: '#ff6a5a', txt: 'NEUTRAL · PELIGRO', p: 0 } : { col: '#dfe8ee', txt: 'NEUTRAL', p: 0 };
   }
@@ -55,7 +55,8 @@ const WAR = (() => {
   }
   function mesh(parts, mine) { const g = new THREE.Group(); for (const [m, geo] of parts) g.add(new THREE.Mesh(geo, m === GL ? (mine ? GA : GE) : m)); return g; }
   const model = k => mesh(k === 'W' ? partsW() : partsS(), false); // vista previa (recuadro del objetivo)
-  function build(s) { const d = nrm([-s.off[0], 0, -s.off[2]]); s.q = lookQ(d[0] || d[2] ? d : [0, 0, -1]); s.g = mesh(s.k === 'W' ? partsW() : partsS(), s.o === myId); s.g.visible = false; scene.add(s.g); } // orientación fija: proa hacia su cuerpo ancla (igual en todos los clientes)
+  function build(s) { const d = nrm([-s.off[0], 0, -s.off[2]]); // los buques y satélites se anclan a la estrella (a = 0, off absoluto)
+    s.q = lookQ(d[0] || d[2] ? d : [0, 0, -1]); s.g = mesh(s.k === 'W' ? partsW() : partsS(), s.o === myId); s.g.visible = false; scene.add(s.g); } // orientación fija: proa hacia su cuerpo ancla (igual en todos los clientes)
   const dropS = s => { if (s.g) scene.remove(s.g); };
 
   // ---------- red ----------

@@ -141,11 +141,11 @@ wss.on('connection', ws => {
         if (h.sh > 0) { const a = Math.min(h.sh, dm); h.sh -= a; dm -= a; } // el escudo de la base absorbe las balas
         if (dm <= 0) { /* todo absorbido */ } else if (Number.isInteger(m.tw) && m.tw >= 0 && m.tw < 4) h.tw[m.tw] = Math.max(0, h.tw[m.tw] - dm); else h.hp -= dm; // golpe a una torreta o al hangar
         if (h.hp <= 0) { R.hangars.delete(m.o); const x = R.lobby.get(m.o); if (x) { x.b = null; x.siteOk = false; } R.bots.delete(m.o - 1000); bcast(R, { ev: { t: 'hdead', o: m.o, by: id, id } }); }
-      } else if (m.t === 'wdep' && e && R.phase === 'playing' && (m.k === 'W' || m.k === 'S') && Number.isInteger(m.zi) && m.zi >= 0 && m.zi < R.czs.length && num(m.off, 3)) { // desplegar un buque de guerra (W) o construir un satélite (S) en una zona propia y segura (los recursos ya los gastó el cliente, como 'bup')
+      } else if (m.t === 'wdep' && e && R.phase === 'playing' && (m.k === 'W' || m.k === 'S') && Number.isInteger(m.zi) && m.zi >= 0 && m.zi < R.czs.length && num(m.off, 3)) { // desplegar un buque de guerra (W) o construir un satélite (S) en una zona propia y segura; off: punto ABSOLUTO respecto a la estrella (queda fijo: ancla a = 0). Los recursos ya los gastó el cliente, como 'bup'
         const W = m.k === 'W', M = W ? R.wships : R.sats, mine = [...M.values()].filter(s => s.o === id);
         const why = (W ? (mine.length >= WARCFG.ws.max ? `Máximo ${WARCFG.ws.max} buques desplegados` : '') : (mine.filter(s => s.zi === m.zi).length >= WARCFG.sat.maxZone ? `Máximo ${WARCFG.sat.maxZone} satélites por zona` : ''))
           || czCheck(R.SYS, R.czs, m.zi, m.off, id, R.cz[m.zi].o, [...R.hangars.values()], [...R.wships.values()], Date.now() / 1000);
-        if (!why) { const sid = (W ? 5000 : 6000) + (R.wn++ % 1000); M.set(sid, { id: sid, o: id, zi: m.zi, a: R.czs[m.zi].anchor, off: m.off.map(Math.round), hp: W ? WARCFG.ws.hp : WARCFG.sat.hp, sh: W ? WARCFG.ws.sh : 0, shT: 0, on: 1 }); }
+        if (!why) { const sid = (W ? 5000 : 6000) + (R.wn++ % 1000); M.set(sid, { id: sid, o: id, zi: m.zi, a: 0, off: [Math.round(m.off[0]), 0, Math.round(m.off[2])], hp: W ? WARCFG.ws.hp : WARCFG.sat.hp, sh: W ? WARCFG.ws.sh : 0, shT: 0, on: 1 }); }
         send(ws, { wok: why ? 0 : 1, k: m.k, why });
       } else if (m.t === 'wh' && e && (m.k === 'W' || m.k === 'S') && Number.isInteger(m.i) && Number.isFinite(m.dmg)) { // daño a un buque de guerra o a un satélite de otro jugador (lo decide el servidor, como 'hh')
         const M = m.k === 'W' ? R.wships : R.sats, s = M.get(m.i);
