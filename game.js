@@ -452,7 +452,7 @@ function fireMissile() {
 }
 applyLoadout(mySpec, false);
 const targetSpeed = t => t.k === 'p' ? (t.id === myId ? S.ve : remotes.get(t.id)?.v || (typeof BOT !== 'undefined' ? BOT.speed(t.id) : 0)) : t.k === 'n' && typeof NEU !== 'undefined' ? NEU.speed(t.id) : 0;
-function targetPos(t) { if (t.k === 'h') return typeof BASE !== 'undefined' ? BASE.targetPos(t.id) : null; if (t.k === 'p') return t.id === myId ? S.pos : remotes.get(t.id)?.apos || (typeof BOT !== 'undefined' ? BOT.pos(t.id) : null); if (t.k === 'n') return typeof NEU !== 'undefined' ? NEU.pos(t.id) : null; if (t.k === 'W' || t.k === 'S') return typeof WAR !== 'undefined' ? WAR.pos(t.k, t.id) : null; const w = wrecks[t.id]; return w && !dead.has(w.i) ? w.pos : null; }
+function targetPos(t) { if (t.k === 'h') return typeof BASE !== 'undefined' ? BASE.targetPos(t.id) : null; if (t.k === 'p') return t.id === myId ? S.pos : remotes.get(t.id)?.apos || (typeof BOT !== 'undefined' ? BOT.pos(t.id) : null); if (t.k === 'n') return typeof NEU !== 'undefined' ? NEU.pos(t.id) : null; if (t.k === 'W' || t.k === 'S' || t.k === 'F') return typeof WAR !== 'undefined' ? WAR.pos(t.k, t.id) : null; const w = wrecks[t.id]; return w && !dead.has(w.i) ? w.pos : null; }
 
 function applyLoadout(spec, reset = true) {
   mySpec = spec; const st = statsOf(spec, lvlOf(spec.t).a); scene.remove(ship); ship = makeShip(spec); scene.add(ship); // con los puntos de nivel de ESTA nave
@@ -616,7 +616,7 @@ const ATK = { t: 0, kind: '', name: '', pos: null, nt: {}, beep: 0 };
 function attackAlert(kind, name, pos) { // kind: 't' torretas enemigas · 'p' nave enemiga · 'b' daño a mi base
   const now = performance.now(); ATK.t = now; ATK.kind = kind; ATK.name = name || ''; ATK.pos = pos ? [...pos] : ATK.pos;
 }
-const ownerName = o => o >= 3000 && typeof NEU !== 'undefined' ? NEU.name(o) : (remotes.get(o) || {}).name || (typeof BOT !== 'undefined' && BOT.name(o)) || 'Un piloto'; // autor de un disparo: piloto, bot (2000+) o nave neutral (3000+)
+const ownerName = o => o >= 7000 && o < 8000 && typeof WAR !== 'undefined' ? WAR.fname(o) : o >= 3000 && typeof NEU !== 'undefined' ? NEU.name(o) : (remotes.get(o) || {}).name || (typeof BOT !== 'undefined' && BOT.name(o)) || 'Un piloto'; // autor de un disparo: piloto, bot (2000+) o nave neutral (3000+)
 const ownerPos = o => o >= 3000 && typeof NEU !== 'undefined' ? NEU.pos(o) : (remotes.get(o) || {}).pos || (typeof BOT !== 'undefined' ? BOT.pos(o) : null);
 function attackHud(W, H, now, cm) {
   const dt = now - ATK.t; if (dt > 2600) return; const k = 1 - dt / 2600, pulse = 0.5 + 0.5 * Math.sin(now / 110);
@@ -809,7 +809,7 @@ function drawHud(fwd, now, targets) {
   const nearest = Math.min(Infinity, ...targets.filter(t => t.kind === 'p').map(t => t.dist)); // enemigo más cercano (solo naves de jugadores)
   for (const t of targets) {
     if ((t.kind === 'w' && t.dist > 300000) || losBlocked(t)) continue; // sin línea de visión (planeta de por medio) no se dibuja
-    const lock = t === lockT, sel = t === S.tsel, col = sel ? '#ffd23f' : t.kind === 'n' ? (t.hostile ? (lock ? '#ff2a2a' : '#ff5a4a') : (lock ? '#ffee55' : '#c8ff5d')) : t.kind === 'p' || t.kind === 'h' || t.kind === 'W' || t.kind === 'S' ? (lock ? '#ff2a2a' : '#ff8a4c') : (lock ? '#ffee55' : '#5dff8a'); // neutrales: verde amarillento (rojo si están hostiles); elegida con B: amarillo
+    const lock = t === lockT, sel = t === S.tsel, col = sel ? '#ffd23f' : t.kind === 'n' ? (t.hostile ? (lock ? '#ff2a2a' : '#ff5a4a') : (lock ? '#ffee55' : '#c8ff5d')) : t.kind === 'p' || t.kind === 'h' || t.kind === 'W' || t.kind === 'S' || t.kind === 'F' ? (lock ? '#ff2a2a' : '#ff8a4c') : (lock ? '#ffee55' : '#5dff8a'); // neutrales: verde amarillento (rojo si están hostiles); elegida con B: amarillo
     tv.copy(t.grp.position).project(camera);
     let x = (tv.x * 0.5 + 0.5) * W, y = (-tv.y * 0.5 + 0.5) * H; const behind = tv.z > 1;
     if (behind) { x = W - x; y = H - y; }
@@ -835,13 +835,13 @@ function drawHud(fwd, now, targets) {
   }
   tv.set(fwd.x, fwd.y, fwd.z).multiplyScalar(1000).project(camera);
   const ax = (tv.x * 0.5 + 0.5) * W, ay = (-tv.y * 0.5 + 0.5) * H,
-        cone = Math.tan(CONE) / Math.tan(camera.fov * Math.PI / 360) * H / 2 * (1 + 0.08 * Math.max(0, 1 - nearest / 2000) * Math.sin(now / 140)), hot = lockT && lockOn && (lockT.kind === 'p' || lockT.kind === 'h' || lockT.kind === 'W' || lockT.kind === 'S');
+        cone = Math.tan(CONE) / Math.tan(camera.fov * Math.PI / 360) * H / 2 * (1 + 0.08 * Math.max(0, 1 - nearest / 2000) * Math.sin(now / 140)), hot = lockT && lockOn && (lockT.kind === 'p' || lockT.kind === 'h' || lockT.kind === 'W' || lockT.kind === 'S' || lockT.kind === 'F');
   g2.strokeStyle = hot ? '#ff2a2a' : lockT ? '#ffee55' : '#7fe8ff'; g2.beginPath(); g2.arc(ax, ay, 3, 0, 7);
   g2.moveTo(ax - 14, ay); g2.lineTo(ax - 6, ay); g2.moveTo(ax + 6, ay); g2.lineTo(ax + 14, ay); g2.moveTo(ax, ay - 14); g2.lineTo(ax, ay - 6); g2.moveTo(ax, ay + 6); g2.lineTo(ax, ay + 14); g2.stroke();
   g2.setLineDash([4, 6]); g2.beginPath(); g2.arc(ax, ay, cone, 0, 7); g2.stroke(); g2.setLineDash([]);
   g2.font = 'bold 22px ui-monospace,Consolas,monospace';
   if (hot) {
-    g2.fillStyle = '#ff2a2a'; if (Math.floor(now / 250) % 2) g2.fillText(lockT.kind === 'h' ? '⚠ BASE ENEMIGA FIJADA — DISPAROS GUIADOS ⚠' : lockT.kind === 'W' || lockT.kind === 'S' ? '⚠ ESTRUCTURA ENEMIGA FIJADA — DISPAROS GUIADOS ⚠' : '⚠ BLOQUEADO — MISILES GUIADOS ⚠', W / 2, 70);
+    g2.fillStyle = '#ff2a2a'; if (Math.floor(now / 250) % 2) g2.fillText(lockT.kind === 'h' ? '⚠ BASE ENEMIGA FIJADA — DISPAROS GUIADOS ⚠' : lockT.kind === 'W' || lockT.kind === 'S' || lockT.kind === 'F' ? '⚠ OBJETIVO ENEMIGO FIJADO — DISPAROS GUIADOS ⚠' : '⚠ BLOQUEADO — MISILES GUIADOS ⚠', W / 2, 70);
     if (now - lastBeep > 70 + 230 * Math.min(1, lockT.dist / RANGE)) { lastBeep = now; beep(); } // más cerca = pitido más rápido
   } else if (lockT && !lockOn) { g2.fillStyle = Math.floor(now / 150) % 2 ? '#ffb347' : '#fff'; g2.font = `bold 18px ${MONO}`; g2.fillText(`ADQUIRIENDO BLOQUEO… ${Math.round(Math.min(1, S.lk.t / LOCK_T) * 100)} % · sin bloqueo el daño se reduce`, W / 2, 70); }
   else if (lockT) { g2.fillStyle = '#ffee55'; g2.fillText(lockT.kind === 'n' ? `NAVE ${lockT.hostile ? 'HOSTIL' : 'NEUTRAL'} FIJADA — disparos guiados` : 'CASCO FIJADO — misil listo', W / 2, 70); }
@@ -1076,9 +1076,9 @@ function frame(now) {
     if (p.fromSpace && airK(p.pos) > 0.02) { killProj(key); continue; } // viene del espacio: se consume al entrar en la atmósfera
     const ao = fields.active.find(o => segDist(old, p.pos, o.pos) < o.r); if (ao) { puff(p.pos, 2, 0xffd090, 0.4, 0.01); killProj(key); if (p.owner === myId && !p.bot) hitAsteroid(ao, p.dmg); continue; } // extraer recursos de asteroides
     if ((p.owner === myId || (p.owner >= 2000 && p.owner < 3000)) && typeof BASE !== 'undefined' && BASE.hit(old, p.pos, p)) { killProj(key); continue; } // golpe al hangar de otro jugador (las neutrales no atacan bases)
-    if (p.owner === myId && typeof WAR !== 'undefined' && WAR.hit(old, p.pos, p)) { killProj(key); continue; } // golpe a un buque de guerra o satélite ajeno (lo decide el servidor)
+    if (typeof WAR !== 'undefined' && (p.owner === myId || (p.owner >= 3000 && p.owner < 4000 && BASE.isHost())) && WAR.hit(old, p.pos, p, p.owner >= 3000, ak)) { killProj(key); continue; } // golpe a un buque de guerra o satélite ajeno (lo decide el servidor)
     const gi = planets.impact(old, p.pos); if (gi) { killProj(key); if (len(sub(gi, S.pos)) < 200) boom(gi, p.kind === 'm' ? 0.06 : 0.012); FOOT.splash(gi, p.kind); continue; } // el proyectil golpea el suelo: explosión y daño de área a los objetos
-    if (p.owner !== myId && p.owner !== -myId && !p.vis && alive && segDist(old, p.pos, S.pos) < (p.spd !== undefined || ak > 0.02 ? 0.04 : HIT_R)) { // en el aire y los disparos de torreta: radio real de la nave (40 m); en el espacio, el radio grande de siempre // el impacto lo decide la víctima
+    if (p.owner !== myId && p.owner !== -myId && !(p.owner >= 7000 && p.owner < 8000 && typeof WAR !== 'undefined' && WAR.fOwner(p.owner) === myId) && !p.vis && alive && segDist(old, p.pos, S.pos) < (p.spd !== undefined || ak > 0.02 ? 0.04 : HIT_R)) { // en el aire y los disparos de torreta: radio real de la nave (40 m); en el espacio, el radio grande de siempre // el impacto lo decide la víctima
       if (p.nl && Math.random() >= NOLOCK_HIT) { killProj(key); puff(p.pos, 0.01, 0xffd070, 0.3, 0.006); continue; } // disparo sin bloqueo: roza (solo cuenta el 45 %)
       if (dodging() && Math.random() < dodgeP()) { killProj(key); P.dodgeT = now; tone('sine', 700, 1600, 0.12, 0.06); continue; } // esquiva con Q/E (lo decide la víctima: yo)
       killProj(key); if (p.owner < 0 && typeof BASE !== 'undefined') { const th = BASE.HG.get(-p.owner); attackAlert(p.sn ? 's' : 't', p.sn || (th ? th.nm : 'un enemigo'), th && !p.sn ? BASE.worldOf(th) : ATK.pos); } else if (p.owner !== myId) attackAlert('p', ownerName(p.owner), ownerPos(p.owner)); hurt(p.dmg, p.dir, now); send({ t: 'hit', by: p.owner, key, dmg: p.dmg, pos: S.pos, dead: P.hp <= 0, sh: P.sh });

@@ -84,6 +84,7 @@ const NEU = (() => {
     for (const gr of G.values()) {
       const ms = [...E.values()].filter(n => n.g === gr.g), lead = ms[0]; if (!lead) continue;
       let F = gr.host != null ? foe(gr.host) : null;
+      if (gr.host != null && typeof WAR !== 'undefined') { const SF = WAR.nearestOwned(gr.host, world(lead), CALM); if (SF && (!F || dist(SF.pos, world(lead)) < dist(F.pos, world(lead)))) F = SF; } // también atacan sus buques, satélites y cazas
       if (gr.host != null && (!F || dist(F.pos, world(lead)) > CALM)) { gr.host = null; F = null; } // el agresor murió o se alejó mucho: el grupo se calma
       if (!F && dist(world(lead), bodies[lead.a].pos.map((c, i) => c + gr.wp[i] + lead.off[i])) < 300) gr.wp = wpOf(gr.s);
       for (const n of ms) step(n, gr, F, dt);
@@ -155,5 +156,8 @@ const NEU = (() => {
     for (const n of E.values()) { const gr = G.get(n.g); if (!gr || gr.host !== owner || !n.w) continue; const d = dist(n.w, w); if (d < bd) { bd = d; best = { pos: n.w, v: n.v, q: n.q, d, id: n.id }; } }
     return best;
   }
-  return { frame, sync, hit, onHit, targets, hostileNear, E, G, MAXG, SPOTS, pos: id => (E.get(id) || {}).w || null, speed: id => (E.get(id) || {}).v || 0, name: id => { const n = E.get(id); return n ? nameOf(n) : 'Nave neutral'; } };
+  function nearest(w, range) { // (anfitrión) la neutral más cercana al alcance, cualquiera: buques, satélites y cazas también les disparan (y se vuelven hostiles al dueño)
+    if (!wasHost) return null; let best = null, bd = range; for (const n of E.values()) { if (!n.w) continue; const d = dist(n.w, w); if (d < bd) { bd = d; best = { pos: n.w, v: n.v, q: n.q, d, id: n.id }; } } return best;
+  }
+  return { frame, sync, hit, onHit, targets, hostileNear, nearest, E, G, MAXG, SPOTS, pos: id => (E.get(id) || {}).w || null, speed: id => (E.get(id) || {}).v || 0, name: id => { const n = E.get(id); return n ? nameOf(n) : 'Nave neutral'; } };
 })();

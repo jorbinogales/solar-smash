@@ -2,7 +2,7 @@
 const $ = id => document.getElementById(id);
 let sel = JSON.parse(JSON.stringify(mySpec)), tab = 'ship';
 const mkPreview = id => { const r = new THREE.WebGLRenderer({ canvas: $(id), antialias: true, alpha: true }), sc = new THREE.Scene(), cam = new THREE.PerspectiveCamera(38, 460 / 320, 0.001, 20); sc.add(new THREE.AmbientLight(0xffffff, 0.4)); const l = new THREE.DirectionalLight(0xffffff, 0.9); l.position.set(1, 1.4, 0.8); sc.add(l); r.setPixelRatio(Math.min(devicePixelRatio, 2)); const pivot = new THREE.Group(); sc.add(pivot); return { r, sc, cam, pivot, obj: null, key: '' }; };
-const PV = mkPreview('pv'), BV = mkPreview('bv');
+const PV = mkPreview('pv'), BV = mkPreview('bv'), FV = mkPreview('fv'); // FV: visor de la pestaña FLOTA (war.js le pone el modelo)
 
 // naves y estilos de torreta desbloqueados (Halcón y plasma son los básicos)
 const load = (k, base) => { try { return new Set([...base, ...JSON.parse(localStorage.getItem(k) || '[]')]); } catch { return new Set(base); } };
@@ -107,7 +107,7 @@ function hangarFrame(now) { // llamado desde el bucle principal mientras el men�
   const h = typeof BASE !== 'undefined' ? BASE.mine() : null, sg = JSON.stringify([typeof INV !== 'undefined' && INV, typeof TOOLS !== 'undefined' && TOOLS, h && [h.up, Math.round(h.hp), Math.round(h.sh), h.tw, h.ts], [...unlocked], [...towersUnlocked], mySpec.a, mySpec.t, lvlOf(mySpec.t), atBase(), tab, typeof WAR !== 'undefined' && WAR.sig()]);
   if (fitLast !== ov.style.display + innerWidth + 'x' + innerHeight) { fitLast = ov.style.display + innerWidth + 'x' + innerHeight; fitMenu(); }
   if (sg !== sig) { sig = sg; sel.a = mySpec.a.slice(); sel.t = mySpec.t; refresh(); } // los recursos y la base cambian mientras juegas
-  const P_ = tab === 'ship' ? PV : tab === 'base' ? BV : null;
+  const P_ = tab === 'ship' ? PV : tab === 'base' ? BV : tab === 'fleet' ? FV : null;
   if (P_ && P_.obj) {
     P_.pivot.rotation.y = now / 2500; if (P_ === PV) { setThrust(PV.obj, 500, now); updateShipFx(PV.obj, now); }
     const cv = P_.r.domElement; P_.r.setSize(cv.clientWidth, cv.clientHeight, false); P_.cam.aspect = cv.clientWidth / cv.clientHeight; P_.cam.updateProjectionMatrix(); P_.r.render(P_.sc, P_.cam);

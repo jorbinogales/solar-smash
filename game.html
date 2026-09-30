@@ -25,7 +25,7 @@
   .ship{display:block;width:100%;text-align:left;background:#0a1f30;border:1px solid #1d4a66;color:#bfe8ff;border-radius:8px;padding:8px 10px;margin-bottom:8px;cursor:pointer;font:inherit}
   .ship.on{border-color:#4db8ff;background:#0e3550;box-shadow:0 0 12px #4db8ff55}
   .ship b{display:block;font-size:14px}.ship small{display:block;color:#7fb6d4}
-  #pv{width:100%;height:auto;aspect-ratio:460/320;border-radius:8px;background:radial-gradient(circle at 50% 40%,#12304a,#02060a)}
+  #pv,#fv{width:100%;height:auto;aspect-ratio:460/320;border-radius:8px;background:radial-gradient(circle at 50% 40%,#12304a,#02060a)}
   #stats,.sgrid{display:grid;grid-template-columns:auto 1fr auto;gap:4px 10px;align-items:center;margin-top:8px}
   .bar{height:7px;background:#ffffff1f;border-radius:4px;overflow:hidden}.bar i{display:block;height:100%}
   .add{margin-bottom:10px}.add b{display:flex;justify-content:space-between}.add small{color:#7fb6d4;display:block}
@@ -50,7 +50,7 @@
   #hg .ph{display:block;letter-spacing:.18em;color:#9fd4ee;font-size:11px;margin-bottom:8px}
   #slotsRow{display:flex;gap:8px;justify-content:center;margin:8px 0}#slotsRow button{width:64px;padding:4px;border-radius:10px;border:1px solid #1d4a66;background:#0a1f30;color:#bfe8ff;font:inherit;font-size:10px;cursor:pointer;text-align:center}#slotsRow button:hover{border-color:#4db8ff}#slotsRow button.dead{opacity:.35}#slotsRow .uico{width:40px;height:40px;margin:0 auto 2px}
   #hg{user-select:none}.panel.sc{position:relative;padding:0}.panel.sc .in{position:absolute;inset:10px;display:flex;flex-direction:column;min-height:0}
-  .lst{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:5px;padding-right:4px}.lst>*{flex:0 0 calc((100% - 15px)/4);margin:0!important;box-sizing:border-box;overflow:hidden}.lst>.empty{flex:none}
+  .lst{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:5px;padding-right:4px}.lst>*{flex:0 0 auto;min-height:calc((100% - 15px)/4);margin:0!important;box-sizing:border-box} /* altura natural: nunca recorta el botón de compra (la lista hace scroll) */.lst>.empty{flex:none}
   .buy{display:inline-flex}.upc:has(.buy),#hg .ship{cursor:pointer}
   .pvtag{background:#3a2a06;border:1px solid #ffb347;color:#ffd27a;border-radius:6px;padding:3px 8px;font-size:11px;letter-spacing:.1em;margin:6px 0;text-align:center}
   #tv{position:fixed;left:16px;bottom:290px;width:200px;background:#02101a80;border:1px solid #2a5a7855;border-radius:8px;padding:4px;text-align:center;pointer-events:none;display:none;opacity:.6}
@@ -104,6 +104,8 @@
   /* fuera de la base: botones atenuados y sin acción (sin mensajes) */
   #hg.nob .kbuy,#hg.nob [data-wdep],#hg.nob [data-equip],#hg.nob #slotsRow button,#hg.nob #shipList .ship:not(.on){opacity:.4;pointer-events:none;cursor:default;filter:grayscale(.5)}
   #tv .hx{z-index:3}#pvlv .lvtag{display:inline-block;background:#ffd23f;color:#050f1c;border:3px solid #050f1c;border-radius:9px;padding:0 8px;font-weight:900}
+  #hg .ship small+small,#hg .upc small{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden} /* descripción en 1-2 líneas: la fila coste + botón siempre cabe */
+  #hg .upc.fsel{cursor:pointer}#hg .upc.fsel.on{border-color:#4db8ff;background:#0e3550;box-shadow:0 0 12px #4db8ff55}
   /* botón COMPRAR / ADQUIRIR (pegatina naranja) */
   button.kbuy{display:inline-flex;align-items:center;gap:8px;padding:6px 18px;border:3px solid #050f1c;border-bottom-width:4px;border-radius:9px;background:#ff8a3c;box-shadow:2px 2px 0 #050f1c;color:#050f1c;font:inherit;cursor:pointer}button.kbuy b{font-weight:900;letter-spacing:.08em;font-size:11px;white-space:nowrap}
   button.kbuy:hover:not(:disabled){background:#ffab6e}button.kbuy:active:not(:disabled){transform:translateY(2px);border-bottom-width:3px}button.kbuy:disabled{background:#56606b;color:#16202c;cursor:not-allowed}button.kbuy:disabled .costs{opacity:.8}button.kbuy .cost{padding:1px 6px 1px 2px}
@@ -136,7 +138,11 @@
   </div>
   
   <div id="tab-fleet" class="tab" style="display:none">
-    <div class="fleet"><div id="warShips" class="fcard"></div><div id="warSats" class="fcard"></div><div class="fcard"><b class="ph">PUNTO DE REAPARICIÓN</b><div id="warSpawn"></div><div class="fnote">Al morir: teclas 1-3 para elegir dónde reaparecer.</div><b class="ph" style="margin-top:14px">ZONAS DE CONTROL</b><div id="warZones"></div></div></div>
+    <div class="cols">
+      <div class="panel sc"><div class="in"><b class="ph">FLOTA</b><div id="fleetList" class="lst"></div></div></div>
+      <div class="panel pvw"><canvas id="fv" width="460" height="320"></canvas><div id="fleetStats" class="sgrid"></div></div>
+      <div class="panel sc"><div class="in"><b class="ph">UNIDADES DESPLEGADAS</b><div id="fleetDep" class="lst"></div></div></div>
+    </div>
   </div>
   <div id="tab-help" class="tab" style="display:none">
   <div id="keys">

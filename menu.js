@@ -50,7 +50,7 @@
       const Z = sys._z || (sys._z = genZones(sys)), itOf = {}; items.forEach(it => { if (it.p) itOf[it.p.n] = it; });
       for (const z of Z) {
         const b = sys.bodies[z.anchor], ol = Math.hypot(z.off[0], z.off[1], z.off[2]) || 1; let px, py, pz, zr;
-        if (b.k === 'sun') { const d = Math.hypot(z.off[0], z.off[2]) / 0.06, rr = 0.2 + 0.8 * Math.sqrt(Math.max(0, (d - amin) / (amax - amin + 1e-9))), a = Math.atan2(z.off[2], z.off[0]); px = Math.cos(a) * rr; py = 0; pz = Math.sin(a) * rr; zr = 0.03; } // 0,06 = DIST_SCALE: 'a' de los planetas va sin escalar
+        if (b.k === 'sun') { const d = Math.hypot(z.off[0], z.off[2]) / 0.06, rr = 0.2 + 0.8 * Math.sqrt(Math.max(0, (d - amin) / (amax - amin + 1e-9))), a = Math.atan2(z.off[2], z.off[0]) + (t || 0) / 1000 * 0.05 / Math.pow(rr, 1.5); px = Math.cos(a) * rr; py = 0; pz = Math.sin(a) * rr; zr = 0.03; } // 0,06 = DIST_SCALE: 'a' de los planetas va sin escalar
         else { const it = itOf[b.n]; if (!it) continue; const k = it.r / S / it.q.f * 3.4; px = Math.cos(it.ang) * it.rr + z.off[0] / ol * k; py = z.off[1] / ol * k; pz = Math.sin(it.ang) * it.rr + z.off[2] / ol * k; zr = 0.02; } // sigue la órbita de su planeta
         const q = pr(px, py, pz); items.push({ zone: z, q, r: Math.max(7, zr * S * q.f) });
       }

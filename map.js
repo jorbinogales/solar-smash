@@ -159,15 +159,15 @@ const MAP = (() => {
     const proj = v => { vTmp.copy(v).project(cam); if (vTmp.z > 1 || Math.abs(vTmp.x) > 1.05 || Math.abs(vTmp.y) > 1.05) return null; return [(vTmp.x * 0.5 + 0.5) * W, (-vTmp.y * 0.5 + 0.5) * H]; };
     const queue = (x, y, text, col, pri, o = {}) => { const size = o.size || fs; g.font = `${o.bold ? 'bold ' : ''}${size}px ${MONO}`; LQ.push({ x: x + (o.dx ?? 10), y: y + (o.dy ?? 4), w: g.measureText(text).width + (o.extraW || 0), h: size + 4 + (o.h2 || 0), size, text, col, pri, bold: o.bold, after: o.after, center: o.center }); }; // cola de etiquetas: se dibujan al final por prioridad y sin solaparse
     const lab = (v, text, col, kind, pos, bold, extra, pri = 5, o = {}) => { const s = proj(v); if (!s) return null; const [x, y] = s; queue(x, y, text, col, pri, { bold, ...o }); const p = { x, y, n: text, kind, pos, ...extra }; pts.push(p); return p; };
-    if (typeof WAR !== 'undefined') { try { czDraw(pts, now, queue); } catch (err) { if (!st.czErr) { st.czErr = 1; console.warn('mapa: zonas de control', err); } } } // un fallo en las zonas nunca debe dejar el mapa sin textos
     // ---------- cursor sobre un planeta, luna, estrella o cúmulo: brillo verde pulsante y ficha junto al cursor (radio proyectado + margen; el más cercano a la cámara) ----------
     const camUp = vTmp2.set(0, 1, 0).applyQuaternion(cam.quaternion).clone(), scrR = (c, r) => { const p0 = proj(c), p1 = proj(camUp.clone().multiplyScalar(r).add(c)); return p0 && p1 ? [p0, Math.max(6, Math.hypot(p1[0] - p0[0], p1[1] - p0[1]))] : null; };
     let hv = null;
-    if (!st.drag && !st.place) {
+    if (!st.drag) { // también en el modo colocación: planeta → despliegue junto al planeta · cúmulo → junto al cúmulo
       sys.objs.forEach((o, i) => { const q = scrR(o.p, dispR(o.b)); if (q && Math.hypot(q[0][0] - st.mx, q[0][1] - st.my) < q[1] + 6) { const dep = o.p.distanceTo(st.pos); if (!hv || dep < hv.dep) hv = { dep, s: q[0], r: q[1], kind: 'b', i, o }; } });
       sys.zones.forEach((o, i) => { const q = scrR(o.p, zoneR(o.t.zone) * 1.3); if (q && Math.hypot(q[0][0] - st.mx, q[0][1] - st.my) < q[1] + 6) { const dep = o.p.distanceTo(st.pos); if (!hv || dep < hv.dep) hv = { dep, s: q[0], r: q[1], kind: 'z', i, o }; } });
     }
     st.hv = hv;
+    if (typeof WAR !== 'undefined') { try { czDraw(pts, now, queue); } catch (err) { if (!st.czErr) { st.czErr = 1; console.warn('mapa: zonas de control', err); } } } // un fallo en las zonas nunca debe dejar el mapa sin textos
     if (hv) { const pul = 0.5 + 0.5 * Math.sin(now / 220); g.save(); g.shadowColor = '#5dff8a'; g.shadowBlur = 12 + 12 * pul; g.strokeStyle = `rgba(93,255,138,${0.55 + 0.45 * pul})`; g.lineWidth = 3; g.beginPath(); g.arc(hv.s[0], hv.s[1], hv.r + 5, 0, 7); g.stroke(); g.lineWidth = 1.5; g.globalAlpha = 0.5; g.beginPath(); g.arc(hv.s[0], hv.s[1], hv.r + 10 + 3 * pul, 0, 7); g.stroke(); g.restore(); }
     // ---------- etiquetas ----------
     sys.objs.forEach((o, i) => { const b = o.b, top = o.p.clone(); top.y += dispR(b) * 1.15; const occ = BASES.find(x => x.body === b.n); lab(top, b.n + (occ ? '  ⌂ ' + occ.owner : ''), b.k === 'sun' ? '#ffd166' : '#dff4ff', b.k === 'sun' ? 'estrella' : b.parent ? 'luna' : (b.label || 'planeta').toLowerCase(), b.pos, !b.parent, { body: true, ref: i }, b.parent ? 4 : 7); });
@@ -237,7 +237,8 @@ const MAP = (() => {
     if (Math.abs(d.y) < 1e-6) return null; const t = -o.y / d.y; return t > 0 ? [(o.x + d.x * t) / K, 0, (o.z + d.z * t) / K] : null;
   }
   function czDraw(pts, now, Q) { // Q: cola de etiquetas de drawSys
-    const pl = st.place, mp = czMouse(), hz = mp ? czAt(SYS, WAR.CZ, mp) : -1, pd = pl && hz >= 0 ? WAR.deploy(pl.k, hz) : null, plOk = !!pd && !pd.why, sz = st.sel && st.sel.kind === 'cz' ? st.sel.i : -1, P = [];
+    const pl = st.place, mp = czMouse(), hv0 = st.hv, tgt = hv0 ? (hv0.kind === 'b' ? (hv0.o.b.k === 'sun' ? null : { zi: czAt(SYS, WAR.CZ, hv0.o.b.pos), at: 'p' }) : { zi: hv0.o.t.zone.cz, at: 'c' }) : null; // elemento bajo el cursor (planeta o cúmulo) manda sobre la zona
+    const hz = tgt && tgt.zi != null ? tgt.zi : mp ? czAt(SYS, WAR.CZ, mp) : -1, at = tgt ? tgt.at : 'c', pd = pl && hz >= 0 ? WAR.deploy(pl.k, hz, at) : null, plOk = !!pd && !pd.why, sz = st.sel && st.sel.kind === 'cz' ? st.sel.i : -1, P = [];
     g.save(); g.lineJoin = 'round';
     WAR.CZ.forEach((z, zi) => { const sp = projPoly(czPoly(z)); if (sp.length >= 3) P.push({ zi, sp, L: WAR.look(zi), hi: zi === hz || zi === sz }); });
     const path = sp => { g.beginPath(); sp.forEach(([x, y], k) => { if (k) g.lineTo(x, y); else g.moveTo(x, y); }); g.closePath(); };
@@ -260,24 +261,23 @@ const MAP = (() => {
     for (const s of WAR.all()) { // buques (rombo grande) y satélites (pequeño) en su sitio real: están anclados a la estrella · azul míos, rojo ajenos
       if (!s.w) continue; const q = projU(czV.set(s.w[0] * K, 0, s.w[2] * K)); if (!q) continue; const mine = s.o === myId, col = mine ? '#4db8ff' : '#ff3b30', r = s.k === 'W' ? 8 : 5;
       g.beginPath(); g.moveTo(q[0], q[1] - r); g.lineTo(q[0] + r, q[1]); g.lineTo(q[0], q[1] + r); g.lineTo(q[0] - r, q[1]); g.closePath(); g.fillStyle = col; g.fill(); g.lineWidth = 3; g.strokeStyle = '#050f1c'; g.stroke();
-      if (s.k === 'W') { const fh = Math.max(0, Math.min(1, s.hp / WARCFG.ws.hp)), fs = Math.max(0, Math.min(1, s.sh / WARCFG.ws.sh)); g.fillStyle = '#050f1c'; g.fillRect(q[0] - 20, q[1] + 11, 40, 9); g.fillStyle = fh > 0.35 ? '#5dff8a' : '#ff5a4a'; g.fillRect(q[0] - 19, q[1] + 12, 38 * fh, 4); g.fillStyle = '#4db8ff'; g.fillRect(q[0] - 19, q[1] + 16, 38 * fs, 3); } // vida y escudo del buque en el mapa
       Q(q[0], q[1], `${s.k === 'W' ? 'BUQUE' : 'SATÉLITE'} · ${mine ? 'TUYO' : WAR.nmOf(s.o)}`, mine ? '#9fd8ff' : '#ff8a7a', 6, { bold: true, size: 10 });
       pts.push({ x: q[0], y: q[1], n: `${s.k === 'W' ? 'Buque' : 'Satélite'} de ${WAR.nmOf(s.o)}`, kind: s.k === 'W' ? 'buque de guerra' : 'satélite defensivo', pos: s.w });
     }
     st.ghost = null;
     if (pl) { // fantasma bajo el cursor: verde = válido, rojo = inválido (con el motivo); el clic lo confirma
       if (pd) { // la posición NO se elige: el buque/satélite va junto al cúmulo de la zona (sysgen.czDeployPoint); aquí se marca dónde caerá
-        const col = plOk ? '#5dff8a' : '#ff3b30'; st.ghost = { zi: hz, why: pd.why };
+        const col = plOk ? '#5dff8a' : '#ff3b30'; st.ghost = { zi: hz, why: pd.why, at };
         const q = pd.off && projU(czV.set(pd.off[0] * K, 0, pd.off[2] * K));
         if (q) { g.beginPath(); g.arc(q[0], q[1], 9 + 3 * Math.sin(now / 150), 0, 7); g.globalAlpha = 0.4; g.fillStyle = col; g.fill(); g.globalAlpha = 1; g.lineWidth = 5; g.strokeStyle = '#050f1c'; g.stroke(); g.lineWidth = 2; g.strokeStyle = col; g.stroke(); g.beginPath(); g.moveTo(q[0], q[1] - 6); g.lineTo(q[0] + 6, q[1]); g.lineTo(q[0], q[1] + 6); g.lineTo(q[0] - 6, q[1]); g.closePath(); g.fillStyle = col; g.fill(); g.setLineDash([5, 5]); g.beginPath(); g.moveTo(st.mx, st.my); g.lineTo(q[0], q[1]); g.stroke(); g.setLineDash([]); }
-        g.textAlign = 'center'; g.font = `bold 12px ${MONO}`; g.lineWidth = 4; g.strokeStyle = '#000'; g.fillStyle = col; const tx = pd.why || `CLIC: ${pl.k === 'W' ? 'DESPLEGAR EL BUQUE' : 'CONSTRUIR EL SATÉLITE'} JUNTO AL CÚMULO`; g.strokeText(tx, st.mx, st.my + 30); g.fillText(tx, st.mx, st.my + 30);
+        g.textAlign = 'center'; g.font = `bold 12px ${MONO}`; g.lineWidth = 4; g.strokeStyle = '#000'; g.fillStyle = col; const tx = pd.why || `CLIC: ${pl.k === 'W' ? 'DESPLEGAR EL BUQUE' : pl.k === 'F' ? 'DESPLEGAR LOS CAZAS' : 'CONSTRUIR EL SATÉLITE'} JUNTO AL ${at === 'p' ? 'PLANETA' : 'CÚMULO'}`; g.strokeText(tx, st.mx, st.my + 30); g.fillText(tx, st.mx, st.my + 30);
       }
-      const W = c2.width, tx = `${pl.k === 'W' ? 'DESPLIEGUE · BUQUE DE GUERRA' : 'CONSTRUCCIÓN · SATÉLITE DEFENSIVO'} — clic en una zona AZUL (tuya): se posiciona junto a su cúmulo · Esc: cancelar`; g.font = `bold 13px ${MONO}`; const w = g.measureText(tx).width + 36;
+      const W = c2.width, tx = `${pl.k === 'W' ? 'DESPLIEGUE · BUQUE DE GUERRA' : pl.k === 'F' ? 'DESPLIEGUE · CAZAS' : 'CONSTRUCCIÓN · SATÉLITE DEFENSIVO'} — clic en una zona AZUL (tuya): sobre su planeta, junto al planeta; si no, junto a su cúmulo · Esc: cancelar`; g.font = `bold 13px ${MONO}`; const w = g.measureText(tx).width + 36;
       g.fillStyle = '#050f1c'; g.fillRect(W / 2 - w / 2 + 4, 52, w, 34); g.fillStyle = '#0b2233'; g.fillRect(W / 2 - w / 2, 48, w, 34); g.lineWidth = 3; g.strokeStyle = '#050f1c'; g.strokeRect(W / 2 - w / 2, 48, w, 34); g.textAlign = 'center'; g.fillStyle = '#ffd23f'; g.fillText(tx, W / 2, 70);
     }
     g.restore();
   }
-  function placeClick() { const gh = st.ghost; if (!gh) return say('Elige un punto dentro de una zona de control tuya (azul)'); if (gh.why) return say(gh.why); send({ t: 'wdep', k: st.place.k, zi: gh.zi }); close(); }
+  function placeClick() { const gh = st.ghost; if (!gh) return say('Elige un punto dentro de una zona de control tuya (azul)'); if (gh.why) return say(gh.why); send({ t: 'wdep', k: st.place.k, zi: gh.zi, at: gh.at }); close(); }
   function loop() { if (!st.open) return; requestAnimationFrame(loop); const now = performance.now(), dt = Math.min(0.1, (now - st.t) / 1000); st.t = now; drawSys(dt); }
 
   // ---------- entrada ----------
