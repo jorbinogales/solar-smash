@@ -16,10 +16,11 @@ const NEU = (() => {
   const r1 = x => Math.round(x * 10) / 10, r3 = x => Math.round(x * 1e3) / 1e3;
   function model(n) { if (n.grp) scene.remove(n.grp); n.grp = makeShip({ t: n.t, a: [0, 0, 0, 0, 0, 0], c: ACC }, HULL); n.grp.gear.visible = false; n.grp.visible = false; scene.add(n.grp); } // geometría compartida (caché de ships.js); oculta hasta que frame() la coloque
   function drop(id) { const n = E.get(id); if (n && n.grp) scene.remove(n.grp); E.delete(id); }
-  const safeAlt = b => b.k === 'sun' ? STAR_KILL_R - b.R + 20000 : Math.max(2500 * SYS_SCALE, 6 * (ATMO[b.n] ? ATMO[b.n].H : 0)); // nunca bajan a la atmósfera (así tampoco se acercan a las bases)
+  const NEAR = [200, 300]; // km sobre la superficie de un planeta o sobre el BORDE de un cúmulo: ahí aparecen y patrullan
+  const safeAlt = b => b.k === 'sun' ? STAR_KILL_R - b.R + 20000 : Math.max(NEAR[0], ATMO[b.n] ? 6 * ATMO[b.n].H + 20 : 0); // nunca bajan a la atmósfera: ≥ 200 km (o 6H + 20 si su atmósfera es más alta)
   // puntos de encuentro: cada zona de recursos y cada planeta principal (rutas habituales de los jugadores); c: centro relativo al cuerpo ancla a, r: radio por el que vagan (compactado con el sistema)
-  const SPOTS = [...ZONES.map(z => ({ a: z.anchor, c: z.off, r: z.radius + 8000 * SYS_SCALE })), ...MAINS.map(b => ({ a: b.i, c: [0, 0, 0], r: b.R + safeAlt(b) + 25000 * SYS_SCALE }))];
-  const CZN = genControlZones(SYS); CZN.forEach(z => { if (!z.noClaim) SPOTS.push({ a: 0, c: czCenter(z), r: Math.min(60000 * SYS_SCALE, ((Number.isFinite(z.r1) ? z.r1 : z.r0 * 1.5) - z.r0) * 0.3), zs: z.id }); }); // + el centro de cada sector
+  const SPOTS = [...ZONES.map(z => ({ a: z.anchor, c: z.off, R: z.radius, k: 'c' })), ...MAINS.map(b => ({ a: b.i, c: [0, 0, 0], R: b.R, k: 'p' }))]; // cúmulos y planetas (nada en el centro vacío de un sector)
+  const CZN = genControlZones(SYS);
   // ---------- POBLACIÓN POR ZONA: 5 grupos de 3 por zona de control (menos la solar). Solo se instancian y simulan los de zonas cercanas a alguien (ACT_KM), con un tope de naves activas;
   // las demás quedan «dormidas» (solo el estado de sus 5 plazas). Grupo aniquilado: reaparece a los 60-120 s (la mitad si su zona está activa). ----------
   const PER_ZONE = 5, GSIZE = 3, ACT_KM = 1.5e6 * SYS_SCALE, MAX_ACTIVE = 90, RESP_Z = [60000, 120000], ACT_MS = 1000;
@@ -28,25 +29,32 @@ const NEU = (() => {
   const spotPos = s => { const A = bodies[s.a].pos; return [A[0] + s.c[0], A[1] + s.c[1], A[2] + s.c[2]]; };
   function keepOut(n, w, D) { // desvía el rumbo hacia fuera al acercarse a un astro y, si aun así entra en la zona prohibida, la saca
     for (const b of bodies) {
-      const d = sub(w, b.pos), l = len(d), alt = l - b.R, s = safeAlt(b); if (alt > s + 3000) continue; const up = d.map(c => c / l);
-      D.addScaledVector(new THREE.Vector3(up[0], up[1], up[2]), 1.5 * Math.min(1, (s + 3000 - alt) / 3000)).normalize();
+      const d = sub(w, b.pos), l = len(d), alt = l - b.R, s = safeAlt(b), M = b.k === 'sun' ? 3000 : 40; if (alt > s + M) continue; const up = d.map(c => c / l); // margen: 40 km sobre planetas (patrullan a 200-300 km)
+      D.addScaledVector(new THREE.Vector3(up[0], up[1], up[2]), 1.5 * Math.min(1, (s + M - alt) / M)).normalize();
       if (alt < s) n.r = n.r.map((c, i) => c + up[i] * (s - alt));
     }
   }
   const rndDir = () => { const u = rnd(-1, 1), th = rnd(0, 6.2832), s = Math.sqrt(1 - u * u); return [s * Math.cos(th), u, s * Math.sin(th)]; };
-  function wpOf(si) { // punto de paso al azar en torno a un punto de encuentro, relativo a su cuerpo ancla y fuera de la zona prohibida de ese cuerpo
-    const s = SPOTS[si], d = rndDir(), k = rnd(0.2, 1) * s.r; let wp = s.c.map((c, i) => c + d[i] * k);
-    const b = bodies[s.a]; if (b.k !== 'sun') { const l = len(wp) || 1, mn = b.R + safeAlt(b) + 2000; if (l < mn) wp = wp.map(c => c * (mn + rnd(0, 5000)) / l); }
-    return wp;
+  const prng = seed => { let a = (seed * 2654435761) >>> 0 || 1; return () => { a ^= a << 13; a >>>= 0; a ^= a >> 17; a ^= a << 5; a >>>= 0; return a / 4294967296; }; }; // sorteo determinista por grupo
+  function homeOf(si, g) { // punto de encuentro del grupo: a 200-300 km de la superficie del planeta (lejos de la vertical de sus bases) o del borde del cúmulo, relativo al cuerpo ancla, + 3 puntos de patrulla (≤ 30 km)
+    const s = SPOTS[si], r = prng(g * 7919 + si), hd = NEAR[0] + r() * (NEAR[1] - NEAR[0]), b = bodies[s.a], bases = s.k === 'p' && typeof BASE !== 'undefined' ? [...BASE.HG.values()].filter(h => h.b === b.n && h.dir && h.hp > 0).map(h => h.dir) : [];
+    const ud = () => { const u = r() * 2 - 1, th = r() * 6.2832, q = Math.sqrt(1 - u * u); return [q * Math.cos(th), u * 0.35, q * Math.sin(th)]; }; let u = nrm(ud());
+    for (let k = 0; k < 30 && bases.some(bd => u[0] * bd[0] + u[1] * bd[1] + u[2] * bd[2] > 0.5); k++) u = nrm(ud()); // lejos de la vertical de sus bases (sus torretas alcanzan 200 km)
+    if (bases.some(bd => u[0] * bd[0] + u[1] * bd[1] + u[2] * bd[2] > 0.5)) { const m = nrm(bases.reduce((a, bd) => a.map((c, i) => c - bd[i]), [0, 0, 0])); if (len(m) > 0.5) u = m; } // último recurso: el lado opuesto a las bases
+    const R = s.k === 'p' ? s.R + Math.max(hd, safeAlt(b) + (hd - NEAR[0])) : s.R + hd, home = s.c.map((c, i) => c + u[i] * R);
+    const e1 = nrm([u[2], 0, -u[0]].every(x => !x) ? [1, 0, 0] : [u[2], 0, -u[0]]), e2 = [u[1] * e1[2] - u[2] * e1[1], u[2] * e1[0] - u[0] * e1[2], u[0] * e1[1] - u[1] * e1[0]];
+    const pts = [0, 1, 2].map(k => { const a = k * 2.1 + r(), o = 10 + r() * 20, p = home.map((c, i) => c + (e1[i] * Math.cos(a) + e2[i] * Math.sin(a)) * o), q = sub(p, s.c), L = len(q) || 1; return s.c.map((c, i) => c + q[i] / L * R); }); // a la misma distancia del centro
+    return { home, pts, R, hd };
   }
+  const wpOf = gr => gr.pts[(Math.random() * gr.pts.length) | 0]; // siguiente punto de patrulla del grupo
   function newId() { let k = 0; do { nid = nid >= 3999 ? 3000 : nid + 1; } while (E.has(nid) && ++k < 1000); return nid; }
-  function spawnGroup(zi, slot) { // en un punto de encuentro de SU zona (cúmulo, planeta o centro del sector), sin otro grupo si se puede y nunca a menos de NEAR_MIN de un jugador si hay alternativa
+  function spawnGroup(zi, slot) { // junto a un planeta o cúmulo de SU zona (sin ninguno, el más cercano a ella), a 200-300 km; sin otro grupo si se puede y nunca a menos de NEAR_MIN de un jugador si hay alternativa
     const foes = [S.pos, ...[...remotes.values()].filter(r => r.apos).map(r => r.apos)], used = new Set([...G.values()].map(g => g.s));
-    let cand = SPOTS.map((s, si) => ({ si, d: Math.min(...foes.map(f => dist(f, spotPos(s)))) })).filter(c => SPOTS[c.si].zs === zi || czAt(SYS, CZN, spotPos(SPOTS[c.si])) === zi); if (!cand.length) return;
+    let cand = SPOTS.map((s, si) => ({ si, d: Math.min(...foes.map(f => dist(f, spotPos(s)))) })).filter(c => czAt(SYS, CZN, spotPos(SPOTS[c.si])) === zi); if (!cand.length) { const zc = czCenter(CZN[zi]); let bi = 0, bd = Infinity; SPOTS.forEach((sp, k) => { const d = dist(spotPos(sp), zc); if (d < bd) { bd = d; bi = k; } }); cand = [{ si: bi, d: Infinity }]; } // sector vacío: al planeta o cúmulo más cercano
     let pool = cand.filter(c => c.d > NEAR_MIN && !used.has(c.si)); if (!pool.length) pool = cand.filter(c => c.d > NEAR_MIN); if (!pool.length) pool = [cand.sort((a, b) => b.d - a.d)[0]];
     const si = pool[(Math.random() * pool.length) | 0].si, s = SPOTS[si], far = len(spotPos(s)) / Math.max(...SPOTS.map(q => len(spotPos(q)))), lv0 = Math.max(1, Math.min(10, 1 + Math.floor(Math.random() * 5 + far * 5))); // nivel: al azar y mayor cuanto más lejos de la estrella
-    const g = gid++, size = GSIZE, c0 = wpOf(si);
-    G.set(g, { g, s: si, wp: wpOf(si), host: null, zi, slot }); if (slot) slot.g = g;
+    const g = gid++, size = GSIZE, hm = homeOf(si, g), c0 = hm.home;
+    G.set(g, { g, s: si, ...hm, wp: hm.pts[0], host: null, zi, slot }); if (slot) slot.g = g;
     for (let i = 0; i < size; i++) {
       const t = TT[(Math.random() * TT.length) | 0], lv = Math.max(1, Math.min(10, lv0 + (Math.random() < 0.3 ? (Math.random() < 0.5 ? -1 : 1) : 0))), st = stOf(t, lv), id = newId(), off = [(i - (size - 1) / 2) * 2.5, (i % 2) * 1.2, (i % 2 ? 1 : -1) * 1.5];
       const n = { id, g, t, lv, a: s.a, r: c0.map((c, k) => c + off[k]), q: new THREE.Quaternion().setFromEuler(new THREE.Euler(0, rnd(0, 6.28), 0)), v: st.vmax * 0.5, hp: 100, sh: 100, h: 0, st, hpA: st.hp, shA: st.sh, cd: rnd(0, 1), dmg: new Map(), off };
@@ -56,7 +64,7 @@ const NEU = (() => {
   function adopt() { // paso a ser el anfitrión: sigo simulando las naves que ya existían (último estado recibido del servidor), sin duplicarlas
     for (const n of E.values()) {
       if (!n.st) { n.st = stOf(n.t, n.lv); n.hpA = n.hp / 100 * n.st.hp; n.shA = n.sh / 100 * n.st.sh; n.cd = rnd(0, 1); n.dmg = new Map(); n.off = [rnd(-2, 2), rnd(-1, 1), rnd(-2, 2)]; n.t0 = 0; }
-      if (!G.has(n.g)) { const w = world(n); let si = 0, bd = Infinity; SPOTS.forEach((s, i) => { const d = dist(spotPos(s), w); if (d < bd) { bd = d; si = i; } }); const zi = czAt(SYS, CZN, w), sl = (POP[zi] || []).find(q => q.g == null); G.set(n.g, { g: n.g, s: si, wp: wpOf(si), host: null, zi, slot: sl || null }); if (sl) sl.g = n.g; }
+      if (!G.has(n.g)) { const w = world(n); let si = 0, bd = Infinity; SPOTS.forEach((s, i) => { const d = dist(spotPos(s), w); if (d < bd) { bd = d; si = i; } }); const zi = czAt(SYS, CZN, w), sl = (POP[zi] || []).find(q => q.g == null); const hm = homeOf(si, n.g); G.set(n.g, { g: n.g, s: si, ...hm, wp: hm.pts[0], host: null, zi, slot: sl || null }); if (sl) sl.g = n.g; }
       const sa = SPOTS[G.get(n.g).s].a; if (sa !== n.a) { const w = world(n); n.a = sa; n.r = sub(w, bodies[sa].pos); } // mismo ancla que su punto de encuentro
       nid = Math.max(nid, n.id); gid = Math.max(gid, n.g + 1);
     }
@@ -92,7 +100,7 @@ const NEU = (() => {
       let F = gr.host != null ? foe(gr.host) : null;
       if (gr.host != null && typeof WAR !== 'undefined') { const SF = WAR.nearestOwned(gr.host, world(lead), CALM); if (SF && (!F || dist(SF.pos, world(lead)) < dist(F.pos, world(lead)))) F = SF; } // también atacan sus buques, satélites y cazas
       if (gr.host != null && (!F || dist(F.pos, world(lead)) > CALM)) { gr.host = null; F = null; } // el agresor murió o se alejó mucho: el grupo se calma
-      if (!F && dist(world(lead), bodies[lead.a].pos.map((c, i) => c + gr.wp[i] + lead.off[i])) < 300) gr.wp = wpOf(gr.s);
+      if (!F && dist(world(lead), bodies[lead.a].pos.map((c, i) => c + gr.wp[i] + lead.off[i])) < 5) { if (Math.random() < 0.08) { const alt = SPOTS.map((sp, k) => k).filter(k => k !== gr.s && czAt(SYS, CZN, spotPos(SPOTS[k])) === gr.zi); if (alt.length) { gr.s = alt[(Math.random() * alt.length) | 0]; Object.assign(gr, homeOf(gr.s, gr.g + Math.floor(Math.random() * 1e6))); for (const n of ms) if (n.a !== SPOTS[gr.s].a) { const w = world(n); n.a = SPOTS[gr.s].a; n.r = sub(w, bodies[n.a].pos); } } } gr.wp = wpOf(gr); } // de vez en cuando cambia de planeta/cúmulo dentro de su zona
       for (const n of ms) step(n, gr, F, dt);
     }
     if (now - sendT > SEND_MS) { sendT = now; send({ t: 'ns', l: [...E.values()].map(n => [n.id, n.g, n.a, r1(n.r[0]), r1(n.r[1]), r1(n.r[2]), r3(n.q.x), r3(n.q.y), r3(n.q.z), r3(n.q.w), Math.round(n.v), Math.round(n.hp), Math.round(n.sh), TT.indexOf(n.t), n.lv, n.h]) }); }
@@ -173,5 +181,5 @@ const NEU = (() => {
   function nearest(w, range) { // (anfitrión) la neutral más cercana al alcance, cualquiera: buques, satélites y cazas también les disparan (y se vuelven hostiles al dueño)
     if (!wasHost) return null; let best = null, bd = range; for (const n of E.values()) { if (!n.w) continue; const d = dist(n.w, w); if (d < bd) { bd = d; best = { pos: n.w, v: n.v, q: n.q, d, id: n.id }; } } return best;
   }
-  return { population, popStats, POP, ACTIVE: () => ACTIVE, frame, sync, hit, onHit, targets, hostileNear, nearest, E, G, MAXG: MAX_ACTIVE / GSIZE, SPOTS, pos: id => (E.get(id) || {}).w || null, speed: id => (E.get(id) || {}).v || 0, name: id => { const n = E.get(id); return n ? nameOf(n) : 'Nave neutral'; } };
+  return { NEAR, homeOf, population, popStats, POP, ACTIVE: () => ACTIVE, frame, sync, hit, onHit, targets, hostileNear, nearest, E, G, MAXG: MAX_ACTIVE / GSIZE, SPOTS, pos: id => (E.get(id) || {}).w || null, speed: id => (E.get(id) || {}).v || 0, name: id => { const n = E.get(id); return n ? nameOf(n) : 'Nave neutral'; } };
 })();

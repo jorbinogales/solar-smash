@@ -349,6 +349,42 @@ const THR_COL = { p: 0xff5a28, c: 0xffd23f, m: 0xff8a3c }, THR = (() => {
       g.setDrawRange(0, n * 2); g.attributes.position.needsUpdate = true; g.attributes.color.needsUpdate = true; } };
 })();
 const num3 = a => Array.isArray(a) && a.length === 3 && a.every(Number.isFinite);
+// ---------- SOMBRAS PROYECTADAS (sin shadow maps): decal plano con la silueta difuminada de una nave, sobre el suelo o la cubierta de un buque; pool de 8 (las naves más cercanas) ----------
+// shadowSpec (lógica pura): alt km sobre la superficie · sunDir unitario hacia el sol · up normal de la superficie · size envergadura (km) → { opacity, offset (km, mundo), scale (km) }
+function shadowSpec(alt, sunDir, up, size) {
+  const su = sunDir[0] * up[0] + sunDir[1] * up[1] + sunDir[2] * up[2]; if (!(alt >= -0.05) || alt > 3 || su <= 0.05) return { opacity: 0, offset: [0, 0, 0], scale: size }; // lejos del suelo o de noche: nada
+  const a = Math.max(0, alt), t = [-(sunDir[0] - up[0] * su), -(sunDir[1] - up[1] * su), -(sunDir[2] - up[2] * su)], tl = Math.hypot(t[0], t[1], t[2]) || 1, sh = Math.min(2, a * Math.sqrt(1 - su * su) / su); // la sombra cae al lado contrario del sol, desplazada altura·tan θ (tope 2 km)
+  return { opacity: 0.55 * Math.pow(1 - a / 3, 1.5) * Math.min(1, su / 0.25), offset: t.map(c => c / tl * sh), scale: size * (1 + a * 0.15) };
+}
+const SHADOW = (() => {
+  const N = 8, geo = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), cv = document.createElement('canvas'); cv.width = cv.height = 128; const g = cv.getContext('2d');
+  if (g && g.fillRect) { g.fillStyle = '#000'; g.shadowColor = '#000'; g.shadowBlur = 10; g.beginPath(); g.moveTo(64, 10); g.lineTo(76, 58); g.lineTo(120, 86); g.lineTo(76, 84); g.lineTo(72, 116); g.lineTo(56, 116); g.lineTo(52, 84); g.lineTo(8, 86); g.lineTo(52, 58); g.closePath(); g.fill(); } // silueta vista desde arriba (proa hacia −z de la malla: arriba del lienzo), bordes suaves
+  const tex = new THREE.CanvasTexture(cv), pool = [];
+  for (let i = 0; i < N; i++) { const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: 0x000000, alphaMap: tex, map: tex, transparent: true, opacity: 0, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4, fog: false })); m.renderOrder = 5; m.visible = false; m.frustumCulled = false; scene.add(m); pool.push(m); }
+  const _q = new THREE.Quaternion(), _m = new THREE.Matrix4(), X = new THREE.Vector3(), Y = new THREE.Vector3(), Z = new THREE.Vector3();
+  function ground(p) { // superficie bajo p: cubierta de un buque (a < 1 km de ella y sobre la pista) o suelo con terreno de un planeta rocoso → { pt, up, alt } o null
+    if (typeof WAR !== 'undefined' && WAR.deck) for (const u of WAR.all()) { if (u.k !== 'W' || !u.w || !u.q || u.arr) continue; const D = WAR.deck(u), r = sub(p, D.pos), h = r[0] * D.up[0] + r[1] * D.up[1] + r[2] * D.up[2]; if (h < -0.05 || h > 1) continue;
+      const along = r[0] * D.dirProa[0] + r[1] * D.dirProa[1] + r[2] * D.dirProa[2], side = Math.hypot(r[0] - D.up[0] * h - D.dirProa[0] * along, r[1] - D.up[1] * h - D.dirProa[1] * along, r[2] - D.up[2] * h - D.dirProa[2] * along); if (Math.abs(along) > D.largo / 2 + 0.2 || side > D.ancho / 2 + 0.2) continue;
+      return { pt: p.map((c, i) => c - D.up[i] * h), up: D.up, alt: h }; }
+    for (const b of bodies) { if (b.k === 'sun' || b.k === 'gas') continue; const d = sub(p, b.pos), l = len(d); if (l - b.R > 4 || l < 1e-6) continue; const sr = planets.surfaceR(b, d, l), up = d.map(c => c / l); return { pt: b.pos.map((c, i) => c + up[i] * sr), up, alt: l - sr }; }
+    return null;
+  }
+  function frame() { // ≤ 8 sombras de las naves más cercanas que están cerca del suelo o de la cubierta
+    const C = [];
+    if (P.hp > 0 && !S.warp.on && ship) C.push({ p: S.foot && S.foot.on ? S.shipPos : S.pos, q: S.q, size: 0.035 * ((TYPES[mySpec.t] || {}).size || 1), d: 0 });
+    for (const r of remotes.values()) if (r.hp > 0 && r.apos && r.dist < 60 && !r.wp) C.push({ p: r.apos, q: r.q, size: 0.035 * ((TYPES[r.st] || {}).size || 1), d: r.dist });
+    if (typeof BOT !== 'undefined') for (const B of BOT.bots.values()) if (!B.dead && !B.w && B.pos && len(sub(B.pos, S.pos)) < 60) C.push({ p: B.pos, q: B.q, size: 0.035, d: len(sub(B.pos, S.pos)) });
+    if (typeof NEU !== 'undefined') for (const n of NEU.E.values()) if (n.w && n.dist < 60) C.push({ p: n.w, q: n.q, size: 0.035, d: n.dist });
+    C.sort((a, b) => a.d - b.d); let k = 0; const sd = [sunLight.position.x, sunLight.position.y, sunLight.position.z], sl = Math.hypot(...sd) || 1; for (let i = 0; i < 3; i++) sd[i] /= sl;
+    for (const c of C) { if (k >= N) break; const gr = ground(c.p); if (!gr) continue; const sp = shadowSpec(gr.alt, sd, gr.up, c.size); if (sp.opacity <= 0.01) continue;
+      const m = pool[k++], w = gr.pt.map((x, i) => x + sp.offset[i] + gr.up[i] * 0.002), v = view(w); // 2 m sobre la superficie (+ polygonOffset): sin z-fighting
+      Y.set(...gr.up); Z.set(0, 0, 1).applyQuaternion(c.q); Z.addScaledVector(Y, -Z.dot(Y)); if (Z.lengthSq() < 1e-8) Z.set(1, 0, 0).addScaledVector(Y, -Y.x); Z.normalize(); X.crossVectors(Y, Z); // orientada con el rumbo de la nave
+      m.quaternion.setFromRotationMatrix(_m.makeBasis(X, Y, Z)); m.position.set(v.x, v.y, v.z); m.scale.setScalar(sp.scale * v.s); m.material.opacity = sp.opacity; m.visible = true; }
+    for (; k < N; k++) pool[k].visible = false;
+    return C.length;
+  }
+  return { frame, pool, N };
+})();
 function shieldBreak(pos, at) { puff(pos, 0.06, 0x9fe8ff, 0.5, 0.03); puff(pos, 0.03, 0xffffff, 0.25, 0.02); for (let i = 0; i < 6; i++) puff(pos.map(c => c + (Math.random() - 0.5) * 0.06), 0.01, 0xbfefff, 0.4 + Math.random() * 0.3, 0.006); sfx('escudo', at); } // el escudo se rompe: destello, esquirlas de luz y chasquido (espacial; at null = mío)
 function puff(pos, size, color, dur, min) { const sp = new THREE.Mesh(ball, glow(color)); scene.add(sp); fx.push({ pos: [...pos], size, t: 0, dur, min, sp }); }
 const DUST0 = new THREE.Color(0xa08c70); let dustAcc = 0;
@@ -1163,7 +1199,7 @@ function frame(now) {
       trailDraw(tr);
     }
   }
-  trailTick(dt); beamTick(dt, now); THR.tick(dt);
+  trailTick(dt); beamTick(dt, now); THR.tick(dt); SHADOW.frame();
   for (let i = fx.length - 1; i >= 0; i--) {
     const e = fx[i]; e.t += dt; if ((CARRY[0] || CARRY[1] || CARRY[2]) && Math.abs(e.pos[0] - S.pos[0]) < 300 && Math.abs(e.pos[1] - S.pos[1]) < 300 && Math.abs(e.pos[2] - S.pos[2]) < 300) e.pos = e.pos.map((c, i) => c + CARRY[i]); const v = view(e.pos);
     if (e.t > e.dur) { scene.remove(e.sp); e.sp.material.dispose(); fx.splice(i, 1); continue; }
