@@ -40,6 +40,7 @@
   #hg .tabs{display:flex;gap:8px;margin:10px 0}#hg .tabs button{padding:8px 18px;border-radius:8px;border:1px solid #1d4a66;background:#0a1f30;color:#bfe8ff;font:inherit;font-weight:bold;letter-spacing:.12em;cursor:pointer}#hg .tabs button.on{background:#4db8ff;color:#00131f;border-color:#4db8ff}
   #resbar{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px}
   .cost{display:inline-flex;align-items:center;gap:4px;background:#0a1f30;border:1px solid #1d4a66;border-radius:8px;padding:2px 8px 2px 4px;font-weight:bold;color:#e6f6ff}.cost i{display:block;width:22px;height:22px}.cost i svg{width:100%;height:100%;display:block}.cost.no{color:#ff8a7a;border-color:#6a2a24;background:#1a0d0b}
+  .buyrow{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.buyrow .kbuy{margin-left:auto}
   .costs{display:inline-flex;flex-wrap:wrap;gap:6px}.ship .costs{margin-top:6px}
   button.up{display:inline-flex;align-items:center;padding:4px 8px;border-radius:8px;border:1px solid #2a6a90;background:#0b2a3d;color:#dff4ff;font:inherit;cursor:pointer;width:auto;height:auto}button.up:hover:not(:disabled){border-color:#4db8ff;background:#0e3550}button.up:disabled{opacity:.55;cursor:not-allowed}.max{color:#5dff8a;font-size:12px;letter-spacing:.15em}
   #hg .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px;margin-top:6px}#hg .card{background:#06121ecc;border:1px solid #1d4a66;border-radius:10px;padding:12px}#hg .card.wide{grid-column:1/-1}#hg .card .ch{display:flex;justify-content:space-between;margin-bottom:4px}#hg .card small{display:block;color:#8fb8d0;margin-bottom:8px}#hg .empty{color:#8fb8d0;padding:20px}
@@ -104,7 +105,7 @@
   #hg.nob .kbuy,#hg.nob [data-wdep],#hg.nob [data-equip],#hg.nob #slotsRow button,#hg.nob #shipList .ship:not(.on){opacity:.4;pointer-events:none;cursor:default;filter:grayscale(.5)}
   #tv .hx{z-index:3}#pvlv .lvtag{display:inline-block;background:#ffd23f;color:#050f1c;border:3px solid #050f1c;border-radius:9px;padding:0 8px;font-weight:900}
   /* botón COMPRAR / ADQUIRIR (pegatina naranja) */
-  button.kbuy{display:inline-flex;align-items:center;gap:8px;padding:3px 10px 3px 4px;border:3px solid #050f1c;border-bottom-width:4px;border-radius:9px;background:#ff8a3c;box-shadow:2px 2px 0 #050f1c;color:#050f1c;font:inherit;cursor:pointer}button.kbuy b{font-weight:900;letter-spacing:.08em;font-size:11px;white-space:nowrap}
+  button.kbuy{display:inline-flex;align-items:center;gap:8px;padding:6px 18px;border:3px solid #050f1c;border-bottom-width:4px;border-radius:9px;background:#ff8a3c;box-shadow:2px 2px 0 #050f1c;color:#050f1c;font:inherit;cursor:pointer}button.kbuy b{font-weight:900;letter-spacing:.08em;font-size:11px;white-space:nowrap}
   button.kbuy:hover:not(:disabled){background:#ffab6e}button.kbuy:active:not(:disabled){transform:translateY(2px);border-bottom-width:3px}button.kbuy:disabled{background:#56606b;color:#16202c;cursor:not-allowed}button.kbuy:disabled .costs{opacity:.8}button.kbuy .cost{padding:1px 6px 1px 2px}
   /* pestaña FLOTA */
   #hg .fleet{display:grid;grid-template-columns:1fr 1fr 290px;gap:14px;margin:12px 0}#hg .fcard{background:#0b2233e6;border:3px solid #050f1c;box-shadow:5px 5px 0 #050f1c;border-radius:14px;padding:12px;min-height:430px}

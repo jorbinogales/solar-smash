@@ -17,7 +17,7 @@ const ic = k => `<i class="uico">${(typeof UPI !== 'undefined' && UPI[k]) || ''}
 const costHtml = cost => `<span class="costs">${Object.entries(cost).map(([k, n]) => `<span class="cost${(inv()[k] || 0) >= n ? '' : ' no'}"><i>${icon(k)}</i>${n}</span>`).join('')}</span>`;
 const canPay = cost => FOOT.creative || Object.entries(cost).every(([k, n]) => (inv()[k] || 0) >= n);
 const pips = (lv, max) => Array.from({ length: max }, (_, k) => `<span class="pip ${k < lv ? 'on' : ''}" style="display:inline-block;margin-left:3px"></span>`).join('');
-const buyBtn = (attr, cost, label = 'COMPRAR') => { const ok = atBase(), pay = canPay(cost), txt = ok && !pay ? 'FALTAN RECURSOS' : label; return `<button class="buy kbuy" ${attr}${ok && pay ? '' : ' disabled'}>${costHtml(cost)}<b>${txt}</b></button>`; }; // botón naranja: compra con UN clic · gris si faltan recursos · fuera de la base, atenuado (sin mensajes)
+const buyBtn = (attr, cost, label = 'COMPRAR') => { const ok = atBase(), pay = canPay(cost), txt = ok && !pay ? 'FALTAN RECURSOS' : label; return `<div class="buyrow">${costHtml(cost)}<button class="buy kbuy" ${attr}${ok && pay ? '' : ' disabled'}><b>${txt}</b></button></div>`; }; // botón naranja: compra con UN clic · gris si faltan recursos · fuera de la base, atenuado (sin mensajes)
 let pvs = null; // vista previa: al pasar el ratón sobre una mejora bloqueada se ve su efecto en el modelo sin comprarla ('style:x' | 'up:x' | 'ship:x' | 'add:i')
 const card = (iconKey, title, pipsHtml, small, ctl, pv = '') => `<div class="upc" data-pv="${pv}">${ic(iconKey)}<div><b>${title}<span>${pipsHtml}</span></b><small>${small}</small><div class="ctl">${ctl}</div></div></div>`;
 
