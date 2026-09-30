@@ -200,7 +200,12 @@ const BASE = (() => {
   #mm .room{background:#08202f;border:1px solid #1d4a66;border-radius:10px;padding:12px;display:grid;gap:4px}#mm .room span{color:#9fd4ee;font-size:12px}#mm .hint{color:#8fb8d0;font-size:11px;text-align:center}#mm .err{color:#ffd23f;text-align:center;min-height:16px}
   #ldg{position:fixed;inset:0;z-index:35;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;background:#02060cf2;color:#cfe9f7;font-family:ui-monospace,Consolas,monospace}#ldg h2{letter-spacing:.3em;margin:0}#ldg .sub{color:#9fd4ee;min-height:18px}
   #ldg .bar{width:min(460px,80vw);height:12px;border:1px solid #2a5a78;border-radius:7px;overflow:hidden;background:#04121e}#ldg .bar i{display:block;height:100%;width:0;background:linear-gradient(90deg,#4db8ff,#5dff8a);transition:width .2s}#ldg .pct{font-size:22px;font-weight:bold}
-  #ldg .lst{width:min(460px,80vw);display:grid;gap:5px}#ldg .lst div{display:grid;grid-template-columns:1fr auto;gap:8px;background:#08202f;border-radius:6px;padding:5px 9px;font-size:12px;position:relative;overflow:hidden}#ldg .lst i{position:absolute;left:0;bottom:0;height:3px;background:#5dff8a}`; document.head.append(css2);
+  #ldg .lst{width:min(520px,86vw);display:grid;gap:5px;max-height:calc(100vh - 250px);overflow:hidden}#ldg .lst.two{grid-template-columns:1fr 1fr;width:min(760px,92vw)}
+  #ldg .pr{position:relative;display:flex;align-items:center;gap:8px;box-sizing:border-box;border:2px solid #050f1c;border-radius:12px;background:#0a2233;overflow:hidden;padding:0 10px 0 3px;min-height:0}
+  #ldg .pr .fill{position:absolute;left:0;top:0;bottom:0;width:var(--p);background:linear-gradient(90deg,#1a67a6,#4db8ff 75%,#8fe8ff);box-shadow:0 0 16px #4db8ffcc;transition:width .25s;animation:ldglow 1.1s ease-in-out infinite}#ldg .pr.done .fill{background:linear-gradient(90deg,#1c9a4e,#5dff8a);box-shadow:0 0 14px #5dff8a99;animation:none}
+  @keyframes ldglow{50%{filter:brightness(1.45);box-shadow:0 0 26px #8fe8ffff}}
+  #ldg .pr .av{position:relative;flex:none;height:calc(100% - 6px);aspect-ratio:1;border-radius:50%;border:2px solid #050f1c;overflow:hidden;background:#fff;box-shadow:0 2px 0 #050f1c}#ldg .pr .av svg{display:block;width:100%;height:100%}
+  #ldg .pr .nm{position:relative;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700;text-shadow:0 1px 3px #000}#ldg .pr b{position:relative;text-shadow:0 1px 3px #000}`; document.head.append(css2);
   function onWelcome() { let tk = ''; try { tk = sessionStorage.getItem('token') || ''; } catch {} send({ t: 'resume', token: tk }); } // la página del juego se reengancha con el mismo jugador que creó/entró a la sala en el menú
   function onRoomMsg(m) { if (m.resumed === 0) location.href = '/'; } // sin sala (o sin ser miembro): de vuelta al menú principal
   window.BOOT_DONE = async () => { // fin de la carga de módulos: se generan las texturas de todos los planetas con barra de progreso
@@ -211,11 +216,13 @@ const BASE = (() => {
   };
   let loading = false, ldPct = 0, ldSend = 0, ldFrames = 0;
   function beginLoading() { loading = true; ldPct = 0; ldFrames = 0; ldg.style.display = 'flex'; ldg.querySelector('h2').textContent = 'CARGANDO PARTIDA'; }
+  let BLOB = null; import('/blobatar.js').then(m => { BLOB = m.blobatar; }).catch(() => {}); // fotos de perfil (Blobatar) en la pantalla de carga
   function loadTick(now) { // precarga el terreno y los objetos alrededor de la base; la partida empieza cuando todos los jugadores llegan al 100 %
     planets.warm(S.pos, 6); const pr = planets.loadProgress(S.pos), warm = ++ldFrames > 20; ldPct = warm ? Math.min(100, Math.round(100 * (0.6 * pr.rings + 0.4 * pr.cells))) : 0;
     if (now - ldSend > 250 || ldPct >= 100 && ldSend !== -1) { ldSend = ldPct >= 100 ? -1 : now; send({ t: 'ld', p: ldPct }); }
     ldg.querySelector('.bar i').style.width = ldPct + '%'; ldg.querySelector('.pct').textContent = ldPct + ' %'; ldg.querySelector('.sub').textContent = ldPct < 100 ? 'Cargando el terreno y los recursos alrededor de tu base…' : (LB.phase === 'playing' ? '¡Todo listo!' : 'Esperando a los demás jugadores…');
-    ldg.querySelector('.lst').innerHTML = LB.list.filter(x => x.b).map(x => { const v = x.id === myId ? ldPct : (x.ld ?? 0); return `<div><span>${x.nm || 'Piloto'}${x.id === myId ? ' (tú)' : ''}</span><b>${v} %</b><i style="width:${v}%"></i></div>`; }).join('');
+    { const rows = LB.list.filter(x => x.b), lst = ldg.querySelector('.lst'), two = rows.length > 6, n = two ? Math.ceil(rows.length / 2) : rows.length, avail = Math.max(60, innerHeight - 300), rh = Math.max(20, Math.min(46, Math.floor((avail - (n - 1) * 5) / n))); // la fila se reduce si hay muchos jugadores: nunca pasa del alto disponible
+      lst.classList.toggle('two', two); lst.innerHTML = rows.map(x => { const v = x.id === myId ? ldPct : (x.ld ?? 0), av = BLOB && x.av ? BLOB(x.av, { background: 'circle' }) : ''; return `<div class="pr${v >= 100 ? ' done' : ''}" style="--p:${v}%;height:${rh}px;font-size:${Math.max(10, Math.min(13, rh * 0.32))}px"><i class="fill"></i><span class="av">${av}</span><span class="nm">${x.nm || 'Piloto'}${x.id === myId ? ' (tú)' : ''}</span><b>${v} %</b></div>`; }).join(''); }
     if (ldPct >= 100 && LB.phase === 'playing') { loading = false; ldg.style.display = 'none'; say('¡Partida iniciada! Esc abre el menú de mejoras'); }
   }
   function startGame() { // el administrador inició la partida (o te uniste con ella en marcha): nave básica, inventario vacío, reaparecer en tu hangar
