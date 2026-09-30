@@ -234,9 +234,9 @@
     if (owner && owner !== me && !attack) return 'Zona de otro jugador: solo junto a su planeta con base (ataque)';
     if (czAt(sys, zs, off) !== zi && !(anch > 0 && czAt(sys, zs, bodyPosAt(sys, anch, t)) === zi)) return 'Fuera de la zona'; // anclado a un planeta: cuenta la zona del PLANETA (a 300 km de altitud el punto puede asomar al sector vecino si el planeta está junto al borde)
     const rr = Math.hypot(off[0], off[2]); if (rr < WARCFG.starClear) return 'Demasiado cerca de la estrella';
-    if (anch > 0) { const b = sys.bodies[anch], H = sys.atmo[b.n] ? sys.atmo[b.n].H : 0; if (d3(off, bodyPosAt(sys, anch, t)) < b.R + 5.5 * H + 5) return 'Dentro de la atmósfera'; return attack ? '' : czDanger(sys, zs, zi, me, hangars, [], t, anch); }
+    if (anch > 0) { const b = sys.bodies[anch], H = sys.atmo[b.n] ? sys.atmo[b.n].H : 0; if (d3(off, bodyPosAt(sys, anch, t)) < b.R + 5.5 * H + 5) return 'Dentro de la atmósfera'; return attack || owner === me ? '' : czDanger(sys, zs, zi, me, hangars, [], t, anch); }
     for (const b of sys.bodies) if (b.k !== 'sun' && !b.parent && Math.abs(rr - b.a * DS) < WARCFG.orbitClear) return `Demasiado cerca de la órbita de ${b.n}`;
-    return attack ? '' : czDanger(sys, zs, zi, me, hangars, [], t); // los buques (propios o enemigos) ya no impiden desplegar
+    return attack || owner === me ? '' : czDanger(sys, zs, zi, me, hangars, [], t); // los buques (propios o enemigos) ya no impiden desplegar; en una zona PROPIA (p. ej. la inicial) la ZONA ROJA por un hangar enemigo vecino tampoco
   }
   root.SYS_SCALE = SYS_SCALE; root.genSystem = genSystem; root.genZones = genZones; root.wreckLoot = wreckLoot; root.BASE_UP = BASE_UP; root.baseStats = baseStats; root.TOWER_STYLES = TOWER_STYLES; root.WEAPONS = WEAPONS; root.weaponCd = weaponCd;
   root.WARCFG = WARCFG; root.genControlZones = genControlZones; root.bodyPosAt = bodyPosAt; root.czAt = czAt; root.czCheck = czCheck; root.czDist = czDist; root.czCenter = czCenter; root.czDanger = czDanger; root.czDeployPoint = czDeployPoint;

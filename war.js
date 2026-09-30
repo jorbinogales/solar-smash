@@ -97,7 +97,7 @@ const WAR = (() => {
   function onAlarm(e) { // 'walarm': un buque detectó a un enemigo → sirena según la distancia y parpadeo de su icono
     const s = WS.get(e.i); if (!s || !s.w) return; s.blinkT = performance.now(); AUDIO.alarm(s.w, s.o !== myId);
   }
-  function onOk(m) { if (m.wok) { stock[m.k] = Math.max(0, stock[m.k] - 1); say(`${UN[m.k] || 'Unidad'} desplegado`); } else say(m.why || 'No se pudo desplegar ahí'); }
+  function onOk(m) { if (m.wok) { stock[m.k] = Math.max(0, stock[m.k] - 1); say(`${UN[m.k] || 'Unidad'} desplegado`); } else say('No se pudo desplegar: ' + (m.why || 'posición no válida'), true); } // el motivo SIEMPRE visible (no lo silencia QUIET)
 
   // ---------- por cuadro: posición (origen flotante), torretas y cazas ----------
   function blocked(a, b) { // ¿un astro entre a y b?
@@ -476,7 +476,6 @@ const WAR = (() => {
     if (sp) { pref = sp.dataset.wsp === 'base' ? 'base' : +sp.dataset.wsp; refresh(); return; }
     if (fs && !e.target.closest('.buy')) { fsel = fs.dataset.fsel; refresh(); return; }
     if (!d || d.disabled || !atBase()) return; // fuera de la base: atenuado, sin mensaje
-    if (d.dataset.wdep === 'S' && !CZS.some(Z => Z.o === myId)) return say('Los satélites solo en zonas tuyas: reclama una primero'); // buques y cazas también en zonas sin dueño (las reclaman)
     ov.style.display = 'none'; MAP.place(d.dataset.wdep); // el mapa se abre en modo colocación
   });
   // ---------- DESPLIEGUE RÁPIDO (tecla B): panel con las unidades en reserva; se despliegan en el sector donde está mi nave (mismas reglas que desde el mapa) ----------

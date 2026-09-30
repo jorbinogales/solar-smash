@@ -290,7 +290,7 @@ const MAP = (() => {
     }
     g.restore();
   }
-  function placeClick() { const gh = st.ghost; if (!gh) return say('Elige un punto dentro de una zona de control tuya (azul)'); if (gh.why) return say(gh.why); send({ t: 'wdep', k: st.place.k, zi: gh.zi, at: gh.at }); close(); }
+  function placeClick() { const gh = st.ghost; if (!gh) return say('Elige una zona de control tuya o sin dueño', true); if (gh.why) return say('No se puede desplegar aquí: ' + gh.why, true); send({ t: 'wdep', k: st.place.k, zi: gh.zi, at: gh.at }); close(); }
   function loop() { if (!st.open) return; requestAnimationFrame(loop); const now = performance.now(), dt = Math.min(0.1, (now - st.t) / 1000); st.t = now; drawSys(dt); }
 
   // ---------- entrada ----------
