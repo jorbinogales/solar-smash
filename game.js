@@ -550,7 +550,7 @@ function flightInstr(W, H, now) { // gráfica HOLOGRÁFICA lateral de colisión:
     ceil = ATMO[nb.n] ? 6 * ATMO[nb.n].H : 200; g = Math.max(0, planets.info.on && planets.info.name === nb.n ? planets.info.ground : na);
     const dv = sub(S.pos, nb.pos), dl = len(dv); up = [dv[0] / dl, dv[1] / dl, dv[2] / dl]; _fi.f.set(0, 0, -1).applyQuaternion(S.q);
     sinP = Math.max(-1, Math.min(1, _fi.f.x * up[0] + _fi.f.y * up[1] + _fi.f.z * up[2])); vz = S.ve * sinP; tti = vz < -0.03 && g > 0 && !S.park.on ? g / -vz : Infinity;
-    show = na < ceil * (_fi.on ? 1.1 : 1) && !S.park.on && (_fi.on ? vz < 0.01 : vz < -0.002); // histéresis: se activa al cruzar el límite de la exosfera bajando (> 2 m/s), sale al dejar de bajar o al pasar el 110 % del techo
+    show = na < ceil * (_fi.on ? 1.1 : 1) && !S.park.on; // se activa al cruzar el límite de la exosfera, mires o no hacia el suelo (histéresis: sale al pasar el 110 % del techo)
   }
   _fi.on = show; _fi.a = Math.max(0, Math.min(1, (_fi.a || 0) + (show ? 1 : -1) * dtI / 0.4)); // fundido de 0,4 s
   if (tti <= 1.5 && vz < -0.3) crashAlert(W, H, now, tti); // la alerta de choque no cambia (1,5 s)
