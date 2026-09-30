@@ -40,7 +40,7 @@ const BOT = (() => {
       { const sd = sub(B.pos, bodies[0].pos), sl = len(sd); if (sl < STAR_KILL_R * 1.2) D.addScaledVector(new THREE.Vector3(sd[0] / sl, sd[1] / sl, sd[2] / sl), 2).normalize(); } // evita la zona letal de la estrella
       B.q.rotateTowards(lookQ([D.x, D.y, D.z]), 2.2 * dt); B.v += (vDes - B.v) * (1 - Math.exp(-dt * 1.5));
       const f = FWD.clone().applyQuaternion(B.q); B.pos = [B.pos[0] + f.x * B.v * dt, B.pos[1] + f.y * B.v * dt, B.pos[2] + f.z * B.v * dt];
-      if (aimAt && B.cd <= 0) { const ad = sub(aimAt, B.pos), al = len(ad); if (al < 3.5 && (f.x * ad[0] + f.y * ad[1] + f.z * ad[2]) / al > Math.cos(0.14)) { B.cd = CD; fire(B, idx, [ad[0] / al + (Math.random() - 0.5) * 0.02, ad[1] / al + (Math.random() - 0.5) * 0.02, ad[2] / al + (Math.random() - 0.5) * 0.02]); } }
+      if (aimAt && B.cd <= 0) { const ad = sub(aimAt, B.pos), al = len(ad); if (al < 3.5 && (f.x * ad[0] + f.y * ad[1] + f.z * ad[2]) / al > Math.cos(0.14)) { B.cd = weaponCd(WEAPONS.plasma, B, CD); fire(B, idx, [ad[0] / al + (Math.random() - 0.5) * 0.02, ad[1] / al + (Math.random() - 0.5) * 0.02, ad[2] / al + (Math.random() - 0.5) * 0.02]); } }
       const v = view(B.pos); B.grp.visible = true; B.grp.position.set(v.x, v.y, v.z); B.grp.scale.setScalar(Math.max(v.s, v.rd * 0.12)); B.grp.quaternion.copy(B.q); setThrust(B.grp, B.v, now); updateShipFx(B.grp, now, 0);
       sendState(B, idx, h, now);
     }

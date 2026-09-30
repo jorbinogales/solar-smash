@@ -76,7 +76,7 @@ const NEU = (() => {
     if (!F || n.cd > 0) return;
     const mp = world(n), d = dist(F.pos, mp); if (d > FIRE_R) return;
     const fv = FWD.clone().applyQuaternion(F.q), tt = d / WPN.p.speed, ap = F.pos.map((c, i) => c + fv.getComponent(i) * F.v * tt), ad = nrm(sub(ap, mp)); // apunta por delante del agresor
-    if (f.x * ad[0] + f.y * ad[1] + f.z * ad[2] > Math.cos(0.3)) { n.cd = st.cd * rnd(0.8, 1.3); fire(n, mp, nrm(ad.map(c => c + rnd(-SPREAD, SPREAD)))); } // con dispersión: puntería imperfecta
+    if (f.x * ad[0] + f.y * ad[1] + f.z * ad[2] > Math.cos(0.3)) { n.cd = weaponCd(WEAPONS.plasma, n, st.cd); fire(n, mp, nrm(ad.map(c => c + rnd(-SPREAD, SPREAD)))); } // con dispersión: puntería imperfecta
   }
   function sim(dt, now) {
     for (const g of [...G.keys()]) if (![...E.values()].some(n => n.g === g)) { G.delete(g); pend.push(now + rnd(RESPAWN[0], RESPAWN[1])); } // grupo aniquilado: otro aparecerá en 12-30 s

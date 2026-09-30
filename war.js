@@ -118,10 +118,10 @@ const WAR = (() => {
   function fire(s, t, tg) { // buque: plasma rápido con puntería adelantada (precisión moderada) · satélite: misil guiado de largo alcance · ambos salen de la boca real del cañón
     const homing = s.k === 'S', mp = muzzle(s, tg.pos);
     let ap = tg.pos; if (!homing) { const fw = new THREE.Vector3(0, 0, -1).applyQuaternion(tg.q); for (let k = 0; k < 3; k++) { const tt = len(sub(ap, mp)) / t.spd; ap = tg.pos.map((x, i) => x + fw.getComponent(i) * tg.v * tt); } }
-    const l = len(sub(ap, mp)); if (l < 0.01) return; const dir = sub(ap, mp).map(x => x / l), kind = homing ? 'm' : 'p', tgt = homing ? { k: tg.id >= 3000 && tg.id < 4000 ? 'n' : 'p', id: tg.id } : null, key = `${myId ?? 0}:x${++seq}`, sn = (s.k === 'W' ? 'Buque de ' : 'Satélite de ') + nmOf(s.o);
-    spawnProj(-s.o, key, kind, mp, dir, tgt, t.dmg, { spd: t.spd, col: homing ? 0x9fe8ff : 0xff8a3c, life: Math.min(60, l / t.spd * 1.5 + 3), hr: t.hr }); const q = projs.get(key); if (q) q.sn = sn; // sn: nombre para el aviso de ataque
+    const l = len(sub(ap, mp)); if (l < 0.01) return; const dir = sub(ap, mp).map(x => x / l), Wp = WEAPONS[t.w] || WEAPONS.plasma, kind = homing ? 'm' : Wp.kind, tgt = homing ? { k: tg.id >= 3000 && tg.id < 4000 ? 'n' : 'p', id: tg.id } : null, key = `${myId ?? 0}:x${++seq}`, sn = (s.k === 'W' ? 'Buque de ' : 'Satélite de ') + nmOf(s.o);
+    spawnProj(-s.o, key, kind, mp, dir, tgt, t.dmg, { spd: t.spd, col: Wp.col, life: Math.min(60, l / t.spd * 1.5 + 3), hr: t.hr }); const q = projs.get(key); if (q) q.sn = sn; // sn: nombre para el aviso de ataque
     send({ t: 'fire', key, kind, pos: mp, dir, tgt, dmg: t.dmg, tw: 1, spd: t.spd, rb: S.refB, rp: S.refB >= 0 ? sub(mp, bodies[S.refB].pos) : null });
-    flash(mp, dir, homing ? 0.05 : 0.04 * SCW, homing ? 0x9fe8ff : 0xffa050);
+    flash(mp, dir, homing ? 0.05 : 0.04 * SCW, Wp.col);
     sfx(s.k === 'W' ? 'buqueDisparo' : 'satDisparo', mp); s.cd = t.cd * (0.8 + 0.4 * Math.random());
     if (tg.id === myId) attackAlert('s', sn, s.w);
   }
@@ -139,7 +139,7 @@ const WAR = (() => {
       c.q.rotateTowards(lookQ(nrm(d)), 2.4 * dt); c.v += (vDes - c.v) * (1 - Math.exp(-dt * 1.5)); const fw = new THREE.Vector3(0, 0, -1).applyQuaternion(c.q);
       c.pos = [c.pos[0] + fw.x * c.v * dt, c.pos[1] + fw.y * c.v * dt, c.pos[2] + fw.z * c.v * dt]; c.cd -= dt;
       if (tg && c.cd <= 0 && dl < F.range && (fw.x * d[0] + fw.y * d[1] + fw.z * d[2]) / dl > Math.cos(0.3) && !blocked(c.pos, tg.pos)) { // plasma ligero (lo decide la víctima: el disparo se retransmite con ow = escuadrón)
-        c.cd = F.cd * (0.8 + 0.4 * Math.random()); c.mz = c.mz === 1 ? -1 : 1; const key = `${myId ?? 0}:f${++seq}`, mz = toWorld(c.pos, c.q, c.mz * 0.0197, -0.002, -0.011), dir = nrm(sub(tg.pos, mz).map(x => x + (Math.random() - 0.5) * 0.02 * dl)); // vaina de punta de ala, una y otra por turnos
+        c.cd = weaponCd(WEAPONS[F.w] || WEAPONS.plasma, c, F.cd); c.mz = c.mz === 1 ? -1 : 1; const key = `${myId ?? 0}:f${++seq}`, mz = toWorld(c.pos, c.q, c.mz * 0.0197, -0.002, -0.011), dir = nrm(sub(tg.pos, mz).map(x => x + (Math.random() - 0.5) * 0.02 * dl)); // vaina de punta de ala, una y otra por turnos
         spawnProj(-f.o, key, 'p', mz, dir, null, F.dmg); sfx('plasma', mz); flash(mz, dir, 0.006, 0xffb070);
         send({ t: 'fire', key, kind: 'p', pos: mz, dir, tgt: null, dmg: F.dmg, rb: -1, rp: null, ow: f.id }); if (tg.id === myId) attackAlert('p', 'Cazas de ' + nmOf(f.o), c.pos);
       }
@@ -187,15 +187,93 @@ const WAR = (() => {
     for (const f of FQ.values()) { if ((!neu && f.o === myId) || f.arr) continue; for (let j = 0; j < F.n; j++) { const c = f.c[j]; if (!(f.hp[j] > 0) || !c.w || segDist(old, pos, c.w) > R) continue; send({ t: 'wh', k: 'F', i: f.id, j, dmg: p.dmg, nb: neu ? 1 : 0 }); f.hp[j] -= p.dmg; boom(pos, 0.02); return true; } }
     return false;
   }
-  function collide(old, vEff, now) { // buques (4 esferas del casco, escaladas y orientadas) y satélites son SÓLIDOS: a más de 600 km/h de cierre te estrellas; menos, daño y rebote. El buque recibe daño leve ('wh', ≤ 2 % de su vida, cada 2 s como mucho)
+  // ---------- COLISIÓN con el MODELO REAL (buque y satélite) ----------
+  // Cajas alineadas con los ejes del MODELO (en el mundo son OBB: giran con s.q y escalan con la escala de dibujo), calculadas UNA vez de la geometría real de models.js: se muestrea la
+  // superficie de cada triángulo sólido (sin penachos ni resplandores aditivos), se agrupa en celdas (z 0,04 · y 0,02 · x 0,01 u. del modelo) y cada fila (z, y) se reduce a tramos en x,
+  // rellenando los huecos INTERIORES (con superficie encima y debajo); luego se funden filas y rodajas contiguas de extensión casi igual. Cada caja se infla ~12 m reales (validado: scratchpad colltest.js).
+  // Se exportan como MODELS[k].colliders = [{ c: [x, y, z], h: [hx, hy, hz] }] (unidades del modelo, proa -z). Mi nave es una esfera de SHIP_R km.
+  const COL = {}, SHIP_R = 0.035, SCALE = k => k === 'W' ? SCW : 1; // escala a la que se DIBUJA cada modelo de cerca (frame: stretch(v.s · SCW) con v.s = 1)
+  function colliders(k) {
+    if (COL[k]) return COL[k];
+    const g = unitModel(k, true), INF = 0.012 / SCALE(k), DZ = 0.04, DY = 0.02, DX = 0.01, STEP = 0.012, TR = []; g.updateMatrixWorld(true);
+    const a = new THREE.Vector3(); let x0 = Infinity, y0 = Infinity, z0 = Infinity, x1 = -Infinity, y1 = -Infinity, z1 = -Infinity;
+    g.traverse(o => { // triángulos sólidos (sin penachos ni resplandores aditivos) en coordenadas del modelo
+      if (!o.isMesh || (o.material && o.material.blending === THREE.AdditiveBlending)) return; const pa = o.geometry.attributes.position, ix = o.geometry.index, n = ix ? ix.count : pa.count;
+      for (let t = 0; t < n; t++) { a.fromBufferAttribute(pa, ix ? ix.getX(t) : t).applyMatrix4(o.matrixWorld); TR.push(a.x, a.y, a.z); x0 = Math.min(x0, a.x); x1 = Math.max(x1, a.x); y0 = Math.min(y0, a.y); y1 = Math.max(y1, a.y); z0 = Math.min(z0, a.z); z1 = Math.max(z1, a.z); }
+    });
+    if (!TR.length) return (COL[k] = { boxes: [], R: 0 }); // modelo vacío (pruebas sin models.js)
+    const nx = Math.floor((x1 - x0) / DX) + 1, ny = Math.floor((y1 - y0) / DY) + 1, nz = Math.floor((z1 - z0) / DZ) + 1, N = nx * ny * nz, occ = new Uint8Array(N), E = new Float32Array(N * 6), id = (iz, iy, ix) => (iz * ny + iy) * nx + ix;
+    for (let i = 0; i < N; i++) { E[i * 6] = E[i * 6 + 2] = E[i * 6 + 4] = Infinity; E[i * 6 + 1] = E[i * 6 + 3] = E[i * 6 + 5] = -Infinity; }
+    const RW = k === 'W' ? 0.06 : -1; // pista: sus detalles planos (franja, balizas, chevrones) no se muestrean; la cubre una caja plana propia (abajo)
+    const put = (x, y, z) => { if (Math.abs(x) <= RW && z > DECK.z0 - 0.012 && z < DECK.z1 + 0.06 && y > DECK.y - 0.004 && y < DECK.y + 0.006) return; const q = id(Math.min(nz - 1, Math.floor((z - z0) / DZ)), Math.min(ny - 1, Math.floor((y - y0) / DY)), Math.min(nx - 1, Math.floor((x - x0) / DX))), e = q * 6; occ[q] = 1;
+      if (x < E[e]) E[e] = x; if (x > E[e + 1]) E[e + 1] = x; if (y < E[e + 2]) E[e + 2] = y; if (y > E[e + 3]) E[e + 3] = y; if (z < E[e + 4]) E[e + 4] = z; if (z > E[e + 5]) E[e + 5] = z; };
+    for (let t = 0; t < TR.length; t += 9) { // muestras de la superficie (rejilla baricéntrica de paso ≤ STEP) directamente en las celdas
+      const ax = TR[t], ay = TR[t + 1], az = TR[t + 2], bx = TR[t + 3] - ax, by = TR[t + 4] - ay, bz = TR[t + 5] - az, cx = TR[t + 6] - ax, cy = TR[t + 7] - ay, cz = TR[t + 8] - az;
+      const m = Math.max(1, Math.ceil(Math.max(Math.hypot(bx, by, bz), Math.hypot(cx, cy, cz), Math.hypot(cx - bx, cy - by, cz - bz)) / STEP));
+      for (let i = 0; i <= m; i++) for (let j = 0; j <= m - i; j++) { const u = i / m, w = j / m; put(ax + bx * u + cx * w, ay + by * u + cy * w, az + bz * u + cz * w); }
+    }
+    const inside = (iz, iy, ix) => { let up = false, dn = false; for (let j = 0; j < ny && !(up && dn); j++) if (j !== iy && occ[id(iz, j, ix)]) { if (j > iy) up = true; else dn = true; } return up && dn; }; // hueco interior: superficie encima y debajo en la misma rodaja
+    let boxes = [], open = [];
+    const fuse = (B, r) => { B.x0 = Math.min(B.x0, r.x0); B.x1 = Math.max(B.x1, r.x1); for (const q of r.cells) B.cells.push(q); };
+    for (let iz = 0; iz < nz; iz++) {
+      let prev = [];
+      for (let iy = 0; iy < ny; iy++) {
+        const runs = []; let s0 = -1;
+        for (let ix = 0; ix <= nx; ix++) { const on = ix < nx && occ[id(iz, iy, ix)]; if (on && s0 < 0) s0 = ix; if (!on && s0 >= 0) { runs.push([s0, ix - 1]); s0 = -1; } }
+        for (let r = runs.length - 1; r > 0; r--) { const m = (runs[r - 1][1] + runs[r][0]) >> 1; if (inside(iz, iy, m)) { runs[r - 1][1] = runs[r][1]; runs.splice(r, 1); } } // rellena el interior
+        const cur = [];
+        for (const [ra, rb] of runs) { const r = { x0: ra, x1: rb, cells: [] }; for (let ix = ra; ix <= rb; ix++) if (occ[id(iz, iy, ix)]) r.cells.push(id(iz, iy, ix));
+          const B = prev.find(B => Math.abs(B.sx0 - ra) <= 1 && Math.abs(B.sx1 - rb) <= 1 && !B.used); // misma extensión en x que la fila SEMILLA de la caja (sin deriva): se funde en vertical
+          if (B) { B.used = true; fuse(B, r); B.y1 = iy; cur.push(B); } else { const nb = { x0: ra, x1: rb, sx0: ra, sx1: rb, y0: iy, y1: iy, z0: iz, z1: iz, cells: r.cells }; cur.push(nb); boxes.push(nb); } }
+        for (const B of cur) B.used = false; prev = cur;
+      }
+    }
+    for (const B of boxes) open.push(B); boxes = []; // fusión a lo largo de z: rodajas contiguas con casi la misma sección
+    open.sort((p, q) => p.z0 - q.z0);
+    for (const B of open) { const A = boxes.find(A => A.z1 === B.z0 - 1 && Math.abs(A.zy0 - B.y0) <= 1 && Math.abs(A.zy1 - B.y1) <= 1 && Math.abs(A.zx0 - B.x0) <= 1 && Math.abs(A.zx1 - B.x1) <= 1); if (A) { A.z1 = B.z1; A.y0 = Math.min(A.y0, B.y0); A.y1 = Math.max(A.y1, B.y1); fuse(A, B); } else { Object.assign(B, { zx0: B.x0, zx1: B.x1, zy0: B.y0, zy1: B.y1 }); boxes.push(B); } } // se compara con la rodaja SEMILLA de cada caja: sin deriva
+    const out = []; let R = 0;
+    for (const B of boxes) { // extensión exacta de las muestras de sus celdas + inflado
+      const m = [Infinity, -Infinity, Infinity, -Infinity, Infinity, -Infinity]; for (const q of B.cells) for (let j = 0; j < 6; j++) m[j] = j % 2 ? Math.max(m[j], E[q * 6 + j]) : Math.min(m[j], E[q * 6 + j]);
+      if (!(m[0] <= m[1])) continue; const h = [(m[1] - m[0]) / 2 + INF, (m[3] - m[2]) / 2 + INF, (m[5] - m[4]) / 2 + INF], cc = [(m[0] + m[1]) / 2, (m[2] + m[3]) / 2, (m[4] + m[5]) / 2];
+      out.push({ c: cc, h }); R = Math.max(R, Math.hypot(Math.abs(cc[0]) + h[0], Math.abs(cc[1]) + h[1], Math.abs(cc[2]) + h[2]));
+    }
+    if (k === 'W') out.push({ c: [0, DECK.y - 0.02, (DECK.z0 - 0.012 + DECK.z1 + 0.06) / 2], h: [RW, 0.02 + INF, (DECK.z1 - DECK.z0 + 0.072) / 2] }); // superficie de la pista (arriba: DECK.y + INF)
+    models[k].colliders = out; return (COL[k] = { boxes: out, R, inf: INF });
+  }
+  const sdBox = (p, B) => { const qx = Math.abs(p[0] - B.c[0]) - B.h[0], qy = Math.abs(p[1] - B.c[1]) - B.h[1], qz = Math.abs(p[2] - B.c[2]) - B.h[2]; return Math.hypot(Math.max(qx, 0), Math.max(qy, 0), Math.max(qz, 0)) + Math.min(Math.max(qx, qy, qz), 0); };
+  function boxN(p, B) { // normal hacia fuera de la caja en el punto p (local)
+    const d = [p[0] - B.c[0], p[1] - B.c[1], p[2] - B.c[2]], q = d.map((x, i) => Math.abs(x) - B.h[i]);
+    if (q.some(x => x > 0)) return nrm(q.map((x, i) => Math.max(x, 0) * Math.sign(d[i] || 1)));
+    const i = q.indexOf(Math.max(...q)), n = [0, 0, 0]; n[i] = Math.sign(d[i] || 1); return n;
+  }
+  function sdModel(k, p) { let best = Infinity, bb = null; for (const B of colliders(k).boxes) { const d = sdBox(p, B); if (d < best) { best = d; bb = B; } } return { d: best, B: bb }; } // distancia firmada (u. del modelo) a la caja más cercana
+  const toLocal = (s, p) => { _v.set(p[0] - s.w[0], p[1] - s.w[1], p[2] - s.w[2]).applyQuaternion(_qi.copy(s.q).invert()).divideScalar(SCALE(s.k)); return [_v.x, _v.y, _v.z]; };
+  const toWorldS = (s, l) => toWorld(s.w, s.q, l[0] * SCALE(s.k), l[1] * SCALE(s.k), l[2] * SCALE(s.k));
+  // ---------- PISTA del buque: la cubierta de vuelo de models.js (franja central, superficie y = 0,2325) libre de bloques en |x| ≤ 0,02 entre z −0,84 (proa) y 0,46 (antes de la torre); u. del modelo ----------
+  const DECK = { y: 0.2325, hw: 0.02, z0: -0.84, z1: 0.46 }, LAND_KMH = 200, LAND_H = 0.15; // aterrizaje: < 200 km/h relativos y < 150 m sobre la cubierta
+  const upOf = s => { _v.set(0, 1, 0).applyQuaternion(s.q); return [_v.x, _v.y, _v.z]; };
+  function deck(s) { return { pos: toWorldS(s, [0, DECK.y, (DECK.z0 + DECK.z1) / 2]), dirProa: fwdOf(s), up: upOf(s), ancho: 2 * DECK.hw * SCW, largo: (DECK.z1 - DECK.z0) * SCW }; } // en el mundo (km)
+  const deckRest = () => DECK.y + colliders('W').inf + SHIP_R / SCW + 0.001; // altura local (u. del modelo) del centro de mi nave apoyada en la pista, justo fuera de las cajas
+  const onDeck = (l, m = 0) => Math.abs(l[0]) <= DECK.hw + m && l[2] >= DECK.z0 - m && l[2] <= DECK.z1 + m;
+  function deckLanding(s, l, nL, vEff) { // contacto lento desde arriba sobre la pista de un buque propio: la nave se posa encima (sin daño ni rebote); T la estaciona
+    if (nL[1] < 0.7 || !onDeck(l, 0.01) || l[1] < DECK.y - 0.01 || vEff * 3600 > LAND_KMH) return false;
+    S.pos = toWorldS(s, [l[0], deckRest(), l[2]]); S.v = Math.min(S.v, 0.01); return true;
+  }
+  function collide(old, vEff, now) { // buques y satélites son SÓLIDOS según su modelo real: a más de 600 km/h de CIERRE te estrellas; menos, daño y rebote según la normal de la caja golpeada. El buque recibe daño leve ('wh', ≤ 2 % de su vida, cada 2 s como mucho)
     for (const s of all()) {
-      if (!s.w || s.arr || len(sub(s.w, S.pos)) > 4 * SCW) continue; const f = s.k === 'W' ? fwdOf(s) : null, cs = s.k === 'W' ? [1.35, 0.45, -0.45, -1.25].map(z => s.w.map((q, i) => q + f[i] * z * SCW)) : [s.w], R = s.k === 'W' ? 0.5 * SCW + 0.03 : 0.33;
-      for (const cc of cs) { if (segDist(old, S.pos, cc) >= R) continue;
-        const n = nrm(sub(S.pos, cc)), kmh = vEff * 3600; S.pos = cc.map((q, i) => q + n[i] * (R + 0.05)); S.v = Math.min(S.v, 0.02);
-        if (kmh > 600) { P.cause = 'te estrellaste contra un ' + (s.k === 'W' ? 'buque de guerra' : 'satélite'); hurt(P.hp + P.sh + 1, n.map(v => -v), now); boom(S.pos, 60); }
-        else hurt(Math.max(3, 60 * kmh / 600), n.map(v => -v), now);
-        if (s.o !== myId && s.k === 'W' && now - (s.bumpT || 0) > 2000) { s.bumpT = now; send({ t: 'wh', k: 'W', i: s.id, dmg: Math.max(1, Math.min(C.ws.hp * 0.02, C.ws.hp * 0.02 * kmh / 600)) }); }
-        return true; }
+      if (!s.w || s.arr || !s.q) continue; const K = colliders(s.k), sc = SCALE(s.k), r = SHIP_R / sc;
+      if (segDist(old, S.pos, s.w) > K.R * sc + 1) continue; // esfera envolvente generosa (radio real + 1 km): solo ahorra cálculo, no decide
+      const la = toLocal(s, old), lb = toLocal(s, S.pos), n = Math.min(80, Math.ceil(len(sub(lb, la)) / 0.01)); let hitP = null, H = null; // subpasos de ≤ 0,01 u. del modelo: sin atravesar paredes delgadas
+      for (let i = n ? 1 : 0; i <= n && !hitP; i++) { const f = n ? i / n : 1, p = la.map((x, j) => x + (lb[j] - x) * f); if (!K.boxes.some(B => Math.abs(p[0] - B.c[0]) < B.h[0] + r && Math.abs(p[1] - B.c[1]) < B.h[1] + r && Math.abs(p[2] - B.c[2]) < B.h[2] + r)) continue; const q = sdModel(s.k, p); if (q.d < r) { hitP = p; H = q; } }
+      if (!hitP) continue;
+      const nL = boxN(hitP, H.B), nW = (() => { _v.set(...nL).applyQuaternion(s.q); return [_v.x, _v.y, _v.z]; })(), mv = sub(S.pos, old), ml = len(mv), kmh = vEff * 3600 * (ml > 1e-9 ? Math.max(0, -(mv[0] * nW[0] + mv[1] * nW[1] + mv[2] * nW[2]) / ml) : 0); // velocidad de CIERRE contra la superficie
+      if (s.k === 'W' && s.o === myId && deckLanding(s, hitP, nL, vEff)) return true; // pista del buque propio: contacto lento sobre la cubierta = aterrizaje, no choque
+      let p = hitP; for (let it = 0; it < 4; it++) { const q = sdModel(s.k, p); if (q.d >= r) break; const nn = boxN(p, q.B); p = p.map((x, j) => x + nn[j] * (r + 0.002 - q.d)); } // fuera de la caja golpeada (y de las vecinas)
+      S.pos = toWorldS(s, p); S.v = Math.min(S.v, 0.02);
+      if (kmh > 600) { P.cause = 'te estrellaste contra un ' + (s.k === 'W' ? 'buque de guerra' : 'satélite'); hurt(P.hp + P.sh + 1, nW.map(v => -v), now); boom(S.pos, 60); }
+      else hurt(Math.max(3, 60 * kmh / 600), nW.map(v => -v), now);
+      if (s.o !== myId && s.k === 'W' && now - (s.bumpT || 0) > 2000) { s.bumpT = now; send({ t: 'wh', k: 'W', i: s.id, dmg: Math.max(1, Math.min(C.ws.hp * 0.02, C.ws.hp * 0.02 * kmh / 600)) }); }
+      return true;
     }
     return false;
   }
@@ -261,7 +339,7 @@ const WAR = (() => {
         badge(p, u.k, mine, u);
         if (!p.edge && dl < (u.k === 'W' ? LABEL_KM.buque : u.k === 'S' ? LABEL_KM.satelite : LABEL_KM.nave) && !aimedIs(u.k, u.id)) hudText(p.x, p.y + 32, [[`${u.k === 'W' ? 'BUQUE' : u.k === 'S' ? 'SATÉLITE' : `CAZAS ×${u.n}`} · ${mine ? 'TUYO' : nmOf(u.o).toUpperCase()}${u.k === 'S' && !u.on ? ' · INACTIVO' : ''} · ${fDs(dl)}`, mine ? '#9fd8ff' : '#ff8a7a', `bold 10px ${MONO}`]], 6); // texto solo cerca
       }
-      const zi = czAt(SYS, CZ, S.pos, simT); if (CZS[zi].c && CZS[zi].p > 0) banner(zi, W, now); // solo mientras se reclama o se disputa (al llegar al 100 % desaparece: aviso puntual en #nt)
+      const zi = czAt(SYS, CZ, S.pos, simT); if (CZS[zi].c && CZS[zi].p > 0 && !S.warp.on && !(S.warp.cd > 0)) banner(zi, W, now); // solo mientras se reclama o se disputa (al llegar al 100 % desaparece: aviso puntual en #nt)
     }
     if (P.hp <= 0 && mineW().length) { // selector de reaparición: teclas 1-3
       const o = spawnOpts(), cur = curPref(), tx = 'REAPARECER EN:  ' + o.map((x, i) => `[${i + 1}] ${x.n}${x.id === cur ? ' ◀' : ''}`).join('   ');
@@ -270,16 +348,36 @@ const WAR = (() => {
     g2.restore();
   }
   addEventListener('keydown', e => { if (P.hp > 0 || !BASE.started()) return; const i = ['Digit1', 'Digit2', 'Digit3'].indexOf(e.code), o = spawnOpts(); if (i >= 0 && o[i]) { pref = o[i].id; say(`Reaparecerás en: ${o[i].n}`); } });
-  function spawn(noBase) { // reaparecer en la cubierta de mi buque elegido (o en el primero si no tengo base): true si lo hizo
-    const my = mineW(); let s = my.find(x => x.id === pref); if (!s && noBase) s = my[0]; if (!s) return false;
-    const w = wpos(s), f = fwdOf(s), p = [w[0] + f[0] * 0.8 * SCW, w[1] + 0.75 * SCW, w[2] + f[2] * 0.8 * SCW]; // cubierta del buque (escalado)
-    S.pos = p.slice(); S.shipPos = p.slice(); S.v = 0; S.foot.on = false; S.park.on = false; S.auto = false; S.gearK = 0; S.q.copy(s.q); camQ.copy(S.q); S.w.p = S.w.y = S.w.r = 0;
-    say('Despegas desde la cubierta de tu buque de guerra'); return true;
+  function spawn(noBase) { // reaparecer ESTACIONADO sobre la pista de mi buque elegido (o del primero si no tengo base): true si lo hizo
+    const my = mineW().filter(x => x.w && x.q && !x.arr); let s = my.find(x => x.id === pref); if (!s && noBase) s = my[0]; if (!s) return false;
+    S.foot.on = false; S.auto = false; S.gearK = 1; park(s, [0, 0, (DECK.z0 + DECK.z1) / 2 + 0.1]); S.q.copy(s.q); camQ.copy(S.q); S.w.p = S.w.y = S.w.r = 0; parkStep(0);
+    say('Reapareces en la pista de tu buque de guerra · T o W: despegar'); return true;
+  }
+  // ---------- ESTACIONAR en la pista de un buque PROPIO: S.park = { on, ws: id del buque, l: [x, z] punto local de la pista, dir: normal de la cubierta, h: altura extra, leaving, t } ----------
+  const TAKEOFF_V = 0.15; // km/s (540 km/h) al terminar el despegue, en la dirección de proa del buque
+  function landSpot() { // ¿se puede aterrizar ahora? → { s, l } si estoy sobre la pista (con margen lateral) de un buque MÍO ya llegado, a < 150 m de la cubierta y a < 200 km/h
+    if (S.park.on || S.warp.on || S.warp.cd > 0 || S.foot.on || P.hp <= 0 || (S.ve || 0) * 3600 > LAND_KMH) return null;
+    for (const s of mineW()) { if (!s.w || s.arr || !s.q || len(sub(s.w, S.pos)) > 3 * SCW) continue; const l = toLocal(s, S.pos), hy = (l[1] - deckRest()) * SCW; if (onDeck(l, 0.03) && hy > -0.03 && hy < LAND_H) return { s, l }; }
+    return null;
+  }
+  function park(s, l) { // se posa (o reaparece) sobre la pista: mismo estado que en el suelo, con la cubierta como superficie
+    Object.assign(S.park, { on: true, ws: s.id, b: null, l: [Math.max(-DECK.hw, Math.min(DECK.hw, l[0])), Math.max(DECK.z0 + 0.03, Math.min(DECK.z1 - 0.03, l[2]))], dir: upOf(s), h: 0, water: false, upT: null, leaving: false, t: 0, al: 0, dustT: 0 });
+    S.v = 0; P.plasma = MAXA.plasma; P.missiles = MAXA.missiles; // rearme al posarse en la pista
+  }
+  function land() { const ls = landSpot(); if (!ls) return false; park(ls.s, ls.l); sfx('land'); say('Aterrizaje en la pista de tu buque · munición y misiles recargados · Esc: menú'); return true; }
+  function parkStep(dt) { // estacionada en la pista: la nave va con el buque (su ancla puede moverse), sin temblores ni deriva; despegue: sube 100 m en 1,8 s y sale por la proa
+    const pk = S.park, s = WS.get(pk.ws);
+    if (!s || !s.w || !s.q || s.o !== myId) { pk.on = false; pk.ws = null; pk.leaving = false; S.v = TAKEOFF_V; say('Tu buque ya no está: despegue forzoso'); return; }
+    pk.dir = upOf(s);
+    if (pk.leaving) { pk.t += dt; const u = Math.min(1, pk.t / 1.8); pk.h = 0.1 * u * u * (3 - 2 * u); S.q.slerp(s.q, 1 - Math.exp(-dt * 3)); // se alinea con la proa mientras sube
+      if (pk.t >= 1.8) { pk.on = false; pk.leaving = false; pk.ws = null; S.q.copy(s.q); S.v = TAKEOFF_V; say('Despegue completado · rumbo de proa'); } }
+    else { pk.h = 0; if ((pk.al += dt) < 1.2) S.q.slerp(s.q, 1 - Math.exp(-dt * 4)); } // al posarse: proa según el buque
+    const c = toWorldS(s, [pk.l[0], deckRest(), pk.l[1]]); S.shipPos = c.map((x, i) => x + pk.dir[i] * pk.h); S.pos = S.shipPos.slice();
   }
   function deploy(k, zi, at = 'c') { // (zona sin dueño: válida para buques y cazas; sus unidades la reclaman) // punto AUTOMÁTICO (sysgen.czDeployPoint, igual que el servidor): at 'p' junto al planeta (sobre su base si la tiene) · 'c' junto al cúmulo
     const dp = czDeployPoint(SYS, CZ, ZONES, zi, inZone(zi), at, simT, [...BASE.HG.values()], myId, S.pos); return { off: dp && dp.off, abs: dp && dp.abs, a: dp ? dp.a : 0, why: dp ? check(k, zi, dp.abs, dp.a) : 'Zona solar: no se puede desplegar', at };
   }
-  const near = () => { const p = S.foot.on ? S.shipPos : S.pos; return mineW().some(s => s.w && len(sub(s.w, p)) < C.ws.near); }; // junto a mi buque cuenta como «en base»
+  const near = () => { if (S.park.on && S.park.ws && WS.has(S.park.ws)) return true; const p = S.foot.on ? S.shipPos : S.pos; return mineW().some(s => s.w && len(sub(s.w, p)) < C.ws.near); }; // en la pista o junto a mi buque cuenta como «en base»
 
   // ---------- pestaña FLOTA (3 columnas como NAVE): lista con COMPRAR · preview 3D + estadísticas · unidades desplegadas y reserva con DESPLEGAR ----------
   const DEF = '<defs><linearGradient id="gm" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#c9d3dd"/><stop offset=".55" stop-color="#7d8894"/><stop offset="1" stop-color="#4a535d"/></linearGradient><linearGradient id="gb" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#9fe0ff"/><stop offset="1" stop-color="#1f7fd0"/></linearGradient><radialGradient id="gf"><stop offset="0" stop-color="#fff7d0"/><stop offset="1" stop-color="#ff9a1a"/></radialGradient></defs>';
@@ -289,7 +387,7 @@ const WAR = (() => {
     F: `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">${DEF}<g stroke="#050f1c" stroke-width="2.5" stroke-linejoin="round"><path d="M28 32 6 17V25L28 44Z" fill="url(#gm)"/><path d="M36 32 58 17V25L36 44Z" fill="url(#gm)"/><path d="M28 46 20 58H27Z" fill="url(#gm)"/><path d="M36 46 44 58H37Z" fill="url(#gm)"/><path d="M32 3 36.5 14V46L35 53H29L27.5 46V14Z" fill="url(#gm)"/></g><path d="M9 20 27 33M55 20 37 33" stroke="#4db8ff" stroke-width="2.2"/><ellipse cx="32" cy="18" rx="2.6" ry="5.5" fill="url(#gb)" stroke="#050f1c" stroke-width="1.6"/><g fill="#050f1c"><rect x="14" y="27" width="2.4" height="8" rx="1"/><rect x="47.6" y="27" width="2.4" height="8" rx="1"/></g><circle cx="5.5" cy="21" r="2" fill="#ff3b30" stroke="#050f1c" stroke-width="1.2"/><circle cx="58.5" cy="21" r="2" fill="#5dff8a" stroke="#050f1c" stroke-width="1.2"/><ellipse cx="30" cy="55" rx="2.4" ry="3" fill="url(#gf)" stroke="#050f1c" stroke-width="1.2"/><ellipse cx="34" cy="55" rx="2.4" ry="3" fill="url(#gf)" stroke="#050f1c" stroke-width="1.2"/></svg>`,
   };
   const COST = { W: C.ws.cost, S: C.sat.cost, F: F.cost }, DEPL = { W: 'DESPLEGAR', S: 'CONSTRUIR', F: 'DESPLEGAR' };
-  const DESC = { W: `Nave capital de ~14 km con el mayor alcance del juego (${C.ws.range} km): reapareces en su cubierta y junto a ella compras como en la base.`, S: 'Base flotante estática con misiles guiados de largo alcance. Solo en zonas tuyas; se desactiva si pierdes la zona.', F: `${F.n} cazas ligeros que patrullan la zona y atacan enemigos y neutrales; en una zona sin dueño, ayudan a reclamarla. Si caen los ${F.n}, se pierde.` };
+  const DESC = { W: `Nave capital de ~14 km con el mayor alcance del juego (${C.ws.range} km). Se despliega a ${C.approachKm} km de un cúmulo o sobre un planeta (también el de una base rival, para atacarla): reapareces estacionado en su pista (y puedes aterrizar en ella con T): allí y junto al buque compras como en la base.`, S: 'Base flotante estática con misiles guiados de largo alcance. En zonas tuyas o sin dueño (ayuda a reclamarla) y en ataque junto a un planeta con base rival; se desactiva si otro reclama su zona.', F: `${F.n} cazas ligeros que patrullan la zona y atacan enemigos y neutrales; en una zona sin dueño, ayudan a reclamarla. Si caen los ${F.n}, se pierde.` };
   const STATS = k => k === 'W' ? [['Casco', C.ws.hp, 3000, '#5dff8a'], ['Escudo', C.ws.sh, 1000, '#4db8ff'], ['Alcance (km)', C.ws.range, 6000, '#ffd23f'], ['Daño/disparo', C.ws.dmg, 40, '#ff8a3c'], ['Disparos/s', +(1 / C.ws.cd).toFixed(1), 6, '#c8ff5d'], ['Velocidad (km/s)', 0, 400, '#f5a8ff'], ['Unidades', 1, 3, '#9fd4ee'], ['Máximo', C.ws.max, 3, '#9fd4ee']]
     : k === 'S' ? [['Vida', C.sat.hp, 3000, '#5dff8a'], ['Escudo', 0, 1000, '#4db8ff'], ['Alcance (km)', C.sat.range, 6000, '#ffd23f'], ['Daño/disparo', C.sat.dmg, 40, '#ff8a3c'], ['Disparos/s', +(1 / C.sat.cd).toFixed(2), 6, '#c8ff5d'], ['Velocidad (km/s)', 0, 400, '#f5a8ff'], ['Unidades', 1, 3, '#9fd4ee'], ['Por zona', C.sat.maxZone, 3, '#9fd4ee']]
     : [['Vida (cada caza)', F.hp, 3000, '#5dff8a'], ['Escudo', 0, 1000, '#4db8ff'], ['Alcance (km)', F.range, 6000, '#ffd23f'], ['Daño/disparo', F.dmg, 40, '#ff8a3c'], ['Disparos/s', +(F.n / F.cd).toFixed(1), 6, '#c8ff5d'], ['Velocidad (km/s)', F.vmax, 400, '#f5a8ff'], ['Unidades', F.n, 3, '#9fd4ee'], ['Escuadrones', 'sin límite', 1, '#9fd4ee']];
@@ -359,5 +457,6 @@ const WAR = (() => {
   const sig = () => JSON.stringify([stock, pref, fsel, CZS.map(Z => Z.o), all().map(s => [s.id, s.o, s.on]), [...FQ.values()].map(f => [f.id, f.hp.map(h => h > 0)])]);
   const fOwner = id => { const f = FQ.get(id); return f ? f.o : null; };
 
-  return { CZ, CZS, look, owner, check, deploy, collide, units, iconImg, onAlarm, czPos, frame, sync, onEvent, onOk, hit, targets, pos: posOf, hud, spawn, near, mine: mineW, menu, buy, sig, model, nmOf, all, nearestOwned, fOwner, fname: id => 'Cazas de ' + nmOf(fOwner(id)), models };
+  setTimeout(() => { colliders('W'); colliders('S'); }, 0); // se calculan durante la carga (≈ 0,6 s + 0,2 s), no en el primer roce
+  return { CZ, CZS, look, owner, check, deploy, collide, colliders, sdModel, deck, deckRest, SHIP_R, landSpot, land, parkStep, units, iconImg, onAlarm, czPos, frame, sync, onEvent, onOk, hit, targets, pos: posOf, hud, spawn, near, mine: mineW, menu, buy, sig, model, nmOf, all, nearestOwned, fOwner, fname: id => 'Cazas de ' + nmOf(fOwner(id)), models };
 })();

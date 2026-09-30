@@ -2,12 +2,12 @@
 // Todo sonido con origen en el mundo pasa por AUDIO.sfx(kind, pos): fuera de su radio (AUDIO_KM) NO se crea ningún nodo; dentro, atenuación inversa/cuadrática, paso bajo que
 // baja con la distancia (lo lejano suena apagado), retardo de propagación (topado), panorama estéreo según la cámara y máximo de voces por categoría (ganan las más cercanas).
 // pos: null/undefined = mío o de interfaz (siempre al 100 %) · [x, y, z] = punto del mundo (km) · número = distancia (compatibilidad, sin dirección). Usa S y camera de game.js.
-const AUDIO_KM = { plasma: 250, misil: 400, torreta: 300, buqueDisparo: 2500, satDisparo: 2000, impacto: 150, escudo: 150, explosionNave: 1500, explosionGrande: 6000, warpSalida: 20000, warpEntrada: 20000, alarmaBuque: 5000 }; // radio audible (km) de cada sonido del mundo
+const AUDIO_KM = { plasma: 250, misil: 400, municion: 250, riel: 300, torreta: 300, buqueDisparo: 2500, satDisparo: 2000, impacto: 150, escudo: 150, explosionNave: 1500, explosionGrande: 6000, warpSalida: 20000, warpEntrada: 20000, alarmaBuque: 5000 }; // radio audible (km) de cada sonido del mundo
 const AUDIO = (() => {
-  const CAT = { plasma: 'disparo', misil: 'disparo', torreta: 'disparo', buqueDisparo: 'disparo', satDisparo: 'disparo', impacto: 'impacto', escudo: 'impacto', explosionNave: 'explosion', explosionGrande: 'explosion', warpSalida: 'warp', warpEntrada: 'warp', alarmaBuque: 'alarma' };
-  const MAXV = { disparo: 10, impacto: 6, explosion: 4, warp: 4, alarma: 2, mio: 16 }, ALIAS = { p: 'plasma', m: 'misil', boom: 'explosionNave', hit: 'impacto', shield: 'escudo', warp: 'warpEntrada', warpEnd: 'warpSalida' };
+  const CAT = { plasma: 'disparo', misil: 'disparo', municion: 'rafaga', torreta: 'disparo', buqueDisparo: 'disparo', satDisparo: 'disparo', impacto: 'impacto', escudo: 'impacto', explosionNave: 'explosion', explosionGrande: 'explosion', warpSalida: 'warp', warpEntrada: 'warp', alarmaBuque: 'alarma' };
+  const MAXV = { disparo: 10, rafaga: 8, impacto: 6, explosion: 4, warp: 4, alarma: 2, mio: 16 }, ALIAS = { p: 'plasma', m: 'misil', boom: 'explosionNave', hit: 'impacto', shield: 'escudo', warp: 'warpEntrada', warpEnd: 'warpSalida' };
   const SOUND_KMS = 100, MAX_DELAY = 1.5, VOL = 0.9; // velocidad ficticia del «sonido» (km/s) para el retardo, con tope · volumen maestro
-  let A = null, M = null, NZ = null, PK = null, REV = null, SAT = null; const act = {};
+  let A = null, M = null, NZ = null, PK = null, REV = null, SAT = null, ECO = null; const act = {};
   function ctx() { // contexto, maestro (ganancia → compresor → salida), ruido blanco y rosa, reverberación corta y curva de saturación: se crean UNA vez
     if (!A) {
       A = new (window.AudioContext || window.webkitAudioContext)(); const C = A.createDynamicsCompressor(); C.threshold.value = -16; C.knee.value = 12; C.ratio.value = 5; C.attack.value = 0.004; C.release.value = 0.22;
@@ -15,6 +15,7 @@ const AUDIO = (() => {
       const n = A.sampleRate * 2; NZ = A.createBuffer(1, n, A.sampleRate); PK = A.createBuffer(1, n, A.sampleRate); const w = NZ.getChannelData(0), p = PK.getChannelData(0); let b0 = 0, b1 = 0, b2 = 0;
       for (let i = 0; i < n; i++) { const x = Math.random() * 2 - 1; w[i] = x; b0 = 0.997 * b0 + 0.029 * x; b1 = 0.985 * b1 + 0.032 * x; b2 = 0.95 * b2 + 0.048 * x; p[i] = (b0 + b1 + b2 + x * 0.1) * 2.2; } // ruido rosa (filtro de Voss simplificado)
       REV = A.createConvolver(); const rn = Math.floor(A.sampleRate * 1.6), rb = A.createBuffer(2, rn, A.sampleRate); for (let ch = 0; ch < 2; ch++) { const d = rb.getChannelData(ch); for (let i = 0; i < rn; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / rn, 3); } REV.buffer = rb; REV.connect(M);
+      { ECO = A.createGain(); const d = A.createDelay(1), f = flt('lowpass', 1600), fb = A.createGain(), o = A.createGain(); d.delayTime.value = 0.13; fb.gain.value = 0.28; o.gain.value = 0.55; ECO.connect(d); d.connect(f).connect(fb).connect(d); f.connect(o).connect(M); } // eco corto COMPARTIDO de la munición (una ráfaga no crea un eco por bala)
       SAT = new Float32Array(1024); for (let i = 0; i < 1024; i++) { const x = i / 511.5 - 1; SAT[i] = Math.tanh(2.4 * x) / Math.tanh(2.4); }
     }
     if (A.state === 'suspended') A.resume(); return A;
@@ -27,10 +28,14 @@ const AUDIO = (() => {
   function osc(out, t, type, f0, f1, dur, peak, att = 0.005, sat = false, sweep = dur) { const o = A.createOscillator(), g = A.createGain(); o.type = type; o.frequency.setValueAtTime(f0, t); if (f1 !== f0) o.frequency.exponentialRampToValueAtTime(f1, t + sweep); let n = o; if (sat) { const w = A.createWaveShaper(); w.curve = SAT; n = o.connect(w); } n.connect(env(g, t, peak, att, dur)).connect(out); o.start(t); o.stop(t + att + dur + 0.01); }
   function echo(out, t, time, fb, lp, dur) { const d = A.createDelay(1), g = A.createGain(), f = flt('lowpass', lp); d.delayTime.value = time; g.gain.value = fb; out.connect(d); d.connect(f).connect(g).connect(d); const o = A.createGain(); o.gain.value = 0.8; f.connect(o).connect(M); setTimeout(() => { try { out.disconnect(d); } catch (e) {} }, (dur + 3) * 1000); }
   // ---------- voz espacial ----------
+  function place(pos) { // → [distancia km, panorama −1…1] de un punto del mundo (lado según el eje derecho de la cámara)
+    if (typeof pos === 'number') return [pos, 0]; const r = [pos[0] - S.pos[0], pos[1] - S.pos[1], pos[2] - S.pos[2]], d = Math.hypot(r[0], r[1], r[2]); if (!(d > 1e-3) || typeof camera === 'undefined') return [d, 0];
+    const q = camera.quaternion, rx = 1 - 2 * (q.y * q.y + q.z * q.z), ry = 2 * (q.x * q.y + q.w * q.z), rz = 2 * (q.x * q.z - q.w * q.y); return [d, Math.max(-1, Math.min(1, (r[0] * rx + r[1] * ry + r[2] * rz) / d)) * 0.85];
+  }
   function voice(kind, pos, o = {}) { // → { t, out, x (0 cerca · 1 al borde del radio), mine } o null si no se oye
     if (!A) return null; const mine = pos == null || o.mine; let d = 0, pan = 0;
     if (!mine) {
-      if (typeof pos === 'number') d = pos; else { const r = [pos[0] - S.pos[0], pos[1] - S.pos[1], pos[2] - S.pos[2]]; d = Math.hypot(r[0], r[1], r[2]); if (d > 1e-3 && typeof camera !== 'undefined') { const q = camera.quaternion, rx = 1 - 2 * (q.y * q.y + q.z * q.z), ry = 2 * (q.x * q.y + q.w * q.z), rz = 2 * (q.x * q.z - q.w * q.y); pan = Math.max(-1, Math.min(1, (r[0] * rx + r[1] * ry + r[2] * rz) / d)) * 0.85; } } // lado según el eje derecho de la cámara
+      [d, pan] = place(pos);
       if (!(d <= (AUDIO_KM[kind] || 300))) return null; // fuera del radio: no se crea nada
     }
     const x = mine ? 0 : d / (AUDIO_KM[kind] || 300), cat = mine ? 'mio' : CAT[kind] || 'impacto', L = act[cat] || (act[cat] = []), now = A.currentTime;
@@ -44,7 +49,8 @@ const AUDIO = (() => {
   // ---------- efectos ----------
   const FX = {
     plasma(v) { const { t, out } = v; nburst(out, t, 0.007, 0.5, 'highpass', 4200); osc(out, t, 'square', 2400, 260, 0.13, 0.12); osc(out, t, 'sine', 190, 70, 0.14, 0.32); nburst(out, t, 0.09, 0.08, 'bandpass', 3000, 700, 2); }, // zap: transitorio, barrido descendente y cuerpo grave
-    misil(v) { const { t, out } = v; nburst(out, t, 0.01, 0.4, 'highpass', 2500); nburst(out, t, 0.9, 0.3, 'bandpass', 600, 2800, 1.2, PK, 0.08); osc(out, t, 'sawtooth', 62, 55, 1.2, 0.12, 0.05); osc(out, t, 'sawtooth', 64.5, 56, 1.2, 0.1, 0.05); }, // encendido: silbido/whoosh y ronroneo
+    misil(v) { const { t, out } = v; nburst(out, t, 0.12, 0.55, 'lowpass', 900, 160, 0.8, PK, 0.003); nburst(out, t, 0.01, 0.4, 'highpass', 2500); nburst(out, t, 0.9, 0.3, 'bandpass', 600, 2800, 1.2, PK, 0.08); osc(out, t, 'sawtooth', 62, 55, 1.2, 0.12, 0.05); osc(out, t, 'sawtooth', 64.5, 56, 1.2, 0.1, 0.05); }, // encendido: silbido/whoosh y ronroneo
+    municion(v) { const { t, out } = v, rnd = (a, b) => a + Math.random() * (b - a); nburst(out, t, 0.004, 0.7, 'highpass', 3000, 0, 0.7, NZ, 0.0005); nburst(out, t, rnd(0.03, 0.045), 0.55, 'bandpass', rnd(1500, 2100), 700, 1.1, NZ, 0.001); osc(out, t, 'sine', rnd(150, 175), 55, 0.05, 0.45, 0.001, true); out.connect(ECO); }, // bala: chasquido seco + estampido corto, eco compartido (en ráfaga suena a ametralladora)
     cannon(v, big) { const { t, out } = v, k = big ? 1.6 : 1; nburst(out, t, 0.45 * k, 0.8, 'lowpass', 3500, 240, 0.7, PK, 0.004); osc(out, t, 'sine', 85 / k, 36, 0.5 * k, 0.9, 0.004, true); nburst(out, t, 0.012, 0.5, 'highpass', 2000); echo(out, t, big ? 0.22 : 0.16, 0.3, 1200, 1.2 * k); }, // estampido con eco
     torreta(v) { FX.cannon(v, false); }, buqueDisparo(v) { FX.cannon(v, true); }, satDisparo(v) { FX.misil(v); FX.cannon(v, false); },
     impacto(v) { const { t, out } = v, rnd = (a, b) => a + Math.random() * (b - a); nburst(out, t, rnd(0.005, 0.01), 0.6, 'highpass', 1500); for (let i = 0, n = 2 + (Math.random() * 2 | 0); i < n; i++) nburst(out, t + i * rnd(0.008, 0.018), rnd(0.02, 0.04), 0.3 * (1 - i / (n + 1)), 'bandpass', rnd(1500, 5000), 0, rnd(0.8, 1.8)); nburst(out, t + 0.008, 0.05, 0.08, 'bandpass', rnd(6000, 9000), 0, 1.2); }, // golpe en otro objeto: ruido (sin notas)
@@ -67,7 +73,7 @@ const AUDIO = (() => {
       }
     },
   };
-  const DUR = { plasma: 0.3, misil: 1.3, torreta: 1.2, buqueDisparo: 1.8, satDisparo: 1.4, impacto: 0.35, escudo: 0.45, explosionNave: 2.5, explosionGrande: 4.5, warpSalida: 2, warpEntrada: 1.2, alarmaBuque: 3.2 };
+  const DUR = { plasma: 0.3, misil: 1.3, municion: 0.2, torreta: 1.2, buqueDisparo: 1.8, satDisparo: 1.4, impacto: 0.35, escudo: 0.45, explosionNave: 2.5, explosionGrande: 4.5, warpSalida: 2, warpEntrada: 1.2, alarmaBuque: 3.2 };
   function sfx(kind, pos, o = {}) { // punto único de los sonidos del mundo (y de los de interfaz: kind UI sin posición)
     kind = ALIAS[kind] || kind; if (UI[kind]) { if (!A) return; return UI[kind](o); }
     const v = voice(kind, pos, { ...o, dur: DUR[kind] }); if (!v) return;
@@ -94,7 +100,25 @@ const AUDIO = (() => {
     buy() { const v = voice('impacto', null, { dur: 0.5, rev: 0.2 }); if (v) { osc(v.out, v.t, 'sine', 880, 880, 0.18, 0.07, 0.004); osc(v.out, v.t + 0.07, 'sine', 1320, 1320, 0.25, 0.06, 0.004); } },
     rumble(o) { const v = voice('impacto', null, { dur: 0.3 }); if (v) nburst(v.out, v.t, 0.14, 0.03 + 0.07 * Math.min(1, o.k || 0), 'lowpass', 500, 90, 0.7, PK); }, // turbulencia
   };
+  // ---------- CAÑÓN DE RIEL: zumbido CONTINUO mientras el haz esté activo (nodos persistentes por haz, máx. 3, ganan los más cercanos; arranque y apagado suaves) ----------
+  const HUM = new Map(), HUM_MAX = 3;
+  function beamOff(key) { const h = HUM.get(key); if (!h || !A) return; HUM.delete(key); const now = A.currentTime; h.g.gain.cancelScheduledValues(now); h.g.gain.setTargetAtTime(0, now, 0.07); for (const n of h.src) n.stop(now + 0.6); }
+  function beam(key, pos) { // key: haz (torreta) · pos: boca del cañón (null = mío). Llamar en cada cuadro mientras el haz exista; beamOff(key) al cortarse
+    if (!A) return; let d = 0, pan = 0; const R = AUDIO_KM.riel; if (pos != null) [d, pan] = place(pos);
+    let h = HUM.get(key); if (!(d <= R)) { if (h) beamOff(key); return; }
+    const x = d / R, vol = 0.45 * (1 - x) * (1 - x) / (1 + 6 * x), now = A.currentTime;
+    if (!h) {
+      if (HUM.size >= HUM_MAX) { let fk = null, fd = -1; for (const [k, v] of HUM) if (v.d > fd) { fd = v.d; fk = k; } if (fd <= d) return; beamOff(fk); } // prioridad: el más cercano gana
+      const g = A.createGain(), lp = flt('lowpass', 250 + 17000 * (1 - x) * (1 - x)), pn = A.createStereoPanner ? A.createStereoPanner() : null, bp = flt('bandpass', 1100, 2.5), cr = flt('bandpass', 3400, 1.4), trem = A.createGain(), lfo = A.createOscillator(), lg = A.createGain(), src = [];
+      g.gain.value = 0.0001; trem.gain.value = 0.8; lfo.frequency.value = 11 + Math.random() * 4; lg.gain.value = 0.2; lfo.connect(lg).connect(trem.gain); src.push(lfo);
+      for (const [type, f, gv] of [['sawtooth', 97, 0.35], ['sawtooth', 97.8, 0.3], ['sine', 194, 0.25]]) { const o = A.createOscillator(), og = A.createGain(); o.type = type; o.frequency.value = f; og.gain.value = gv; o.connect(og).connect(bp); src.push(o); } // zumbido eléctrico (dos sierras desafinadas + armónico)
+      const nz = A.createBufferSource(), ng = A.createGain(); nz.buffer = PK; nz.loop = true; ng.gain.value = 0.35; nz.connect(cr).connect(ng).connect(trem); src.push(nz); // chisporroteo del haz
+      bp.connect(trem); trem.connect(g); if (pn) { pn.pan.value = pan; g.connect(lp).connect(pn).connect(M); } else g.connect(lp).connect(M);
+      for (const n of src) n.start(now); h = { g, lp, pn, src, d }; HUM.set(key, h);
+    }
+    h.d = d; h.g.gain.setTargetAtTime(Math.max(0.0001, vol), now, 0.06); h.lp.frequency.setTargetAtTime(250 + 17000 * (1 - x) * (1 - x), now, 0.05); if (h.pn) h.pn.pan.setTargetAtTime(pan, now, 0.05);
+  }
   function tone(type, f0, f1, dur, vol) { if (!A) return; const t = A.currentTime, o = A.createOscillator(), g = A.createGain(); o.type = type; o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(f1, t + dur); g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + dur); o.connect(g).connect(M); o.start(t); o.stop(t + dur); } // avisos de interfaz (al maestro)
   function noiseUI(dur, vol, f0, f1) { if (!A) return; const t = A.currentTime, s = src(NZ, t, dur), f = flt('lowpass', f0), g = A.createGain(); f.frequency.exponentialRampToValueAtTime(f1, t + dur); g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + dur); s.connect(f).connect(g).connect(M); }
-  return { ctx, sfx, hitMe, alarm: (pos, enemy) => { const v = voice('alarmaBuque', pos, { dur: DUR.alarmaBuque }); if (v) FX.alarm(v, enemy); }, tone, noiseUI, master: () => (ctx(), M), noise: () => (ctx(), NZ), setVolume: x => { if (M) M.gain.value = x; }, KM: AUDIO_KM };
+  return { ctx, sfx, hitMe, beam, beamOff, beams: () => HUM.size, alarm: (pos, enemy) => { const v = voice('alarmaBuque', pos, { dur: DUR.alarmaBuque }); if (v) FX.alarm(v, enemy); }, tone, noiseUI, master: () => (ctx(), M), noise: () => (ctx(), NZ), setVolume: x => { if (M) M.gain.value = x; }, KM: AUDIO_KM };
 })();

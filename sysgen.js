@@ -105,12 +105,29 @@
     td: { name: 'Daño de las torres', max: 4, cost: n => ({ oro: 3 * n, plata: 3 * n }) },
   };
   const baseStats = up => ({ hpMax: 600 + 250 * (up.hp || 0), shMax: 300 * (up.sh || 0), twMax: 150 + 75 * (up.tw || 0), dmgMul: 1 + 0.4 * (up.td || 0) });
-  // Estilos de torreta: daño por disparo (× mejora de daño), cadencia (s), velocidad del proyectil (km/s), color y si el proyectil es un misil guiado
+  // ARMAS: tabla única (cliente y servidor). kind: tipo de proyectil en la red ('p' plasma · 'c' munición · 'm' misil · 'r' haz) · type: 'proj' | 'homing' | 'beam'
+  // spd km/s · cd s entre disparos (jit: ± fracción aleatoria; dbl/gap: probabilidad de disparo doble / pausa larga; burst/pause: ráfaga de n tiros y pausa en s)
+  // dmg por impacto (× mejora de daño) o dps (haz, aplicado en pasos de `tick` s) · range km (torretas; buques, satélites y cazas usan el suyo de WARCFG)
+  // col / core: color del proyectil y de su núcleo · trail: estela · snd: familia de sonido (audio.js) · ship: valores de las naves (clic izq. plasma, clic der./Espacio misil)
+  const WEAPONS = {
+    plasma:  { name: 'Plasma', kind: 'p', type: 'proj', spd: 12, cd: 0.9, jit: 0.45, dbl: 0.14, gap: 0.1, dmg: 4, range: 200, col: 0xff5a28, core: 0xffffff, trail: 'rayo', snd: 'plasma', desc: 'Rayo de energía rojo-anaranjado de cadencia irregular', ship: { spd: 6000, cd: 0.12, dmg: 8, life: 5 } },
+    cannon:  { name: 'Munición', kind: 'c', type: 'proj', spd: 40, cd: 0.075, jit: 0.15, burst: 24, pause: 0.9, spread: 0.006, dmg: 0.9, range: 200, col: 0xffd23f, core: 0xfff6c8, trail: 'trazadora', snd: 'municion', desc: 'Minigun: ráfagas de balas trazadoras muy rápidas' },
+    missile: { name: 'Misil guiado', kind: 'm', type: 'homing', spd: 6, cd: 3.5, jit: 0.12, dmg: 14, turn: 3, range: 200, col: 0xff8a3c, core: 0xffe0a0, trail: 'fuego', snd: 'misil', desc: 'Persigue al blanco dejando una estela de fuego', ship: { spd: 2500, cd: 3, dmg: 60, life: 20, turn: 6 } },
+    rail:    { name: 'Cañón de riel', kind: 'r', type: 'beam', dps: 7, tick: 0.1, range: 200, col: 0x3d9bff, core: 0xe6f4ff, trail: 'haz', snd: 'riel', desc: 'Láser continuo instantáneo mientras vea al blanco' },
+  };
+  function weaponCd(w, st = {}, cd = w.cd) { // próxima espera (s) de un arma; st: estado del tirador (cuenta de la ráfaga) · cd: base propia (naves, buques, cazas)
+    const j = 1 + (w.jit || 0) * (2 * Math.random() - 1), r = Math.random();
+    if (w.burst) { st.bn = (st.bn || 0) + 1; if (st.bn >= w.burst) { st.bn = 0; return w.pause * j; } return cd * j; } // munición: ráfaga y pausa (el cañón rotativo se detiene)
+    if (w.dbl && r < w.dbl) return cd * 0.18; // plasma: a veces un disparo doble...
+    if (w.gap && r > 1 - w.gap) return cd * (2 + Math.random()); // ...y a veces una pausa larga
+    return cd * j;
+  }
+  // Estilos de torreta: las 4 armas con su coste de desbloqueo; homing: misil guiado · beam: haz continuo (dps en vez de dmg + cd)
   const TOWER_STYLES = {
-    plasma:  { name: 'Plasma',       dmg: 4,  cd: 0.9,  spd: 12, col: 0xff5040, homing: false, cost: null },
-    cannon:  { name: 'Munición',     dmg: 1.6, cd: 0.22, spd: 16, col: 0xffd23f, homing: false, cost: { piedra: 10, cobre: 6 } },
-    missile: { name: 'Misil guiado', dmg: 14, cd: 3.2,  spd: 6, col: 0xff8a3c, homing: true,  cost: { oro: 6, plata: 6 } },
-    rail:    { name: 'Cañón de riel', dmg: 22, cd: 4.2, spd: 30, col: 0x9fe8ff, homing: false, cost: { diamante: 3, oro: 8 } },
+    plasma:  { ...WEAPONS.plasma, homing: false, cost: null },
+    cannon:  { ...WEAPONS.cannon, homing: false, cost: { piedra: 10, cobre: 6 } },
+    missile: { ...WEAPONS.missile, homing: true, cost: { oro: 6, plata: 6 } },
+    rail:    { ...WEAPONS.rail, homing: false, beam: true, cost: { diamante: 3, oro: 8 } },
   };
   // ---------- ZONAS DE CONTROL (estilo mapa galáctico de Helldivers): TESELAN TODO EL PLANO ORBITAL, sin huecos, y cada una hace frontera con otras ----------
   // Anillos concéntricos alrededor de la estrella cuyos bordes son los puntos medios entre órbitas: núcleo (1 zona) · un anillo por planeta principal (4-6 sectores
@@ -123,15 +140,16 @@
     sectors: [4, 4, 5, 5, 6, 6, 6, 6], outerSectors: 6,
     starKill: { k: 3, tMax: 8, tMin: 1.5, reset: 1 }, // ZONA LETAL de la estrella: radio = máx(R★·(1+k), radio del Núcleo estelar); cuenta atrás clamp(tMax·d_superficie/(R_letal−R★), tMin, tMax) s; fuera se cancela tras `reset` s
     arrive: 6, alarmCd: 20, // s que tarda en LLEGAR una unidad desplegada (sale del viaje de luz) · s mínimos entre dos alarmas de un mismo buque
-    presence: { W: 1, F: 0.5 }, // presencia para reclamar zonas: un jugador dentro = 1 · cada buque desplegado = 1 · cada escuadrón de cazas = 0,5 (cuentan aunque su dueño no esté)
+    approachKm: 300, // km a los que se despliegan/aproximan las unidades: sobre el borde del cúmulo y de altitud sobre el planeta (si su atmósfera es más alta, 6H + 30 km)
+    presence: { W: 1, F: 0.5, S: 0.25 }, // presencia para reclamar zonas: un jugador dentro = 1 · cada buque desplegado = 1 · cada escuadrón de cazas = 0,5 (cuentan aunque su dueño no esté)
     gain: { n: 1, every: 10 }, // recursos pasivos: cada zona reclamada da a su dueño n unidades de su recurso cada `every` s (no salen de los cúmulos) // sectores de cada anillo de planeta (de dentro afuera) y de los Confines
     // buque de guerra (modelo de 3,46 km × scale = ~14 km); near: km junto a él que cuentan como «en base». Es la unidad de MÁS alcance del juego (cubre grandes espacios):
     // range 6000 km de detección y disparo (satélite 1200, cazas 3000, torres de base mucho menos) · spd 300 km/s (el servidor admite hasta 500) → a 6000 km tarda 20 s y el
     // proyectil vive l/spd·1,5 + 3 s (≤ 60) · hr 0,25 km: radio de espoleta de proximidad del proyectil (las demás torretas, 0,04-0,05) · cd 1,1 s entre disparos del buque,
     // que alternan entre las 3 torretas gemelas del costado que mira al blanco (cada torreta dispara cada 3,3 s, cañón izquierdo y derecho por turnos)
-    ws: { max: 2, hp: 3000, sh: 1000, scale: 4, near: 32, range: 6000, dmg: 6, cd: 1.1, spd: 300, hr: 0.25, cost: { oro: 40, diamante: 8, plata: 60, cobre: 100, piedra: 150 } },
-    ftr: { max: 30, n: 3, hp: 60, dmg: 4, cd: 0.8, range: 3000, engage: 8000, patrol: 6000, vmax: 400, cost: { plata: 15, cobre: 30, piedra: 30 } }, // escuadrón de CAZAS: n cazas de hp cada uno, plasma ligero; patrullan patrol km en torno a su punto y atacan hasta engage km de él
-    sat: { maxZone: 3, hp: 800, range: 1200, dmg: 20, cd: 4, spd: 50, radar: 1500000, cost: { oro: 8, plata: 20, cobre: 40, piedra: 60 } }, // satélite defensivo (~1 km): misiles guiados de largo alcance
+    ws: { max: 2, hp: 3000, sh: 1000, scale: 4, near: 32, range: 6000, dmg: 6, cd: 1.1, spd: 300, hr: 0.25, w: 'cannon', cost: { oro: 40, diamante: 8, plata: 60, cobre: 100, piedra: 150 } },
+    ftr: { max: 30, n: 3, hp: 60, dmg: 4, cd: 0.8, range: 3000, w: 'plasma', engage: 8000, patrol: 6000, vmax: 400, cost: { plata: 15, cobre: 30, piedra: 30 } }, // escuadrón de CAZAS: n cazas de hp cada uno, plasma ligero; patrullan patrol km en torno a su punto y atacan hasta engage km de él
+    sat: { maxZone: 3, hp: 800, range: 1200, dmg: 20, cd: 4, spd: 50, w: 'missile', radar: 1500000, cost: { oro: 8, plata: 20, cobre: 40, piedra: 60 } }, // satélite defensivo (~1 km): misiles guiados de largo alcance
   };
   const TAU = Math.PI * 2;
   function genControlZones(sys) { // zonas: { id, name, ring, r0, r1 (Infinity en los Confines), a0 (ángulo inicial), da (amplitud), n (sectores del anillo), planet, res (recurso pasivo), noClaim (zona solar) } · zs.rings: [{ r0, r1, a0, n, first }]
@@ -168,8 +186,8 @@
   const cross3 = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]], nrm3 = a => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0] / l, a[1] / l, a[2] / l]; };
   // Punto AUTOMÁTICO de despliegue (lo usan el mapa y el servidor) -> { a: cuerpo ancla, off: posición relativa a él, abs: posición absoluta en el instante t } o null.
   // at 'p': junto al planeta de la zona. Si el planeta tiene bases, sobre la vertical de la base (la mía; si solo hay rivales, la rival; con ambas, la más cercana a myPos),
-  //   al borde de la exosfera (6·H + 30 km; sin atmósfera, 30 % del radio + 30 km), ANCLADO AL PLANETA (viaja con él), en abanico de 60 km (> 3 × los 14 km del buque).
-  //   Sin bases: hacia fuera de su órbita (anclado a la estrella). · at 'c' (defecto): junto al cúmulo de la zona (anclado a la estrella).
+  //   a WARCFG.approachKm (300 km) de altitud (si 6·H + 30 km es mayor, sobre la exosfera), ANCLADO AL PLANETA (viaja con él), en abanico de 60 km (> 3 × los 14 km del buque).
+  //   Sin bases: igual, del lado de la estrella. · at 'c' (defecto): a 300 km del BORDE del cúmulo de la zona (anclado a la estrella).
   function czOrbitPoint(sys, z, idx) { // punto de reserva en un sector sin cúmulo ni planeta: en el ángulo central del sector, fuera del margen de la órbita de su planeta (anclado a la estrella)
     const b = sys.bodies.find(x => x.n === z.planet), am = z.a0 + z.da / 2 + ((idx % 8) - 3.5) * 0.02, rr = b ? b.a * DS + WARCFG.orbitClear + 20000 + Math.floor(idx / 8) * 6000 : czCenter(z)[0] ? Math.hypot(...czCenter(z)) : z.r0 * 1.2;
     const o = [Math.round(rr * Math.cos(am)), 0, Math.round(rr * Math.sin(am))]; return { a: 0, off: o, abs: o };
@@ -181,16 +199,18 @@
       if (hs.length) {
         const dirOf = h => [Math.cos(h.la) * Math.cos(h.lo), Math.sin(h.la), Math.cos(h.la) * Math.sin(h.lo)], mine = hs.filter(h => h.o === me), riv = hs.filter(h => h.o !== me), q = myPos || P;
         const h = mine.length && !riv.length ? mine[0] : riv.length && !mine.length ? riv[0] : hs.reduce((a, x) => d3(q, add3(P, dirOf(x).map(v => v * b.R))) < d3(q, add3(P, dirOf(a).map(v => v * b.R))) ? x : a);
-        const u = dirOf(h), H = sys.atmo[b.n] ? sys.atmo[b.n].H : 0, rr = b.R + (H ? 6 * H : 0.3 * b.R) + 30, e1 = nrm3(cross3(u, Math.abs(u[1]) < 0.9 ? [0, 1, 0] : [1, 0, 0])), e2 = cross3(u, e1);
+        const u = dirOf(h), H = sys.atmo[b.n] ? sys.atmo[b.n].H : 0, rr = b.R + Math.max(WARCFG.approachKm, H ? 6 * H + 30 : 0), // 300 km de altitud (o sobre la exosfera si es más alta)
+          e1 = nrm3(cross3(u, Math.abs(u[1]) < 0.9 ? [0, 1, 0] : [1, 0, 0])), e2 = cross3(u, e1);
         const ring = idx ? Math.ceil(idx / 6) : 0, th = (idx - 1) * Math.PI / 3 + ring * 0.5, sp = 60 * ring; // abanico alrededor de la vertical de la base
         const pt = [0, 1, 2].map(i => u[i] * rr + (idx ? (e1[i] * Math.cos(th) + e2[i] * Math.sin(th)) * sp : 0)), L = Math.hypot(pt[0], pt[1], pt[2]), off = pt.map(v => Math.round(v / L * rr * 10) / 10);
         return { a: bi, off, abs: add3(P, off) };
       }
-      const rr = Math.hypot(P[0], P[2]) || 1, ux = P[0] / rr, uz = P[2] / rr, D = WARCFG.orbitClear + 20000 + Math.floor(idx / 8) * 6000, L = sg * 6000, o = [Math.round(P[0] + ux * D - uz * L), 0, Math.round(P[2] + uz * D + ux * L)];
-      return { a: 0, off: o, abs: o }; } }
+      const H = sys.atmo[b.n] ? sys.atmo[b.n].H : 0, rr = b.R + Math.max(WARCFG.approachKm, H ? 6 * H + 30 : 0), L0 = Math.hypot(P[0], P[2]) || 1, am = Math.atan2(-P[2] / L0, -P[0] / L0) + sg * 60 / rr; // sin bases: a 300 km de altitud del lado de la estrella, en abanico ecuatorial de 60 km, anclado al planeta
+      const off = [Math.round(Math.cos(am) * rr * 10) / 10, Math.round(((Math.floor(idx / 8) % 2 ? -1 : 1) * Math.ceil(Math.floor(idx / 8) / 2) * 60) * 10) / 10, Math.round(Math.sin(am) * rr * 10) / 10];
+      return { a: bi, off, abs: add3(P, off) }; } }
     const cl = zones.find(q => q.cz === zi); if (!cl) return at !== 'p' ? czDeployPoint(sys, czs, zones, zi, idx, 'p', t, bases, me, myPos) : czOrbitPoint(sys, z, idx); // zona sin cúmulo: junto a su planeta; si aún no ha llegado a ella, hacia fuera de la órbita de su anillo
     const cc = cl ? cl.off : czCenter(z), rad = cl ? cl.radius : 0;
-    const a = Math.atan2(-cc[2], -cc[0]) + sg * 0.8, d = rad * 1.4 + 2500 + Math.floor(idx / 8) * 3000, o = [Math.round(cc[0] + Math.cos(a) * d), 0, Math.round(cc[2] + Math.sin(a) * d)]; // del lado de la estrella y abriéndose a ambos lados
+    const a = Math.atan2(-cc[2], -cc[0]) + sg * 0.8, d = rad + WARCFG.approachKm + Math.floor(idx / 8) * 60, o = [Math.round(cc[0] + Math.cos(a) * d), 0, Math.round(cc[2] + Math.sin(a) * d)]; // del lado de la estrella y abriéndose a ambos lados
     return { a: 0, off: o, abs: o };
   }
   function czDanger(sys, zs, zi, me, hangars, ships, t, skipB) { // skipB: cuerpo cuyos hangares no cuentan (despliegue sobre la base rival para atacarla) // '' = segura; si no, por qué es ZONA ROJA. hangars: [{ o, b (nombre del planeta) }] · ships: [{ o, a, off }]
@@ -200,18 +220,18 @@
     return '';
   }
   // ¿Se puede desplegar en la zona zi en el punto off (km, ABSOLUTO respecto a la estrella, en el plano orbital)? '' = sí; si no, el motivo
-  function czCheck(sys, zs, zi, off, me, owner, hangars, ships, t, anch, kind) { // kind: 'W' buque y 'F' cazas también en zonas SIN DUEÑO (sus unidades la reclaman) · 'S' satélite solo en zona propia // off: posición ABSOLUTA · anch > 0: desplegado junto a ese planeta (anclado a él): sin la regla de órbita, fuera de su atmósfera
+  function czCheck(sys, zs, zi, off, me, owner, hangars, ships, t, anch, kind) { // buques, satélites y cazas: zonas propias o SIN DUEÑO (sus unidades la reclaman) y, en ataque, junto a un planeta con base rival · kind: reservado · off: posición ABSOLUTA · anch > 0: desplegado junto a ese planeta (anclado a él): sin la regla de órbita, fuera de su atmósfera
     const z = zs[zi]; if (!z || !Array.isArray(off) || off.length !== 3 || !off.every(Number.isFinite) || Math.abs(off[1]) > 5000) return 'Zona no válida';
     if (z.noClaim) return 'Zona solar: no se puede desplegar';
-    if (owner && owner !== me) return 'Zona de otro jugador: no se puede desplegar';
-    if (!owner && kind === 'S') return 'Los satélites solo en zonas reclamadas por ti';
+    const attack = anch > 0 && hangars.some(h => h.o !== me && h.b === (sys.bodies[anch] || {}).n); // ATAQUE: junto a un planeta con base rival (o de bot): vale aunque la zona sea suya o roja
+    if (owner && owner !== me && !attack) return 'Zona de otro jugador: solo junto a su planeta con base (ataque)';
     if (czAt(sys, zs, off) !== zi) return 'Fuera de la zona';
     const rr = Math.hypot(off[0], off[2]); if (rr < WARCFG.starClear) return 'Demasiado cerca de la estrella';
-    if (anch > 0) { const b = sys.bodies[anch], H = sys.atmo[b.n] ? sys.atmo[b.n].H : 0; if (d3(off, bodyPosAt(sys, anch, t)) < b.R + 5.5 * H + 5) return 'Dentro de la atmósfera'; return czDanger(sys, zs, zi, me, hangars, ships, t, anch); }
+    if (anch > 0) { const b = sys.bodies[anch], H = sys.atmo[b.n] ? sys.atmo[b.n].H : 0; if (d3(off, bodyPosAt(sys, anch, t)) < b.R + 5.5 * H + 5) return 'Dentro de la atmósfera'; return attack ? '' : czDanger(sys, zs, zi, me, hangars, ships, t, anch); }
     for (const b of sys.bodies) if (b.k !== 'sun' && !b.parent && Math.abs(rr - b.a * DS) < WARCFG.orbitClear) return `Demasiado cerca de la órbita de ${b.n}`;
     return czDanger(sys, zs, zi, me, hangars, ships, t);
   }
-  root.genSystem = genSystem; root.genZones = genZones; root.wreckLoot = wreckLoot; root.BASE_UP = BASE_UP; root.baseStats = baseStats; root.TOWER_STYLES = TOWER_STYLES;
+  root.genSystem = genSystem; root.genZones = genZones; root.wreckLoot = wreckLoot; root.BASE_UP = BASE_UP; root.baseStats = baseStats; root.TOWER_STYLES = TOWER_STYLES; root.WEAPONS = WEAPONS; root.weaponCd = weaponCd;
   root.WARCFG = WARCFG; root.genControlZones = genControlZones; root.bodyPosAt = bodyPosAt; root.czAt = czAt; root.czCheck = czCheck; root.czDist = czDist; root.czCenter = czCenter; root.czDanger = czDanger; root.czDeployPoint = czDeployPoint;
-  if (typeof module !== 'undefined') module.exports = { genSystem, genZones, wreckLoot, BASE_UP, baseStats, TOWER_STYLES, WARCFG, genControlZones, bodyPosAt, czAt, czCheck, czDist, czCenter, czDanger, czDeployPoint };
+  if (typeof module !== 'undefined') module.exports = { genSystem, genZones, wreckLoot, BASE_UP, baseStats, TOWER_STYLES, WEAPONS, weaponCd, WARCFG, genControlZones, bodyPosAt, czAt, czCheck, czDist, czCenter, czDanger, czDeployPoint };
 })(typeof window !== 'undefined' ? window : globalThis);
