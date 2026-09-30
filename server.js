@@ -66,7 +66,9 @@ const makeHangar = (R, id, e) => R.hangars.set(id, { o: id, nm: e.nm, b: e.b, la
 const mainPlanets = R => R.SYS.bodies.filter(b => b.k !== 'sun' && !b.parent).map(b => b.n);
 const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = (Math.random() * (i + 1)) | 0; [a[i], a[j]] = [a[j], a[i]]; } return a; };
 const hk = s => { let h = 5381; for (const c of String(s)) h = ((h << 5) + h + c.charCodeAt(0)) | 0; return h >>> 0; }; // huella corta del token (para saber quién eres sin revelarlo)
-const publicRoom = R => R && { code: R.code, name: R.name, seed: R.seed, np: R.np, fillBots: R.fillBots, phase: R.phase, members: [...R.members.values()].map(m => ({ nm: m.nm, col: m.col, hk: hk(m.token), host: m.token === R.host, av: m.av || '', pick: m.pick || null })) };
+const RES_KEYS = ['agua', 'piedra', 'cobre', 'plata', 'oro', 'diamante'], START_DEF = { agua: 10, piedra: 10, cobre: 10, plata: 0, oro: 0, diamante: 0 };
+const cleanStart = s => { const o = {}; for (const k of RES_KEYS) { const v = Math.round(Number(s && s[k])); o[k] = Number.isFinite(v) ? Math.max(0, Math.min(9999, v)) : START_DEF[k]; } return o; }; // recursos iniciales del modo normal (por defecto 10 de cobre, piedra y agua)
+const publicRoom = R => R && { code: R.code, name: R.name, mode: R.mode, start: R.start, seed: R.seed, np: R.np, fillBots: R.fillBots, phase: R.phase, members: [...R.members.values()].map(m => ({ nm: m.nm, col: m.col, hk: hk(m.token), host: m.token === R.host, av: m.av || '', pick: m.pick || null })) };
 const closeRoom = R => { rooms.delete(R.code); for (const c of wss.clients) if (c.R === R) { c.R = null; send(c, { rm: null }); } }; // avisa a quien seguía dentro
 const cleanAv = s => String(s || '').replace(/[^\w\-.@ ]/g, '').slice(0, 24);
 const cleanName = (s, d) => String(s || d).replace(/[<>&"]/g, '').slice(0, 16) || d;
@@ -85,7 +87,7 @@ wss.on('connection', ws => {
         ws.token = String(m.token || '').slice(0, 40); if (!ws.token) return; const old = byToken(ws.token); if (old) { if (old.phase !== 'lobby') return send(ws, { created: 0, why: 'Ya estás en una partida.' }); dropMember(old, ws.token); }
         const np = Math.max(2, Math.min(8, Math.round(Number(m.np) || 4))), seed = Number.isInteger(m.seed) && m.seed > 0 ? m.seed : 1 + Math.floor(Math.random() * 2e9);
         let code; do code = Math.random().toString(36).slice(2, 7).toUpperCase(); while (code.length < 5 || rooms.has(code));
-        R = { code, name: String(m.name || 'Sala').replace(/[<>&"]/g, '').slice(0, 28), fillBots: true, phase: 'lobby', host: ws.token, launchAt: 0, members: new Map(), lobby: new Map(), hangars: new Map(), botPlanets: new Map(), players: new Map(), bots: new Map(), deadWrecks: new Map(), looted: new Set(), nextBot: 0 };
+        R = { code, name: String(m.name || 'Sala').replace(/[<>&"]/g, '').slice(0, 28), fillBots: true, mode: m.mode === 'creative' ? 'creative' : 'normal', start: cleanStart(m.start), phase: 'lobby', host: ws.token, launchAt: 0, members: new Map(), lobby: new Map(), hangars: new Map(), botPlanets: new Map(), players: new Map(), bots: new Map(), deadWrecks: new Map(), looted: new Set(), nextBot: 0 };
         setSystem(R, seed, np); rooms.set(code, R); ws.R = R; R.members.set(ws.token, newMember(ws, m, id, 0));
         console.log(`Sala "${R.name}" (${code}) creada · ${np} planetas · semilla ${seed} · ${rooms.size} salas`); return send(ws, { created: 1, code });
       }

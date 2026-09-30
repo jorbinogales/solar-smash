@@ -9,7 +9,7 @@
   const autoName = () => `${pick(['Nebulosa', 'Cósmica', 'Estelar', 'Orbital', 'Galáctica', 'Lunar', 'Solar', 'Cuántica'])}-${pick(['Alfa', 'Kepler', 'Andrómeda', 'Orión', 'Vega', 'Sirio', 'Aurora', 'Titán'])}-${10 + rnd(90)}`;
   const COL = ['#4db8ff', '#ff6a3c', '#5dff8a', '#ffd23f', '#d06bff', '#f2f2f2', '#ff5fa2', '#3ff0e0'];
   const ZCOL = { agua: '#4db8ff', piedra: '#8d8f94', cobre: '#d9743a', plata: '#dde3ea', oro: '#ffc22a', diamante: '#a6f3ff' }; // color de cada recurso (el mismo que RES en el juego)
-  const st = { name: ls.get('pname') || '', av: ls.get('avatar') || newSeed(), room: null, msg: '', np: 4, seed: 1 + rnd(2e9), rname: autoName(), copied: false, want: null, hover: null, cands: null, view: 'home', code: (new URLSearchParams(location.search).get('sala') || '').toUpperCase().slice(0, 8) };
+  const st = { name: ls.get('pname') || '', av: ls.get('avatar') || newSeed(), room: null, msg: '', np: 4, seed: 1 + rnd(2e9), rname: autoName(), copied: false, want: null, hover: null, cands: null, view: 'home', mode: 'normal', start: { agua: 10, piedra: 10, cobre: 10, plata: 0, oro: 0, diamante: 0 }, code: (new URLSearchParams(location.search).get('sala') || '').toUpperCase().slice(0, 8) };
   st.cands = [st.av, ...Array.from({ length: 5 }, newSeed)];
   const me = () => (st.room ? st.room.members.find(m => m.hk === myHk) : null), isHost = () => !!(me() && me().host);
   const cur = () => (st.room ? { seed: st.room.seed, np: st.room.np } : { seed: st.seed, np: st.np });
@@ -106,7 +106,7 @@
   const esc = s => String(s).replace(/[<>&"]/g, '');
   let sig = '';
   function render(force) {
-    const r = st.room, s = [st.view, st.code, st.msg, st.copied, st.np, st.seed, st.rname, st.want, st.av, st.cands.join(), !!blob, r && JSON.stringify(r)].join('|'); if (!force && s === sig) return; sig = s;
+    const r = st.room, s = [st.mode, JSON.stringify(st.start), st.view, st.code, st.msg, st.copied, st.np, st.seed, st.rname, st.want, st.av, st.cands.join(), !!blob, r && JSON.stringify(r)].join('|'); if (!force && s === sig) return; sig = s;
     const nmEl = box.querySelector('#nm'), rnEl = box.querySelector('#rn'); if (nmEl) st.name = nmEl.value; if (rnEl && !r) st.rname = rnEl.value;
     const focus = document.activeElement && document.activeElement.id; box.innerHTML = html();
     if (focus) { const el = box.querySelector('#' + focus); if (el) { el.focus(); if (el.type === 'text') el.setSelectionRange(el.value.length, el.value.length); } }
@@ -122,6 +122,13 @@
         <div class="card opt"><h3>TENGO UN CÓDIGO</h3><p>Escribe el código de invitación que te pasó el anfitrión.</p><input type="text" id="code" maxlength="8" placeholder="CÓDIGO" value="${esc(st.code)}" style="text-align:center;letter-spacing:.3em;font-size:20px;text-transform:uppercase"><button class="btn green" id="joinCode" style="width:100%;margin-top:10px;font-size:17px;padding:11px">ENTRAR A LA SALA</button></div></div>
       <div class="err" style="font-size:15px;margin-top:14px">${esc(st.msg)}</div></div>`;
   }
+  const RN = { agua: 'Agua', piedra: 'Piedra', cobre: 'Cobre', plata: 'Plata', oro: 'Oro', diamante: 'Diamante' };
+  const modeCard = r => { // modo de juego: normal (recursos iniciales configurables) o creativo (recursos ilimitados); solo se elige al crear la sala
+    const mode = r ? r.mode : st.mode, start = r ? r.start : st.start;
+    if (r) return `<div class="card"><h3>MODO DE JUEGO</h3><div class="wait" style="padding:4px">${mode === 'creative' ? 'Creativo · recursos ilimitados' : 'Normal · inicias con ' + (Object.entries(start).filter(([, n]) => n > 0).map(([k, n]) => n + ' ' + RN[k].toLowerCase()).join(', ') || 'nada')}</div></div>`;
+    return `<div class="card"><h3>MODO DE JUEGO</h3><div class="row"><button class="btn sm ${mode === 'normal' ? 'green' : 'ghost'}" id="mdN" style="flex:1">NORMAL</button><button class="btn sm ${mode === 'creative' ? 'green' : 'ghost'}" id="mdC" style="flex:1">CREATIVO</button></div>
+      ${mode === 'creative' ? '<div class="hint">Recursos ilimitados: compra y mejora todo sin gastar.</div>' : `<div class="hint">Recursos iniciales de cada jugador:</div><div class="rgrid">${Object.keys(RN).map(k => `<label>${RN[k]}<input type="number" min="0" max="9999" data-st="${k}" value="${start[k]}"></label>`).join('')}</div>`}</div>`;
+  };
   const html = () => (st.room && me() ? roomHtml() : st.view === 'setup' ? roomHtml() : homeHtml());
   function roomHtml() {
     const r = st.room, host = isHost(), mem = me(), { np } = cur(), link = r ? `${location.origin}/?sala=${r.code}` : '';
@@ -141,13 +148,14 @@
       <div class="right">
         ${r ? `<div class="card"><h3><span>JUGADORES ${members.length}/${np}</span></h3><div class="slots">${slots}</div></div>` : ''}
         ${profile()}
+        ${modeCard(r)}
         <div class="card"><h3>SISTEMA</h3>${!r ? `<div class="row"><div class="stepper"><button class="btn ghost sm" id="npm">−</button><b>${np}</b><button class="btn ghost sm" id="npp">+</button><span style="color:var(--dim)">planetas = jugadores</span></div><button class="btn ghost sm" id="reroll">🎲 OTRO</button></div>` : `<div class="wait" style="padding:4px">Sistema de ${np} planetas</div>`}
           ${host ? `<label class="chk"><input type="checkbox" id="fb" ${r.fillBots ? 'checked' : ''}> Rellenar los planetas libres con bots IA</label>` : !r ? '<label class="chk"><input type="checkbox" checked disabled> Rellenar los planetas libres con bots IA</label>' : `<div class="wait" style="padding:4px">Bots ${r.fillBots ? 'activados' : 'desactivados'}</div>`}</div>
         ${action}<div class="err">${esc(st.msg)}</div></div></div>`;
   }
 
   // ---------- eventos ----------
-  box.addEventListener('input', e => { if (e.target.id === 'code') st.code = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''); if (e.target.id === 'nm') { st.name = e.target.value; if (me()) send({ t: 'pf', nm: st.name }); ls.set('pname', st.name); } if (e.target.id === 'rn') st.rname = e.target.value; });
+  box.addEventListener('input', e => { if (e.target.dataset && e.target.dataset.st) { st.start[e.target.dataset.st] = Math.max(0, Math.min(9999, Math.round(+e.target.value || 0))); return; } if (e.target.id === 'code') st.code = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''); if (e.target.id === 'nm') { st.name = e.target.value; if (me()) send({ t: 'pf', nm: st.name }); ls.set('pname', st.name); } if (e.target.id === 'rn') st.rname = e.target.value; });
   box.addEventListener('change', e => { if (e.target.id === 'fb' && st.room) send({ t: 'cfg', np: st.room.np, fillBots: e.target.checked }); });
   const setAv = a => { st.av = a; ls.set('avatar', a); if (me()) send({ t: 'pf', av: a }); render(true); };
   const nick = () => (st.name || 'Piloto').slice(0, 16);
@@ -162,7 +170,9 @@
     else if (id === 'rname') { st.rname = autoName(); render(true); }
     else if (id === 'npm' || id === 'npp') { const n = Math.max(2, Math.min(8, np + (id === 'npp' ? 1 : -1))); if (st.room) send({ t: 'cfg', np: n, seed: st.room.seed }); else { st.np = n; st.want = null; render(true); } }
     else if (id === 'reroll') { if (st.room) send({ t: 'cfg', np: st.room.np, seed: 1 + rnd(2e9) }); else { st.seed = 1 + rnd(2e9); st.want = null; render(true); } }
-    else if (id === 'create') send({ t: 'create', token, nm: nick(), av: st.av, np: st.np, seed: st.seed, name: st.rname });
+    else if (id === 'mdN') { st.mode = 'normal'; render(true); }
+    else if (id === 'mdC') { st.mode = 'creative'; render(true); }
+    else if (id === 'create') send({ t: 'create', token, nm: nick(), av: st.av, np: st.np, seed: st.seed, name: st.rname, mode: st.mode, start: st.start });
     else if (id === 'toSetup') { st.view = 'setup'; st.msg = ''; st.seed = 1 + rnd(2e9); render(true); }
     else if (id === 'toHome') { st.view = 'home'; st.want = null; st.msg = ''; render(true); }
     else if (id === 'joinCode') { if (!st.code) { st.msg = 'Escribe el código de la sala.'; render(true); } else send({ t: 'join', token, nm: nick(), av: st.av, code: st.code }); }

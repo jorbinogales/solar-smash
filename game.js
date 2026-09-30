@@ -1125,7 +1125,7 @@ function frame(now) {
       b.el.textContent = `${b.n} · ${fD(b.dist - b.R)}`;
     }
   }
-  { const sg = JSON.stringify(INV); if (sg !== rsSig) { rsSig = sg; rsEl.innerHTML = Object.keys(RES).map(k => `<span class="cost"><i>${ICONS[k]}</i>${INV[k]}</span>`).join(''); } } // recursos recogidos: arriba a la izquierda, con su icono
+  { const sg = JSON.stringify(INV); if (sg !== rsSig) { rsSig = sg; rsEl.innerHTML = Object.keys(RES).map(k => `<span class="cost"><i>${ICONS[k]}</i>${FOOT.creative ? '∞' : INV[k]}</span>`).join(''); } } // recursos recogidos: arriba a la izquierda, con su icono
   hud.style.display = S.foot.on ? 'none' : ''; // a pie se ocultan los paneles de la nave
   scoreboardTick(now); drawHud(fwd, now, targets); FOOT.hud(now); if (typeof BASE !== 'undefined') BASE.hud(now); if (typeof WAR !== 'undefined') WAR.hud(now); if (typeof TV !== 'undefined') TV.update(S.foot.on ? null : aimT && (aimT.type === 'p' || aimT.type === 'n') ? aimT : S.tsel ? { type: S.tsel.kind, t: S.tsel, dist: S.tsel.dist } : aimT, now); // la nave bajo la mira manda; si no, la elegida con B; si no, lo que haya en la mira
   hud.textContent = planets.info.on ? `SUELO      ${fD(Math.max(0, planets.info.ground))} sobre ${planets.info.water ? 'el agua' : 'tierra'} de ${planets.info.name}` : ''; // el panel solo muestra el suelo: velocidad e impulso van en el medidor y los avisos en notificaciones

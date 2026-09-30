@@ -7,8 +7,9 @@ const INV = (() => { const base = { agua: 0, piedra: 0, cobre: 0, plata: 0, oro:
 const FOOT = (() => {
   const save = () => { try { localStorage.setItem('inv', JSON.stringify(INV)); } catch {} };
   const add = (type, n) => { INV[type] = (INV[type] || 0) + n; save(); notifyRes(type, n); }; // recurso obtenido: al inventario y al panel de notificaciones
-  const spend = cost => { if (Object.entries(cost).some(([k, n]) => (INV[k] || 0) < n)) return false; for (const [k, n] of Object.entries(cost)) INV[k] -= n; save(); return true; };
-  const resetInv = () => { for (const k of Object.keys(RES)) INV[k] = 0; save(); };
+  const spend = cost => { if (api.creative) return true; if (Object.entries(cost).some(([k, n]) => (INV[k] || 0) < n)) return false; for (const [k, n] of Object.entries(cost)) INV[k] -= n; save(); return true; };
+  const resetInv = cfg => { api.creative = !!(cfg && cfg.mode === 'creative'); for (const k of Object.keys(RES)) INV[k] = api.creative ? 99999 : Math.max(0, Math.round((cfg && cfg.start && cfg.start[k]) || 0)); save(); }; // modo creativo: recursos ilimitados (no se gastan); normal: los iniciales de la sala
   const nop = () => {};
-  return { add, spend, resetInv, upTool: () => false, toggle: nop, look: nop, frame: nop, hud: nop, cam: nop, tickStay: nop, splash: nop, scan: nop, togglePanel: nop };
+  const api = { creative: false, add, spend, resetInv, upTool: () => false, toggle: nop, look: nop, frame: nop, hud: nop, cam: nop, tickStay: nop, splash: nop, scan: nop, togglePanel: nop };
+  return api;
 })();

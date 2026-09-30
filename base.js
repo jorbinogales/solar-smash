@@ -220,13 +220,15 @@ const BASE = (() => {
   }
   function startGame() { // el administrador inició la partida (o te uniste con ella en marcha): nave básica, inventario vacío, reaparecer en tu hangar
     started = true; chooserShown = false; pl.style.display = 'none'; myName = ($('lbName') && $('lbName').value || myName).slice(0, 16) || 'Piloto';
-    FOOT.resetInv(); if (typeof resetShips === 'function') resetShips(); resetLv(); const b0 = basicSpec(mySpec.c); saveSpec(b0); applyLoadout(b0, true); P.kills = 0; P.deaths = 0; P.deadUntil = 0;
+    FOOT.resetInv(ROOMCFG); if (typeof resetShips === 'function') resetShips(); resetLv(); const b0 = basicSpec(mySpec.c); saveSpec(b0); applyLoadout(b0, true); P.kills = 0; P.deaths = 0; P.deadUntil = 0;
     if (typeof refresh === 'function') { sel = JSON.parse(JSON.stringify(b0)); refresh(); }
     document.exitPointerLock(); ov.style.display = 'none'; say('¡Partida iniciada! Esc abre el menú de mejoras'); // el menú no se abre solo: haz clic para tomar el control
     { const pn = document.getElementById('pname'); if (pn) pn.value = myName; }
     beginLoading();
   }
+  let ROOMCFG = { mode: 'normal', start: { agua: 10, piedra: 10, cobre: 10 } }; // modo y recursos iniciales de la sala (llegan en el tick)
   function onLobby(m) { // fase, lista de jugadores y administrador que envía el servidor
+    if (m.rm) ROOMCFG = { mode: m.rm.mode, start: m.rm.start };
     LB.phase = m.ph; LB.list = m.lb || []; LB.bots = m.bl || []; LB.adm = m.adm; const mine = LB.list.find(x => x.id === myId); if (mine && !mine.b) LB.pick = null; else if (mine && mine.b) LB.pick = mine.b;
     if (LB.phase === 'lobby') { if (MM.booted) location.href = '/'; return; } // la sala volvió a la espera o se cerró
     if (!started && HG.has(myId)) startGame();
