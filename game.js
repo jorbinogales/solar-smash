@@ -75,6 +75,14 @@ function updateBodies() {
   for (const t of ZT) { const p = bodies[t.zone.anchor].pos, f = t.zone.off; t.pos = [p[0] + f[0], p[1] + f[1], p[2] + f[2]]; } // las zonas siguen a su planeta
 }
 const tgtObj = () => S.tgt < bodies.length ? bodies[S.tgt] : ZT[S.tgt - bodies.length]; // destino seleccionado con Tab o desde el mapa: cuerpo o zona
+let lastTargets = []; const TAB_R = 60000; // objetivos del último cuadro (para Tab) y alcance de Tab para naves (km)
+const shipTag = t => `${TYPES[t.st] ? TYPES[t.st].name : 'Nave'} · Nv ${t.lv || 0}`; // «Halcón · Nv 7»
+function tabNext() { // Tab: primero las naves enemigas o neutrales visibles y cercanas (de la más cercana a la más lejana); tras la última, el siguiente planeta o zona
+  const ships = lastTargets.filter(t => (t.kind === 'p' || t.kind === 'n') && t.dist < TAB_R && !losBlocked(t)).sort((a, b) => a.dist - b.dist).slice(0, 8);
+  const i = S.tship ? ships.findIndex(t => t.kind === S.tship.kind && t.id === S.tship.id) : -1;
+  if (i + 1 < ships.length) { const t = ships[i + 1]; S.tship = { kind: t.kind, id: t.id }; return say(`Objetivo: ${t.kind === 'n' ? 'nave neutral' : t.name} · ${shipTag(t)}`); }
+  S.tship = null; S.tgt = (S.tgt + 1) % (bodies.length + ZT.length); const t = tgtObj(); if (t.zone) say(`Destino: ${t.n} · Shift: salto luz`);
+}
 
 // ---------- nave ----------
 let mySpec = loadSpec(), ship = makeShip(mySpec); scene.add(ship); // modelo según el hangar (ships.js)
@@ -103,7 +111,7 @@ function fitBox(box, W) { if (!box) return; box.style.zoom = 1; box.style.width 
 const keys = {}; let mdx = 0, mdy = 0;
 addEventListener('keydown', e => {
   keys[e.code] = true;
-  if (e.code === 'Tab') { e.preventDefault(); S.tgt = (S.tgt + 1) % (bodies.length + ZT.length); const t = tgtObj(); if (t.zone) say(`Destino: ${t.n} · Shift: salto luz`); } // Tab: cicla planetas y zonas de recursos
+  if (e.code === 'Tab') { e.preventDefault(); tabNext(); } // Tab: naves cercanas y luego planetas y zonas de recursos
   if (e.code === 'KeyX') { S.v = 0; S.auto = false; }
   if (e.code === 'KeyG' && !S.foot.on && !S.warp.on && P.hp > 0) { // G: fija el rumbo del salto luz hacia el planeta bajo la mira (otra vez: libera)
     if (S.lockB != null) { S.lockB = null; say('Vuelo directo cancelado'); }
@@ -213,6 +221,26 @@ function notifyRes(type, n) { // recurso obtenido: icono + cantidad (las gananci
 }
 const QUIET = /luz|salto|atmósfera|exosfera|planeta|Ruedas|estacionada|Amerizaje|flota|despegar|impulso/i; // entradas/salidas de planeta y velocidad luz: solo texto central, sin notificación
 const say = t => { const now = performance.now(); P.msg = t; P.msgT = now + 2500; if ((t !== lastSay || now - lastSayT > 3000) && !QUIET.test(t)) notifyEl(`<span>${t}</span>`, 5500); lastSay = t; lastSayT = now; };
+// ---------- experiencia y niveles de la nave actual (datos y fórmula en ships.js: LVL, lvNeed, LV_MAX) ----------
+function gainXp(n, why) { // XP para la nave que pilotas ahora; cada nivel da 1 punto de mejora para esa nave
+  const L = lvlOf(mySpec.t); if (!(n > 0) || L.lv >= LV_MAX) return; L.xp += n; let up = 0;
+  while (L.lv < LV_MAX && L.xp >= lvNeed(L.lv + 1)) { L.xp -= lvNeed(L.lv + 1); L.lv++; up++; }
+  if (L.lv >= LV_MAX) L.xp = 0; saveLv();
+  notifyEl(`<i class="ico">★</i><span><b>+${n} XP</b> ${why}</span>`, 5000, 'xp');
+  if (up) levelUp(L.lv);
+}
+function levelUp(lv) { // aviso grande en el centro con sonido
+  const el = document.createElement('div'); el.className = 'lvup'; el.innerHTML = `${hexSvg(lv, '#fff3b0', 70)}<div><b>¡NIVEL ${lv}!</b><span>${typeof atBase === 'function' && atBase() ? 'Abre el menú (Esc) para mejorar tu nave' : 'Ve a tu base para mejorar'}</span></div>`;
+  document.body.append(el); setTimeout(() => el.classList.add('out'), 3400); setTimeout(() => el.remove(), 4000);
+  [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => tone('square', f, f * 1.01, 0.18, 0.06), i * 110));
+}
+const xpEl = document.createElement('div'); xpEl.id = 'xph'; document.body.append(xpEl); let xpSig = '';
+function xpHud() { // NV y barra de XP de la nave actual, bajo el panel de mi base (arriba a la izquierda)
+  const on = typeof BASE !== 'undefined' && BASE.started() && !BASE.loading() && !S.foot.on, bh = document.getElementById('bh'), top = bh && bh.style.display !== 'none' ? bh.offsetTop + bh.offsetHeight + 8 : 60;
+  const L = lvlOf(mySpec.t), need = L.lv < LV_MAX ? lvNeed(L.lv + 1) : 0, pts = lvPts(L), sg = [on, top, mySpec.t, L.lv, L.xp, pts].join();
+  if (sg === xpSig) return; xpSig = sg; xpEl.style.display = on ? 'flex' : 'none'; if (!on) return; xpEl.style.top = top + 'px';
+  xpEl.innerHTML = `${hexSvg(L.lv, '#ffd23f', 30)}<div class="xb"><div class="xt"><span>NV ${L.lv} · ${TYPES[mySpec.t].name.toUpperCase()}</span>${pts ? `<em>+${pts} PT</em>` : ''}</div><div class="xbar"><i style="width:${need ? Math.min(100, L.xp / need * 100) : 100}%"></i></div><div class="xt"><span>${need ? `${L.xp}/${need} XP` : 'NIVEL MÁXIMO'}</span></div></div>`;
+}
 let CARRY = [0, 0, 0]; // desplazamiento orbital del planeta cercano en este cuadro (lo que está en su aire viaja con él)
 const AST = new Map(), ZONE_PER = { agua: 12, piedra: 14, cobre: 8, plata: 5, oro: 4, diamante: 2 }; // unidades medias por asteroide de zona del recurso dominante principal (el secundario, el 60 %)
 const ROCKN = ['carbonáceo', 'rocoso', 'metálico', 'de hielo', 'alargado', 'binario'], ICOIMG = {};
@@ -372,13 +400,13 @@ function fireMissile() {
   P.missiles--; P.cdM = WPN.m.cd; shoot('m', lockT ? { k: lockT.kind, id: lockT.id } : null);
 }
 applyLoadout(mySpec, false);
-const targetSpeed = t => t.k === 'p' ? (t.id === myId ? S.ve : remotes.get(t.id)?.v || 0) : 0;
-function targetPos(t) { if (t.k === 'h') return typeof BASE !== 'undefined' ? BASE.targetPos(t.id) : null; if (t.k === 'p') return t.id === myId ? S.pos : remotes.get(t.id)?.apos; const w = wrecks[t.id]; return w && !dead.has(w.i) ? w.pos : null; }
+const targetSpeed = t => t.k === 'p' ? (t.id === myId ? S.ve : remotes.get(t.id)?.v || 0) : t.k === 'n' && typeof NEU !== 'undefined' ? NEU.speed(t.id) : 0;
+function targetPos(t) { if (t.k === 'h') return typeof BASE !== 'undefined' ? BASE.targetPos(t.id) : null; if (t.k === 'p') return t.id === myId ? S.pos : remotes.get(t.id)?.apos; if (t.k === 'n') return typeof NEU !== 'undefined' ? NEU.pos(t.id) : null; const w = wrecks[t.id]; return w && !dead.has(w.i) ? w.pos : null; }
 
 function applyLoadout(spec, reset = true) {
-  mySpec = spec; const st = statsOf(spec); scene.remove(ship); ship = makeShip(spec); scene.add(ship);
+  mySpec = spec; const st = statsOf(spec, lvlOf(spec.t).a); scene.remove(ship); ship = makeShip(spec); scene.add(ship); // con los puntos de nivel de ESTA nave
   Object.assign(MAXA, { plasma: st.plasma, missiles: st.missiles }); WPN.p.dmg = st.pdmg;
-  Object.assign(P, { hpMax: st.hp, shMax: st.sh, hp: st.hp, sh: st.sh, plasma: st.plasma, missiles: st.missiles, engMul: st.pitch, agil: st.agil, vmax: st.vmax, warpMax: st.warp });
+  Object.assign(P, { hpMax: st.hp, shMax: st.sh, hp: st.hp, sh: st.sh, plasma: st.plasma, missiles: st.missiles, engMul: st.pitch, agil: st.agil, vmax: st.vmax, warpMax: st.warp, regen: st.regen });
   Object.assign(S.warp, { on: false, lock: false, bar: st.warp, fx: 0 }); S.v = Math.min(S.v, st.vmax);
   if (reset) spawn();
 }
@@ -406,11 +434,12 @@ ws.onmessage = ev => {
   }
   if (m.ev) {
     const e = m.ev;
-    if (e.t === 'fire') { if (e.rb >= 0 && e.rp) e.pos = bodies[e.rb].pos.map((c, i) => c + e.rp[i]); spawnProj(e.id, e.key, e.kind, e.pos, e.dir, e.tgt, e.dmg, e.tw ? { spd: e.spd || 1, col: 0xff5040, life: 30 } : undefined); if (e.tw) { const q = projs.get(e.key); if (q) q.vis = true; } const de = len(sub(e.pos, S.pos)); sfx(e.kind, de); if (de < 40000) P.lastCombat = performance.now(); if (!e.tw && P.hp > 0 && de < 30000 && de > 0 && (S.pos[0] - e.pos[0]) * e.dir[0] / de + (S.pos[1] - e.pos[1]) * e.dir[1] / de + (S.pos[2] - e.pos[2]) * e.dir[2] / de > 0.985) attackAlert('p', (remotes.get(e.id) || {}).name || 'Un piloto', e.pos); } // disparo de otra nave que apunta hacia mí
+    if (e.t === 'fire') { if (e.rb >= 0 && e.rp) e.pos = bodies[e.rb].pos.map((c, i) => c + e.rp[i]); spawnProj(e.ow ?? e.id, e.key, e.kind, e.pos, e.dir, e.tgt, e.dmg, e.tw ? { spd: e.spd || 1, col: 0xff5040, life: 30 } : undefined); if (e.tw) { const q = projs.get(e.key); if (q) q.vis = true; } const de = len(sub(e.pos, S.pos)); sfx(e.kind, de); if (de < 40000) P.lastCombat = performance.now(); if (!e.tw && P.hp > 0 && de < 30000 && de > 0 && (S.pos[0] - e.pos[0]) * e.dir[0] / de + (S.pos[1] - e.pos[1]) * e.dir[1] / de + (S.pos[2] - e.pos[2]) * e.dir[2] / de > 0.985) attackAlert('p', ownerName(e.ow ?? e.id), e.pos); } // disparo de otra nave que apunta hacia mí
     else if (e.t === 'hit') {
-      killProj(e.key); const r = remotes.get(e.id); puff(e.pos, 0.02, 0xffd070, 0.5, 0.012);
+      killProj(e.key); const vid = e.v ?? e.id, r = remotes.get(vid); puff(e.pos, 0.02, 0xffd070, 0.5, 0.012); // vid: la víctima (un bot si lo envía el anfitrión)
       if (e.sh > 0 && r) { r.fl = 1; sfx('shield', len(sub(e.pos, S.pos))); } else boom(e.pos, e.dead ? 60 : e.dmg > 20 ? 25 : 6);
-      if (e.dead && e.by === myId) { P.kills++; say('¡BAJA CONFIRMADA!'); } }
+      if (e.dead && e.by === myId) { P.kills++; say('¡BAJA CONFIRMADA!'); if (vid >= 2000) gainXp(5, 'Bot enemigo derribado'); else gainXp(8 + 4 * ((r && r.lv) || 0), `${(r && r.name) || 'Piloto'} derribado`); } } // XP: bots 5; jugadores 8 + 4 × su nivel
+    else if (e.t === 'nhit' && typeof NEU !== 'undefined') NEU.onHit(e);
     else if (e.t === 'wreck' && e.by !== myId) boom(wrecks[e.w].pos, 80);
     else if ((e.t === 'hdead' || e.t === 'hgone') && typeof BASE !== 'undefined') BASE.onEvent(e);
     return;
@@ -419,6 +448,7 @@ ws.onmessage = ev => {
   if (m.ph && typeof BASE !== 'undefined') BASE.onLobby(m);
   if (Array.isArray(m.zr) && m.zr.length === ZONES.length) ZR = m.zr; // lo que queda en cada zona (igual para todos los de la sala)
   if (Array.isArray(m.wl)) LOOTED = new Set(m.wl);
+  if (Array.isArray(m.nv) && typeof NEU !== 'undefined') NEU.sync(m.nv); // naves neutrales (las simula el anfitrión)
   const wd = new Set(m.wd); for (const w of wrecks) if (dead.has(w.i) && !wd.has(w.i)) w.hp = WRECK_HP;
   dead.clear(); wd.forEach(i => dead.add(i));
   const seen = new Set();
@@ -429,7 +459,7 @@ ws.onmessage = ev => {
     if (!r) { r = { id: p.id, q: new THREE.Quaternion() }; remotes.set(p.id, r); }
     const spk = JSON.stringify(p.sp); // el rival cambió de nave o de mejoras: reconstruir su modelo
     if (r.spk !== spk) { if (r.grp) scene.remove(r.grp); r.grp = makeShip(p.sp); scene.add(r.grp); r.spk = spk; }
-    Object.assign(r, { rb: p.rb ?? -1, rp: p.rp, bt: p.bt || 0, name: p.name, pos: p.pos, v: p.v, hp: p.hp, sh: p.sh, ms: p.ms, pk: p.pk, t: Date.now() }); r.q.fromArray(p.q);
+    Object.assign(r, { rb: p.rb ?? -1, rp: p.rp, bt: p.bt || 0, name: p.name, pos: p.pos, v: p.v, hp: p.hp, sh: p.sh, ms: p.ms, pk: p.pk, lv: p.lv || 0, st: p.sp && p.sp.t, t: Date.now() }); r.q.fromArray(p.q); // lv/st: nivel y tipo de su nave
   }
   for (const [id, r] of remotes) if (!seen.has(id)) { scene.remove(r.grp); remotes.delete(id); }
 };
@@ -519,6 +549,8 @@ function attackAlert(kind, name, pos) { // kind: 't' torretas enemigas · 'p' na
   const now = performance.now(); ATK.t = now; ATK.kind = kind; ATK.name = name || ''; ATK.pos = pos ? [...pos] : ATK.pos;
   if (!ATK.nt[kind] || now - ATK.nt[kind] > 5000) { ATK.nt[kind] = now; notifyEl(`<i class="ico">⚠</i><span>${kind === 't' ? `Las torretas de <b>${name}</b> te disparan` : kind === 'p' ? `<b>${name}</b> te está atacando` : 'Tu <b>base</b> está recibiendo daño'}</span>`, 5000, 'atk'); }
 }
+const ownerName = o => o >= 3000 && typeof NEU !== 'undefined' ? NEU.name(o) : (remotes.get(o) || {}).name || 'Un piloto'; // autor de un disparo: piloto, bot (2000+) o nave neutral (3000+)
+const ownerPos = o => o >= 3000 && typeof NEU !== 'undefined' ? NEU.pos(o) : (remotes.get(o) || {}).pos;
 function attackHud(W, H, now, cm) {
   const dt = now - ATK.t; if (dt > 2600) return; const k = 1 - dt / 2600, pulse = 0.5 + 0.5 * Math.sin(now / 110);
   const gr = g2.createRadialGradient(W / 2, H / 2, H * 0.32, W / 2, H / 2, H * 0.85); gr.addColorStop(0, 'rgba(255,0,0,0)'); gr.addColorStop(1, `rgba(255,20,10,${(0.25 + 0.3 * pulse) * k})`); g2.fillStyle = gr; g2.fillRect(0, 0, W, H); // viñeta roja pulsante
@@ -691,13 +723,13 @@ function drawHud(fwd, now, targets) {
   const nearest = Math.min(Infinity, ...targets.filter(t => t.kind === 'p').map(t => t.dist)); // enemigo más cercano (solo naves de jugadores)
   for (const t of targets) {
     if ((t.kind === 'w' && t.dist > 300000) || losBlocked(t)) continue; // sin línea de visión (planeta de por medio) no se dibuja
-    const lock = t === lockT, col = t.kind === 'p' || t.kind === 'h' ? (lock ? '#ff2a2a' : '#ff8a4c') : (lock ? '#ffee55' : '#5dff8a');
+    const lock = t === lockT, sel = t === S.tsel, col = sel ? '#ffd23f' : t.kind === 'n' ? (t.hostile ? (lock ? '#ff2a2a' : '#ff5a4a') : (lock ? '#ffee55' : '#c8ff5d')) : t.kind === 'p' || t.kind === 'h' ? (lock ? '#ff2a2a' : '#ff8a4c') : (lock ? '#ffee55' : '#5dff8a'); // neutrales: verde amarillento (rojo si están hostiles); elegida con Tab: amarillo
     tv.copy(t.grp.position).project(camera);
     let x = (tv.x * 0.5 + 0.5) * W, y = (-tv.y * 0.5 + 0.5) * H; const behind = tv.z > 1;
     if (behind) { x = W - x; y = H - y; }
     g2.strokeStyle = g2.fillStyle = col;
     if (behind || x < 40 || x > W - 40 || y < 40 || y > H - 40) {
-      if (t.kind === 'w' && !lowAmmo) continue;
+      if ((t.kind === 'w' && !lowAmmo) || (t.kind === 'n' && !sel && !t.hostile && t.dist > TAB_R)) continue; // neutrales lejanas y tranquilas: sin flecha en el borde
       const dx = x - W / 2, dy = y - H / 2, k = Math.min((W / 2 - 40) / (Math.abs(dx) || 1e-6), (H / 2 - 40) / (Math.abs(dy) || 1e-6));
       g2.save(); g2.translate(W / 2 + dx * k, H / 2 + dy * k); g2.rotate(Math.atan2(dy, dx));
       g2.beginPath(); g2.moveTo(14, 0); g2.lineTo(-10, -9); g2.lineTo(-10, 9); g2.closePath(); g2.fill(); g2.restore();
@@ -707,8 +739,9 @@ function drawHud(fwd, now, targets) {
       for (const sx of [-1, 1]) for (const sy of [-1, 1]) { g2.moveTo(x + sx * s, y + sy * (s - c)); g2.lineTo(x + sx * s, y + sy * s); g2.lineTo(x + sx * (s - c), y + sy * s); }
       g2.stroke();
       const bw = 68, bx = x - bw / 2, by = y - s - 13, hbar = (yy, f, c) => { g2.fillStyle = 'rgba(0,0,0,0.6)'; g2.fillRect(bx - 1, yy - 1, bw + 2, 7); g2.fillStyle = c; g2.fillRect(bx, yy, bw * Math.max(0, Math.min(1, f)), 5); };
-      if (t.kind === 'p' || t.kind === 'h') { hbar(by - 8, t.sh / 100, '#4db8ff'); hbar(by, t.hp / 100, t.hp > 25 ? '#5dff8a' : '#ff4b3b'); } else hbar(by, t.hp / 100, t.hp > 40 ? '#5dff8a' : '#ff8a4c'); // vida sobre el objetivo
-      g2.fillStyle = col; g2.fillText(`${t.name} · ${fD(t.dist)}`, x, y + s + 14);
+      if (t.kind === 'p' || t.kind === 'h' || t.kind === 'n') { hbar(by - 8, t.sh / 100, '#4db8ff'); hbar(by, t.hp / 100, t.hp > 25 ? '#5dff8a' : '#ff4b3b'); } else hbar(by, t.hp / 100, t.hp > 40 ? '#5dff8a' : '#ff8a4c'); // vida sobre el objetivo
+      if (sel) { g2.beginPath(); g2.moveTo(x, y - s - 24); g2.lineTo(x + s + 10, y); g2.lineTo(x, y + s + 24); g2.lineTo(x - s - 10, y); g2.closePath(); g2.stroke(); } // rombo de la nave elegida con Tab
+      g2.fillStyle = col; g2.fillText(t.kind === 'n' ? `${t.hostile ? 'HOSTIL' : 'NEUTRAL'} · ${shipTag(t)} · ${fD(t.dist)}` : t.kind === 'p' ? `${t.name} · ${shipTag(t)} · ${fD(t.dist)}` : `${t.name} · ${fD(t.dist)}`, x, y + s + 14);
     }
   }
   tv.set(fwd.x, fwd.y, fwd.z).multiplyScalar(1000).project(camera);
@@ -721,7 +754,7 @@ function drawHud(fwd, now, targets) {
   if (hot) {
     g2.fillStyle = '#ff2a2a'; if (Math.floor(now / 250) % 2) g2.fillText(lockT.kind === 'h' ? '⚠ BASE ENEMIGA FIJADA — DISPAROS GUIADOS ⚠' : '⚠ BLANCO FIJADO — IMPACTO GARANTIZADO ⚠', W / 2, 70);
     if (now - lastBeep > 70 + 230 * Math.min(1, lockT.dist / RANGE)) { lastBeep = now; beep(); } // más cerca = pitido más rápido
-  } else if (lockT) { g2.fillStyle = '#ffee55'; g2.fillText('CASCO FIJADO — misil listo', W / 2, 70); }
+  } else if (lockT) { g2.fillStyle = '#ffee55'; g2.fillText(lockT.kind === 'n' ? `NAVE ${lockT.hostile ? 'HOSTIL' : 'NEUTRAL'} FIJADA — disparos guiados` : 'CASCO FIJADO — misil listo', W / 2, 70); }
   g2.fillStyle = '#ffd23f';
   if (P.hp <= 0) { g2.fillText('DESTRUIDO', W / 2, H / 2 - 80); if (P.cause) { g2.font = `16px ${MONO}`; g2.fillText(P.cause, W / 2, H / 2 - 52); } }
   else if (P.plasma <= 0 && P.missiles <= 0) g2.fillText('SIN MUNICIÓN — destruye cascos a la deriva', W / 2, 105);
@@ -846,7 +879,7 @@ function frame(now) {
     if (P.turb > 0.05 && audio && now - lastRumble > 90) { lastRumble = now; noise(0.14, 0.03 + 0.07 * Math.min(1, P.turb), 500, 90); } // retumbar
   }
 
-  FOOT.frame(dt, now); FOOT.tickStay(dt); if (typeof BASE !== 'undefined') BASE.frame(dt, now); if (typeof BOT !== 'undefined') BOT.frame(dt, now); // modo a pie: caminar, recolectar y colocar al astronauta
+  FOOT.frame(dt, now); FOOT.tickStay(dt); if (typeof BASE !== 'undefined') BASE.frame(dt, now); if (typeof BOT !== 'undefined') BOT.frame(dt, now); if (typeof NEU !== 'undefined') NEU.frame(dt, now); // modo a pie: caminar, recolectar y colocar al astronauta
 
   // render con origen flotante + compresión de distancias enormes (mantiene el tamaño angular real)
   for (const b of bodies) {
@@ -874,9 +907,9 @@ function frame(now) {
   if (alive && now - P.shT > 4000 && P.sh < P.shMax) P.sh = Math.min(P.shMax, P.sh + 0.12 * P.shMax * dt); // el escudo se regenera sin recibir golpes
   P.sf = Math.max(0, P.sf - dt * 2.5); P.shake = Math.max(0, P.shake - dt * 2.5); setShieldFlash(ship, P.sf);
   if (alive && P.hp < 40 && (P.smoke -= dt) <= 0) { P.smoke = 0.06; puff(S.pos.map((c, j) => c - fwd.getComponent(j) * 0.03 + (Math.random() - 0.5) * 0.01), 0.012, 0xff7a30, 1.4, 0.004); } // casco dañado: humo
-  if (alive && P.plasma < MAXA.plasma && now - (P.fireT || 0) > 1500) { P.pAcc = (P.pAcc || 0) + dt; if (P.pAcc >= 1.4) { P.pAcc -= 1.4; P.plasma++; } } // la munición de plasma se recarga muy lentamente (1 cada 1,4 s) si no disparas
+  if (alive && P.plasma < MAXA.plasma && now - (P.fireT || 0) > 1500) { P.pAcc = (P.pAcc || 0) + dt; const rg = P.regen || 1.4; if (P.pAcc >= rg) { P.pAcc -= rg; P.plasma++; } } // la munición de plasma se recarga muy lentamente (1 cada 1,4 s; menos con puntos de nivel en Recarga) si no disparas
   if (alive && firing && !S.warp.on && !S.foot.on && S.warp.cd <= 0 && P.cdP <= 0 && P.plasma > 0) { P.fireT = now; P.plasma--; P.cdP = WPN.p.cd; shoot('p', lockT ? { k: lockT.kind, id: lockT.id } : null); }
-  if (now - lastSend > 66) { lastSend = now; send({ t: 's', rb: S.refB, rp: S.refB >= 0 ? sub(S.foot.on ? S.shipPos : S.pos, bodies[S.refB].pos) : null, name: myName, pos: S.foot.on ? S.shipPos : S.pos, q: S.q.toArray(), v: alive ? vEff : 0, hp: P.hp / P.hpMax * 100, sh: P.sh / P.shMax * 100, sp: mySpec, ms: P.missiles, pk: S.park.on ? 1 : 0, bt: Math.round(S.boost * 100) / 100 }); }
+  if (now - lastSend > 66) { lastSend = now; send({ t: 's', rb: S.refB, rp: S.refB >= 0 ? sub(S.foot.on ? S.shipPos : S.pos, bodies[S.refB].pos) : null, name: myName, pos: S.foot.on ? S.shipPos : S.pos, q: S.q.toArray(), v: alive ? vEff : 0, hp: P.hp / P.hpMax * 100, sh: P.sh / P.shMax * 100, sp: mySpec, lv: lvlOf(mySpec.t).lv, ms: P.missiles, pk: S.park.on ? 1 : 0, bt: Math.round(S.boost * 100) / 100 }); }
   S.ve = alive ? vEff : 0; engine(S.ve, (keys.KeyW && alive) || S.warp.on || S.boost > 0.05); if (S.boost > 0.02) P.shake = Math.max(P.shake, 0.1 + 0.15 * S.boost);
   const targets = [];
   for (const r of remotes.values()) {
@@ -886,9 +919,10 @@ function frame(now) {
     const v = view(r.apos); r.grp.visible = r.hp > 0; r.fl = Math.max(0, (r.fl || 0) - dt * 2.5); setShieldFlash(r.grp, r.fl);
     r.grp.position.set(v.x, v.y, v.z); r.grp.scale.setScalar(Math.max(v.s, v.rd * 0.12)); r.grp.quaternion.copy(r.q); // tamaño real; mínimo ≈0.3° aparente
     setThrust(r.grp, r.v, now); setFlameHeat(r.grp, r.bt || 0); updateShipFx(r.grp, now, r.ms); r.grp.gear.visible = !!r.pk; r.dist = v.d; r.dir = [v.rel[0] / v.d, v.rel[1] / v.d, v.rel[2] / v.d];
-    if (r.hp > 0) targets.push({ kind: 'p', id: r.id, name: r.name, hp: r.hp, sh: r.sh, grp: r.grp, dist: v.d, dir: r.dir });
+    if (r.hp > 0) targets.push({ kind: 'p', id: r.id, name: r.name, hp: r.hp, sh: r.sh, grp: r.grp, dist: v.d, dir: r.dir, lv: r.lv, st: r.st });
   }
   if (typeof BASE !== 'undefined') for (const t of BASE.targets()) targets.push(t); // las bases enemigas también son objetivos: se pueden fijar y guiar los disparos hacia ellas
+  if (typeof NEU !== 'undefined') for (const t of NEU.targets()) targets.push(t); // naves neutrales
   for (const w of wrecks) {
     w.pos = [w.parent.pos[0] + w.off[0], w.parent.pos[1] + w.off[1], w.parent.pos[2] + w.off[2]];
     const v = view(w.pos), isDead = dead.has(w.i); w.grp.visible = !isDead;
@@ -897,6 +931,7 @@ function frame(now) {
     w.dist = v.d; w.dir = [v.rel[0] / v.d, v.rel[1] / v.d, v.rel[2] / v.d];
     if (!isDead) targets.push({ kind: 'w', id: w.i, name: 'Casco a la deriva', hp: w.hp / WRECK_HP * 100, grp: w.grp, dist: v.d, dir: w.dir });
   }
+  lastTargets = targets; S.tsel = S.tship ? targets.find(t => t.kind === S.tship.kind && t.id === S.tship.id) || null : null; if (S.tship && !S.tsel) S.tship = null; // nave elegida con Tab (se suelta si muere o se pierde)
   lockT = null; let bestA = CONE;
   if (alive) for (const t of targets) {
     const a = Math.acos(Math.min(1, fwd.x * t.dir[0] + fwd.y * t.dir[1] + fwd.z * t.dir[2]));
@@ -930,13 +965,14 @@ function frame(now) {
     const old = p.pos, sp = spd * dt; p.pos = old.map((c, i) => c + p.dir[i] * sp);
     if (p.fromSpace && airK(p.pos) > 0.02) { killProj(key); continue; } // viene del espacio: se consume al entrar en la atmósfera
     const ao = fields.active.find(o => segDist(old, p.pos, o.pos) < o.r); if (ao) { puff(p.pos, 2, 0xffd090, 0.4, 0.01); killProj(key); if (p.owner === myId && !p.bot) hitAsteroid(ao, p.dmg); continue; } // extraer recursos de asteroides
-    if ((p.owner === myId || p.owner >= 2000) && typeof BASE !== 'undefined' && BASE.hit(old, p.pos, p)) { killProj(key); continue; } // golpe al hangar de otro jugador
+    if ((p.owner === myId || (p.owner >= 2000 && p.owner < 3000)) && typeof BASE !== 'undefined' && BASE.hit(old, p.pos, p)) { killProj(key); continue; } // golpe al hangar de otro jugador (las neutrales no atacan bases)
     const gi = planets.impact(old, p.pos); if (gi) { killProj(key); if (len(sub(gi, S.pos)) < 200) boom(gi, p.kind === 'm' ? 0.06 : 0.012); FOOT.splash(gi, p.kind); continue; } // el proyectil golpea el suelo: explosión y daño de área a los objetos
     if (p.owner !== myId && !p.vis && alive && segDist(old, p.pos, S.pos) < (p.spd !== undefined || ak > 0.02 ? 0.04 : HIT_R)) { // en el aire y los disparos de torreta: radio real de la nave (40 m); en el espacio, el radio grande de siempre // el impacto lo decide la víctima
-      killProj(key); if (p.owner < 0 && typeof BASE !== 'undefined') { const th = BASE.HG.get(-p.owner); attackAlert('t', th ? th.nm : 'un enemigo', th ? BASE.worldOf(th) : null); } else if (p.owner !== myId) attackAlert('p', (remotes.get(p.owner) || {}).name || 'Un piloto', (remotes.get(p.owner) || {}).pos); hurt(p.dmg, p.dir, now); send({ t: 'hit', by: p.owner, key, dmg: p.dmg, pos: S.pos, dead: P.hp <= 0, sh: P.sh });
+      killProj(key); if (p.owner < 0 && typeof BASE !== 'undefined') { const th = BASE.HG.get(-p.owner); attackAlert('t', th ? th.nm : 'un enemigo', th ? BASE.worldOf(th) : null); } else if (p.owner !== myId) attackAlert('p', ownerName(p.owner), ownerPos(p.owner)); hurt(p.dmg, p.dir, now); send({ t: 'hit', by: p.owner, key, dmg: p.dmg, pos: S.pos, dead: P.hp <= 0, sh: P.sh });
       continue;
     }
     if (!p.vis && p.bot === undefined && p.owner > -1000 && typeof BOT !== 'undefined' && BOT.hit(old, p.pos, p, key, ak)) { killProj(key); continue; } // impacto en un bot (lo decide su anfitrión, el administrador)
+    if (!p.vis && typeof NEU !== 'undefined' && NEU.hit(old, p.pos, p, key, ak)) { killProj(key); continue; } // impacto en una nave neutral (lo decide el anfitrión)
     if (p.owner === myId) for (const w of wrecks) if (!dead.has(w.i) && segDist(old, p.pos, w.pos) < WRECK_R) {
       w.hp -= p.dmg; killProj(key); boom(p.pos, 6);
       if (w.hp <= 0) {
@@ -997,7 +1033,8 @@ function frame(now) {
   }
   { const sg = JSON.stringify(INV); if (sg !== rsSig) { rsSig = sg; rsEl.innerHTML = Object.keys(RES).map(k => `<span class="cost"><i>${ICONS[k]}</i>${INV[k]}</span>`).join(''); } } // recursos recogidos: arriba a la izquierda, con su icono
   hud.style.display = S.foot.on ? 'none' : ''; // a pie se ocultan los paneles de la nave
-  drawHud(fwd, now, targets); FOOT.hud(now); if (typeof BASE !== 'undefined') BASE.hud(now); if (typeof TV !== 'undefined') TV.update(S.foot.on ? null : aimT, now);
+  drawHud(fwd, now, targets); FOOT.hud(now); if (typeof BASE !== 'undefined') BASE.hud(now); if (typeof TV !== 'undefined') TV.update(S.foot.on ? null : aimT && (aimT.type === 'p' || aimT.type === 'n') ? aimT : S.tsel ? { type: S.tsel.kind, t: S.tsel, dist: S.tsel.dist } : aimT, now); // la nave bajo la mira manda; si no, la elegida con Tab; si no, lo que haya en la mira
+  xpHud();
   hud.textContent = planets.info.on ? `SUELO      ${fD(Math.max(0, planets.info.ground))} sobre ${planets.info.water ? 'el agua' : 'tierra'} de ${planets.info.name}` : ''; // el panel solo muestra el suelo: velocidad e impulso van en el medidor y los avisos en notificaciones
   if (ov.style.display !== 'none' && typeof hangarFrame === 'function') hangarFrame(now);
 }

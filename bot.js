@@ -2,7 +2,7 @@
 // Los simula el cliente del administrador; los demás ven sus naves como una nave más (id 2000 + índice) y sus bases como hangares (dueño 1000 + índice).
 const BOT = (() => {
   const bots = new Map(); // idx -> { pos, q, v, hp, sh, dead, cd, grp, ang, sendT, mode }
-  const HP = 120, SH = 60, DMG = 5, CD = 0.45, FWD = new THREE.Vector3(0, 0, -1);
+  const HP = 120, SH = 60, DMG = 5, CD = 0.45, LV = 5, FWD = new THREE.Vector3(0, 0, -1); // LV: nivel que muestran los bots
   const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
   const spec = () => ({ t: 'halcon', a: [0, 0, 0, 0, 0, 0], c: 0xff4030 });
   function nearest(p) { let best = null, bd = 1e30; for (const b of bodies) { if (b.k === 'sun') continue; const d = dist(p, b.pos) - b.R; if (d < bd) { bd = d; best = b; } } return { b: best, alt: bd }; }
@@ -10,7 +10,7 @@ const BOT = (() => {
   function fire(B, idx, dir) {
     const key = `${myId ?? 0}:k${idx}_${++seq}`, n = nearest(B.pos), rb = n.b && n.alt < n.b.R * 30 ? n.b.i : -1;
     spawnProj(2000 + idx, key, 'p', B.pos.slice(), dir, null, DMG, { bot: idx }); sfx('p', dist(B.pos, S.pos));
-    send({ t: 'fire', key, kind: 'p', pos: B.pos, dir, tgt: null, dmg: DMG, rb, rp: rb >= 0 ? sub(B.pos, bodies[rb].pos) : null });
+    send({ t: 'fire', key, kind: 'p', pos: B.pos, dir, tgt: null, dmg: DMG, rb, rp: rb >= 0 ? sub(B.pos, bodies[rb].pos) : null, ow: 2000 + idx }); // ow: el disparo es del bot, no del anfitrión
   }
   function frame(dt, now) {
     const host = BASE.isHost() && BASE.started() && !BASE.loading(), tang = (up, r, ang) => { const e = new THREE.Vector3(0, 1, 0).cross(up); if (e.lengthSq() < 1e-6) e.set(1, 0, 0); e.normalize(); const n2 = up.clone().cross(e); return e.multiplyScalar(Math.cos(ang) * r).addScaledVector(n2, Math.sin(ang) * r); };
@@ -41,7 +41,7 @@ const BOT = (() => {
       const f = FWD.clone().applyQuaternion(B.q); B.pos = [B.pos[0] + f.x * B.v * dt, B.pos[1] + f.y * B.v * dt, B.pos[2] + f.z * B.v * dt];
       if (aimAt && B.cd <= 0) { const ad = sub(aimAt, B.pos), al = len(ad); if (al < 3.5 && (f.x * ad[0] + f.y * ad[1] + f.z * ad[2]) / al > Math.cos(0.14)) { B.cd = CD; fire(B, idx, [ad[0] / al + (Math.random() - 0.5) * 0.02, ad[1] / al + (Math.random() - 0.5) * 0.02, ad[2] / al + (Math.random() - 0.5) * 0.02]); } }
       const v = view(B.pos); B.grp.visible = true; B.grp.position.set(v.x, v.y, v.z); B.grp.scale.setScalar(Math.max(v.s, v.rd * 0.12)); B.grp.quaternion.copy(B.q); setThrust(B.grp, B.v, now); updateShipFx(B.grp, now, 0);
-      if (now - B.sendT > 66) { B.sendT = now; const n2 = nearest(B.pos), rb = n2.b && n2.alt < n2.b.R * 30 ? n2.b.i : -1; send({ t: 'bs', i: idx, name: 'BOT ' + h.b, pos: B.pos, q: B.q.toArray(), v: B.v, hp: B.hp / HP * 100, sh: B.sh / SH * 100, sp: spec(), pk: 0, ms: 0, rb, rp: rb >= 0 ? sub(B.pos, bodies[rb].pos) : null }); }
+      if (now - B.sendT > 66) { B.sendT = now; const n2 = nearest(B.pos), rb = n2.b && n2.alt < n2.b.R * 30 ? n2.b.i : -1; send({ t: 'bs', i: idx, name: 'BOT ' + h.b, pos: B.pos, q: B.q.toArray(), v: B.v, hp: B.hp / HP * 100, sh: B.sh / SH * 100, sp: spec(), lv: LV, pk: 0, ms: 0, rb, rp: rb >= 0 ? sub(B.pos, bodies[rb].pos) : null }); }
     }
   }
   function hit(old, pos, p, key, ak) { // proyectil (de humanos o torretas de humanos) contra un bot: lo decide el administrador
@@ -50,7 +50,9 @@ const BOT = (() => {
       if (B.dead || segDist(old, pos, B.pos) >= (p.spd !== undefined || ak > 0.02 ? 0.05 : HIT_R)) continue;
       const over = p.dmg - B.sh; B.sh = Math.max(0, B.sh - p.dmg); if (over > 0) B.hp -= over;
       const dead = B.hp <= 0; if (dead) { B.dead = performance.now() + 20000; boom(B.pos, 30); if (B.grp) B.grp.visible = false; }
-      send({ t: 'hit', by: p.owner, key, dmg: p.dmg, pos: B.pos, dead, sh: B.sh }); return true;
+      send({ t: 'hit', by: p.owner, key, dmg: p.dmg, pos: B.pos, dead, sh: B.sh, v: 2000 + idx }); // v: la víctima es el bot
+      if (dead && p.owner === myId) { P.kills++; say('¡BAJA CONFIRMADA!'); gainXp(5, 'Bot enemigo derribado'); } // el anfitrión no recibe su propio evento
+      return true;
     }
     return false;
   }

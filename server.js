@@ -3,7 +3,7 @@
 const http = require('http'), fs = require('fs'), path = require('path'), os = require('os');
 const { WebSocketServer } = require('ws');
 
-const FILES = { '/': 'index.html', '/index.html': 'index.html', '/menu.js': 'menu.js', '/blobatar.js': 'blobatar.js', '/three.min.js': 'three.min.js', '/sw.js': 'sw.js', '/manifest.webmanifest': 'manifest.webmanifest', '/icons/icon-192.png': 'icons/icon-192.png', '/icons/icon-512.png': 'icons/icon-512.png', '/icons/icon.svg': 'icons/icon.svg', '/game': 'game.html', '/game.html': 'game.html', '/game.js': 'game.js', '/ships.js': 'ships.js', '/space.js': 'space.js', '/planets.js': 'planets.js', '/tview.js': 'tview.js', '/foot.js': 'foot.js', '/map.js': 'map.js', '/hangar.js': 'hangar.js', '/sysgen.js': 'sysgen.js', '/base.js': 'base.js', '/bot.js': 'bot.js', '/icons.js': 'icons.js' };
+const FILES = { '/': 'index.html', '/index.html': 'index.html', '/menu.js': 'menu.js', '/blobatar.js': 'blobatar.js', '/three.min.js': 'three.min.js', '/sw.js': 'sw.js', '/manifest.webmanifest': 'manifest.webmanifest', '/icons/icon-192.png': 'icons/icon-192.png', '/icons/icon-512.png': 'icons/icon-512.png', '/icons/icon.svg': 'icons/icon.svg', '/game': 'game.html', '/game.html': 'game.html', '/game.js': 'game.js', '/ships.js': 'ships.js', '/space.js': 'space.js', '/planets.js': 'planets.js', '/tview.js': 'tview.js', '/foot.js': 'foot.js', '/map.js': 'map.js', '/hangar.js': 'hangar.js', '/sysgen.js': 'sysgen.js', '/base.js': 'base.js', '/bot.js': 'bot.js', '/neutral.js': 'neutral.js', '/icons.js': 'icons.js' };
 const { genSystem, genZones, wreckLoot, BASE_UP, baseStats, TOWER_STYLES } = require('./sysgen');
 const HG_HP = 600, TW_HP = 150; // hangar: dueño -> { o, nm, b (planeta), la, lo (rad), hp, tw[4], bot }: un planeta = un hangar
 const rooms = new Map(); // código -> sala: { code, name, seed, np, fillBots, phase, host (token), launchAt, SYS, SOLID, zones, zr, looted, members (token -> jugador), lobby (id de conexión -> jugador ya en la página del juego), hangars, botPlanets, players, bots, deadWrecks, nextBot }
@@ -33,7 +33,12 @@ const send = (ws, o) => { if (ws.readyState === 1) ws.send(JSON.stringify(o)); }
 const bcast = (R, o) => { const s = JSON.stringify(o); for (const c of wss.clients) if (c.R === R && c.readyState === 1) c.send(s); }; // solo a los jugadores de esa sala
 const relay = (R, from, ev) => { const s = JSON.stringify({ ev: { ...ev, id: from } }); for (const c of wss.clients) if (c.R === R && c.readyState === 1 && c.pid !== from) c.send(s); };
 const admin = R => { const h = R.members.get(R.host); return h && h.id != null && R.lobby.has(h.id) ? h.id : Math.min(Infinity, ...R.lobby.keys()); }; // el anfitrión simula a los bots
-const stateOf = (id, m, name) => ({ id, name: String(name).slice(0, 20), pos: m.pos, q: m.q, v: m.v, hp: m.hp, sh: Number.isFinite(m.sh) ? m.sh : 0, sp: spec(m.sp), pk: m.pk ? 1 : 0, bt: Number.isFinite(m.bt) ? Math.max(0, Math.min(1, m.bt)) : 0, rb: Number.isInteger(m.rb) ? m.rb : -1, rp: num(m.rp, 3) ? m.rp : null, ms: Number.isFinite(m.ms) ? m.ms : 0 });
+const stateOf = (id, m, name) => ({ id, name: String(name).slice(0, 20), pos: m.pos, q: m.q, v: m.v, hp: m.hp, sh: Number.isFinite(m.sh) ? m.sh : 0, sp: spec(m.sp), lv: Number.isInteger(m.lv) ? Math.max(0, Math.min(20, m.lv)) : 0, pk: m.pk ? 1 : 0, bt: Number.isFinite(m.bt) ? Math.max(0, Math.min(1, m.bt)) : 0, rb: Number.isInteger(m.rb) ? m.rb : -1, rp: num(m.rp, 3) ? m.rp : null, ms: Number.isFinite(m.ms) ? m.ms : 0 }); // lv: nivel de la nave que pilota (0-20)
+// naves neutrales (neutral.js, las simula el anfitrión): fila compacta [id, grupo, cuerpo ancla, rx, ry, rz, qx, qy, qz, qw, v, hp %, esc %, tipo (índice de SHIPS), nivel, hostil]
+const LOOT_OK = ['agua', 'piedra', 'cobre', 'plata', 'oro'], clampN = (x, a, b) => Math.max(a, Math.min(b, x));
+const neuRow = (R, e) => Array.isArray(e) && e.length === 16 && e.every(Number.isFinite) && e[0] >= 3000 && e[0] < 4000 && Number.isInteger(e[2]) && e[2] >= 0 && e[2] < R.SYS.bodies.length && Number.isInteger(e[13]) && e[13] >= 0 && e[13] < SHIPS.length
+  ? e.map((x, i) => i === 11 || i === 12 ? clampN(Math.round(x), 0, 100) : i === 14 ? clampN(Math.round(x), 1, 20) : i === 15 ? (x ? 1 : 0) : x) : null;
+const neuLoot = l => (Array.isArray(l) ? l : []).slice(0, 3).filter(it => it && LOOT_OK.includes(it.type) && Number.isInteger(it.n) && it.n >= 1 && it.n <= 20).map(it => ({ type: it.type, n: it.n }));
 const planetFree = (R, b, id) => ![...R.lobby].some(([i, e]) => i !== id && e.b === b) && ![...R.hangars.values()].some(h => h.b === b && h.o !== id) && ![...R.botPlanets.values()].some(x => x.b === b);
 const makeHangar = (R, id, e) => R.hangars.set(id, { o: id, nm: e.nm, b: e.b, la: e.la, lo: e.lo, hp: HG_HP, sh: 0, shT: 0, up: { hp: 0, sh: 0, tw: 0, td: 0 }, ts: ['plasma', 'plasma', 'plasma', 'plasma'], tw: [TW_HP, TW_HP, TW_HP, TW_HP], bot: id >= 1000 });
 const mainPlanets = R => R.SYS.bodies.filter(b => b.k !== 'sun' && !b.parent).map(b => b.n);
@@ -94,10 +99,16 @@ wss.on('connection', ws => {
       if (m.t === 's' && num(m.pos, 3) && num(m.q, 4) && Number.isFinite(m.v) && Number.isFinite(m.hp)) R.players.set(id, stateOf(id, m, m.name));
       else if (m.t === 'bs' && id === admin(R) && Number.isInteger(m.i) && R.hangars.has(1000 + m.i) && num(m.pos, 3) && num(m.q, 4) && Number.isFinite(m.v) && Number.isFinite(m.hp)) R.bots.set(m.i, { ...stateOf(2000 + m.i, m, m.name), bot: 1 }); // estado de un bot IA (lo simula el cliente del anfitrión)
       else if (m.t === 'fire' && (m.kind === 'p' || m.kind === 'm') && num(m.pos, 3) && num(m.dir, 3) && typeof m.key === 'string') {
-        const t = m.tgt && (m.tgt.k === 'p' || m.tgt.k === 'w' || m.tgt.k === 'h') && Number.isInteger(m.tgt.id) ? { k: m.tgt.k, id: m.tgt.id } : null;
-        relay(R, id, { t: 'fire', key: m.key.slice(0, 24), kind: m.kind, pos: m.pos, dir: m.dir, tgt: t, dmg: Number.isFinite(m.dmg) ? Math.max(1, Math.min(30, m.dmg)) : 8, tw: m.tw ? 1 : 0, spd: Number.isFinite(m.spd) ? Math.max(0.1, Math.min(50, m.spd)) : 0, rb: Number.isInteger(m.rb) ? m.rb : -1, rp: num(m.rp, 3) ? m.rp : null });
+        const t = m.tgt && (m.tgt.k === 'p' || m.tgt.k === 'w' || m.tgt.k === 'h' || m.tgt.k === 'n') && Number.isInteger(m.tgt.id) ? { k: m.tgt.k, id: m.tgt.id } : null;
+        const ow = id === admin(R) && Number.isInteger(m.ow) && m.ow >= 2000 && m.ow < 4000 ? m.ow : undefined; // disparo de un bot (2000+) o de una nave neutral (3000+): solo el anfitrión puede atribuirlo
+        relay(R, id, { t: 'fire', key: m.key.slice(0, 24), kind: m.kind, pos: m.pos, dir: m.dir, tgt: t, dmg: Number.isFinite(m.dmg) ? Math.max(1, Math.min(30, m.dmg)) : 8, tw: m.tw ? 1 : 0, spd: Number.isFinite(m.spd) ? Math.max(0.1, Math.min(50, m.spd)) : 0, rb: Number.isInteger(m.rb) ? m.rb : -1, rp: num(m.rp, 3) ? m.rp : null, ow });
       } else if (m.t === 'hit' && Number.isInteger(m.by) && num(m.pos, 3) && Number.isFinite(m.dmg) && typeof m.key === 'string')
-        relay(R, id, { t: 'hit', by: m.by, key: m.key.slice(0, 24), dmg: m.dmg, pos: m.pos, dead: !!m.dead, sh: Number.isFinite(m.sh) ? m.sh : 0 });
+        relay(R, id, { t: 'hit', by: m.by, key: m.key.slice(0, 24), dmg: m.dmg, pos: m.pos, dead: !!m.dead, sh: Number.isFinite(m.sh) ? m.sh : 0, v: Number.isInteger(m.v) ? m.v : undefined }); // v: víctima si no es quien envía (bots del anfitrión)
+      else if (m.t === 'ns' && id === admin(R) && Array.isArray(m.l) && m.l.length <= 32) R.nv = m.l.map(e => neuRow(R, e)).filter(Boolean); // estado de las naves neutrales
+      else if (m.t === 'nhit' && id === admin(R) && Number.isInteger(m.n) && m.n >= 3000 && m.n < 4000 && Number.isInteger(m.by) && num(m.pos, 3) && typeof m.key === 'string') { // impacto en una nave neutral (lo decide el anfitrión); si muere, win = quien se lleva la recompensa
+        if (m.dead && R.nv) R.nv = R.nv.filter(e => e[0] !== m.n);
+        relay(R, id, { t: 'nhit', n: m.n, by: m.by, key: m.key.slice(0, 24), dmg: Number.isFinite(m.dmg) ? clampN(m.dmg, 0, 60) : 0, pos: m.pos, dead: !!m.dead, sh: m.sh ? 1 : 0, win: Number.isInteger(m.win) ? m.win : -1, lv: Number.isInteger(m.lv) ? clampN(m.lv, 1, 20) : 1, xp: Number.isInteger(m.xp) ? clampN(m.xp, 0, 100) : 0, loot: neuLoot(m.loot) });
+      }
       else if (m.t === 'bts' && R.hangars.has(id) && Number.isInteger(m.i) && m.i >= 0 && m.i < 4 && TOWER_STYLES[m.s]) { // estilo de una torreta (el cliente ya pagó el desbloqueo)
         R.hangars.get(id).ts[m.i] = m.s;
       } else if (m.t === 'bup' && R.hangars.has(id) && BASE_UP[m.k]) { // mejora de la base (los recursos los gasta el cliente)
@@ -153,7 +164,7 @@ setInterval(() => {
     }
     for (const [w, t] of R.deadWrecks) if (t < now) R.deadWrecks.delete(w);
     for (const h of R.hangars.values()) { const st = baseStats(h.up || {}); if (h.up && h.up.sh && now - h.shT > 5000 && h.sh < st.shMax) h.sh = Math.min(st.shMax, h.sh + 20 * 0.066); } // el escudo de la base se regenera sin recibir golpes
-    const msg = JSON.stringify({ players: [...R.players.values(), ...R.bots.values()].filter(Boolean), wd: [...R.deadWrecks.keys()], wl: [...R.looted], zr: R.zr, hg: [...R.hangars.values()].map(h => ({ o: h.o, nm: h.nm, b: h.b, la: h.la, lo: h.lo, hp: Math.round(h.hp), sh: Math.round(h.sh), up: h.up, ts: h.ts, tw: h.tw, bot: h.bot })), bl: [...R.botPlanets.values()], ph: R.phase, adm: admin(R), rm: publicRoom(R), seed: R.seed, lb: [...R.lobby].map(([i, e]) => ({ id: i, nm: e.nm, b: e.b, ready: true, ld: e.ld ?? 0 })) });
+    const msg = JSON.stringify({ players: [...R.players.values(), ...R.bots.values()].filter(Boolean), wd: [...R.deadWrecks.keys()], wl: [...R.looted], zr: R.zr, hg: [...R.hangars.values()].map(h => ({ o: h.o, nm: h.nm, b: h.b, la: h.la, lo: h.lo, hp: Math.round(h.hp), sh: Math.round(h.sh), up: h.up, ts: h.ts, tw: h.tw, bot: h.bot })), bl: [...R.botPlanets.values()], nv: R.phase === 'playing' ? R.nv || [] : [], ph: R.phase, adm: admin(R), rm: publicRoom(R), seed: R.seed, lb: [...R.lobby].map(([i, e]) => ({ id: i, nm: e.nm, b: e.b, ready: true, ld: e.ld ?? 0 })) });
     for (const c of wss.clients) if (c.R === R && c.readyState === 1) c.send(msg);
   }
 }, 66);

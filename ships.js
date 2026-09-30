@@ -25,10 +25,23 @@ function validSpec(s) {
   const a = ADDONS.map((d, i) => Math.max(0, Math.min(d.max, Math.round(Number(s && s.a && s.a[i]) || 0))));
   return { t, a, c: Number.isFinite(s && s.c) ? (s.c >>> 0) & 0xffffff : 0x4db8ff };
 }
-function statsOf(spec) {
-  const T = TYPES[spec.t], [ar, sh, pl, mi, en, am = 0] = spec.a;
-  return { hp: T.hp + 30 * ar, sh: T.sh + 40 * sh, plasma: T.plasma + 60 * am, pdmg: 8 + 2 * pl, missiles: T.missiles + 2 * mi + am, flameMul: 1 + 0.3 * en, pitch: 1 - 0.1 * en, agil: T.agil, vmax: Math.min(1500, Math.round(T.speed * (1 + 0.1 * en))), warp: Math.round(T.warp * (1 + 0.5 * en)) };
+function statsOf(spec, lvA) { // lvA: puntos de nivel asignados a cada característica de LV_STATS (cada punto = +10 % del valor BASE del chasis)
+  const T = TYPES[spec.t], [ar, sh, pl, mi, en, am = 0] = spec.a, [bv = 0, bh = 0, bs = 0, bd = 0, ba = 0, br = 0] = lvA || [];
+  return { hp: T.hp + 30 * ar + Math.round(T.hp * 0.1 * bh), sh: T.sh + 40 * sh + Math.round(T.sh * 0.1 * bs), plasma: T.plasma + 60 * am, pdmg: Math.round((8 + 2 * pl + 0.8 * bd) * 10) / 10, missiles: T.missiles + 2 * mi + am, flameMul: 1 + 0.3 * en, pitch: 1 - 0.1 * en, agil: Math.round(T.agil * (1 + 0.1 * ba) * 100) / 100, vmax: Math.min(1500, Math.round(T.speed * (1 + 0.1 * en))) + Math.round(T.speed * 0.1 * bv), warp: Math.round(T.warp * (1 + 0.5 * en)), regen: 1.4 / (1 + 0.1 * br) }; // regen: segundos por unidad de plasma recargada
 }
+// ---------- niveles por nave: cada chasis tiene su propio nivel (0-20) y experiencia, independientes ----------
+// XP para pasar del nivel n-1 al n: need(n) = 10 + 15(n-1) + 5(n-1)(n-2)/2 → 10, 25, 45, 70, 100, 135… (la barra muestra la XP dentro del nivel actual)
+// Cada nivel da 1 punto de mejora; cada punto suma +10 % del valor base del chasis en la característica elegida (tope: 10 puntos = +100 % por característica).
+const LV_MAX = 20, LV_PTMAX = 10;
+const LV_STATS = [{ id: 'vel', name: 'Velocidad' }, { id: 'hp', name: 'Casco' }, { id: 'sh', name: 'Escudo' }, { id: 'dmg', name: 'Daño' }, { id: 'agil', name: 'Maniobra' }, { id: 'rec', name: 'Recarga' }];
+const lvNeed = n => 10 + 15 * (n - 1) + 5 * (n - 1) * (n - 2) / 2;
+const LVL = (() => { try { return JSON.parse(localStorage.getItem('shipLv')) || {}; } catch { return {}; } })(); // { tipo: { lv, xp, a: [6 puntos asignados] } } durante la partida
+function lvlOf(t) { const o = LVL[t] || (LVL[t] = {}); o.lv = Math.max(0, Math.min(LV_MAX, o.lv | 0)); o.xp = Math.max(0, o.xp | 0); o.a = LV_STATS.map((_, i) => Math.max(0, Math.min(LV_PTMAX, (o.a && o.a[i]) | 0))); return o; }
+const lvPts = L => L.lv - L.a.reduce((x, y) => x + y, 0); // puntos sin gastar
+function saveLv() { try { localStorage.setItem('shipLv', JSON.stringify(LVL)); } catch {} }
+function resetLv() { for (const k of Object.keys(LVL)) delete LVL[k]; saveLv(); } // partida nueva: todas las naves a nivel 0
+// indicador hexagonal de nivel (estilo pegatina: borde grueso y sombra sólida)
+const hexSvg = (n, fill = '#ffd23f', s = 40) => `<svg width="${s}" height="${Math.round(s * 1.08)}" viewBox="0 0 43 46" aria-label="Nivel ${n}"><polygon points="20,5 36,14 36,32 20,41 4,32 4,14" transform="translate(3,3)" fill="#050f1c"/><polygon points="20,3 36,12 36,30 20,39 4,30 4,12" fill="${fill}" stroke="#050f1c" stroke-width="3.5" stroke-linejoin="round"/><text x="20" y="16" text-anchor="middle" font-family="ui-monospace,Consolas,monospace" font-weight="900" font-size="7" fill="#050f1c">NV</text><text x="20" y="30" text-anchor="middle" font-family="ui-monospace,Consolas,monospace" font-weight="900" font-size="${n > 9 ? 13 : 15}" fill="#050f1c">${n}</text></svg>`;
 // Mejoras de la nave básica: se compran con los recursos del planeta (agua, piedra, cobre, plata, oro, diamante). Coste del nivel lv+1 de la mejora i.
 const UPGRADE_COST = [n => ({ piedra: 6 * n, agua: 4 * n }), n => ({ cobre: 4 * n, piedra: 3 * n }), n => ({ plata: 3 * n, cobre: 3 * n }), n => ({ oro: 2 * n, plata: 2 * n }), n => ({ diamante: n, oro: 2 * n }), n => ({ plata: 2 * n, madera: 3 * n })];
 const SHIP_COST = { halcon: null, saeta: { piedra: 12, cobre: 6 }, coloso: { plata: 12, oro: 6 }, nomada: { oro: 8, diamante: 3 } }; // cambiar de nave: se desbloquea una vez con recursos

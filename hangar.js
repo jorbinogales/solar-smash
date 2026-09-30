@@ -22,6 +22,9 @@ let pvs = null; // vista previa: al pasar el ratón sobre una mejora bloqueada s
 const card = (iconKey, title, pipsHtml, small, ctl, pv = '') => `<div class="upc" data-pv="${pv}">${ic(iconKey)}<div><b>${title}<span>${pipsHtml}</span></b><small>${small}</small><div class="ctl">${ctl}</div></div></div>`;
 
 function applyNow() { const v = validSpec(sel); saveSpec(v); applyLoadout(v, false); refresh(); } // la nave se actualiza al momento
+const atBase = () => typeof BASE === 'undefined' || !BASE.started() || BASE.atBase(); // compras, mejoras, puntos de nivel y cambios de nave: solo en tu base
+const NOB = 'Solo en tu base';
+const lvA = t => { const a = lvlOf(t).a.slice(); if (pvs && pvs.startsWith('lv:') && t === mySpec.t) { const i = +pvs.slice(3); a[i] = Math.min(LV_PTMAX, a[i] + 1); } return a; }; // puntos de nivel (con el que se previsualiza al pasar el ratón por +10)
 
 // ---------- NAVE ----------
 function renderRes() {
@@ -29,13 +32,21 @@ function renderRes() {
   $('resbar').innerHTML = keys.map(k => `<span class="cost"><i>${icon(k)}</i>${inv()[k] || 0}</span>`).join('');
 }
 function renderShip() {
-  sel = validSpec(sel); const shown = (() => { if (!pvs) return sel; if (pvs.startsWith('ship:')) return validSpec({ ...sel, t: pvs.slice(5) }); if (pvs.startsWith('add:')) { const i = +pvs.slice(4), a = sel.a.slice(); a[i] = Math.min(ADDONS[i].max, a[i] + 1); return validSpec({ ...sel, a }); } return sel; })(), previewing = shown !== sel, st = statsOf(shown), used = sel.a.reduce((x, y) => x + y, 0), tot = ADDONS.reduce((x, d) => x + d.max, 0);
+  sel = validSpec(sel); const shown = (() => { if (!pvs) return sel; if (pvs.startsWith('ship:')) return validSpec({ ...sel, t: pvs.slice(5) }); if (pvs.startsWith('add:')) { const i = +pvs.slice(4), a = sel.a.slice(); a[i] = Math.min(ADDONS[i].max, a[i] + 1); return validSpec({ ...sel, a }); } return sel; })(), previewing = shown !== sel, st = statsOf(shown, lvA(shown.t)), used = sel.a.reduce((x, y) => x + y, 0), tot = ADDONS.reduce((x, d) => x + d.max, 0);
   $('shipList').innerHTML = Object.entries(TYPES).map(([id, t]) => { const cost = SHIP_COST[id], unl = !cost || unlocked.has(id); return `<button class="ship hasico ${id === sel.t ? 'on' : ''}" data-t="${id}" data-pv="ship:${id}">${ic(id)}<div><b>${t.name}</b><small>${t.role}</small><small>${t.desc}</small>${unl ? '' : costHtml(cost)}</div></button>`; }).join('');
   $('slots').innerHTML = `<b>Mejoras ${used}/${tot}</b> ${'▮'.repeat(used)}${'▯'.repeat(tot - used)}`;
   $('addons').innerHTML = ADDONS.map((a, i) => { const lv = sel.a[i], cost = lv < a.max ? upgradeCost(i, lv) : null; return card(a.id, a.name, pips(lv, a.max), a.desc, cost ? buyBtn(`data-a="${i}"`, cost) : '<span class="max">MÁXIMO</span>', lv < a.max ? 'add:' + i : ''); }).join('');
   $('stats').innerHTML = [['Casco', st.hp, 260, '#5dff8a'], ['Escudo', st.sh, 240, '#4db8ff'], ['Plasma', st.plasma, 420, '#3fe6b0'], ['Misiles', st.missiles, 10, '#ffb347'], ['Velocidad (km/s)', st.vmax, 1500, '#ffd23f'], ['Maniobra', Math.round(st.agil * 100), 130, '#f5a8ff'], ['Barra luz (s)', st.warp, 240, '#b48cff']]
-    .map(([n, v, max, c]) => `<span>${n}</span>${bar(v, max, c)}<b>${v}</b>`).join('') + `<span>Daño plasma</span>${bar(st.pdmg, 14, '#3fe6b0')}<b>${st.pdmg}</b>`;
+    .map(([n, v, max, c]) => `<span>${n}</span>${bar(v, max, c)}<b>${v}</b>`).join('') + `<span>Daño plasma</span>${bar(st.pdmg, 20, '#3fe6b0')}<b>${st.pdmg}</b><span>Recarga plasma</span>${bar(1 / st.regen, 1.5, '#c8ff5d')}<b>${(1 / st.regen).toFixed(2)}/s</b>`;
+  renderLvl();
   const key = JSON.stringify(shown); if (key !== PV.key) { PV.key = key; if (PV.obj) PV.pivot.remove(PV.obj); PV.obj = makeShip(shown); PV.obj.showShield = true; setThrust(PV.obj, 500, 0); updateShipFx(PV.obj, 0); PV.pivot.add(PV.obj); PV.cam.position.set(0.05, 0.032, 0.09); PV.cam.lookAt(0, 0, 0); }
+}
+
+function renderLvl() { // nivel de la nave actual: XP, puntos sin gastar y +10 % del valor base por característica (solo en la base)
+  const t = mySpec.t, T = TYPES[t], L = lvlOf(t), pts = lvPts(L), need = L.lv < LV_MAX ? lvNeed(L.lv + 1) : 0, ok = atBase();
+  const fx = [n => `+${Math.round(T.speed * 0.1 * n)} km/s`, n => `+${Math.round(T.hp * 0.1 * n)} casco`, n => `+${Math.round(T.sh * 0.1 * n)} escudo`, n => `+${(0.8 * n).toFixed(1)} daño`, n => `+${10 * n} % giro`, n => `${(1.4 / (1 + 0.1 * n)).toFixed(2)} s/u`];
+  $('lvl').innerHTML = `<div class="lvh">${hexSvg(L.lv, '#ffd23f', 46)}<div><b>NIVEL ${L.lv} · ${T.name.toUpperCase()}</b><div class="xbar"><i style="width:${need ? Math.min(100, L.xp / need * 100) : 100}%"></i></div><small>${need ? `XP ${L.xp} / ${need}` : 'NIVEL MÁXIMO'} · <em>${pts} punto${pts === 1 ? '' : 's'} sin gastar</em></small></div></div>`
+    + `<div class="lvg">${LV_STATS.map((s, i) => `<div class="lvs" data-pv="${L.a[i] < LV_PTMAX ? 'lv:' + i : ''}"><b>${s.name}</b><small>+${L.a[i] * 10} % · ${fx[i](L.a[i])}</small><button class="kb${ok ? '' : ' nb'}" data-lv="${i}" ${ok && pts > 0 && L.a[i] < LV_PTMAX ? '' : 'disabled'}>${!ok ? NOB.toUpperCase() : L.a[i] >= LV_PTMAX ? 'MÁX' : '+10'}</button></div>`).join('')}</div>`;
 }
 
 // ---------- BASE: modelo centrado con sus estadísticas, estilos de torreta y mejoras ----------
@@ -65,21 +76,26 @@ function renderTools() {
 }
 const fitMenu = () => { if (ov.style.display !== 'none') fitBox($('hg'), 1100); };
 addEventListener('resize', fitMenu);
-function refresh() { renderRes(); setTimeout(fitMenu, 0); if (tab === 'ship') renderShip(); else if (tab === 'base') renderBase(); else if (tab === 'tools') renderTools(); }
+function refresh() { $('hg').classList.toggle('nob', !atBase()); renderRes(); setTimeout(fitMenu, 0); if (tab === 'ship') renderShip(); else if (tab === 'base') renderBase(); else if (tab === 'tools') renderTools(); }
 function setTab(t) { tab = t; document.querySelectorAll('#hg .tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === t)); document.querySelectorAll('#hg .tab').forEach(x => x.style.display = x.id === 'tab-' + t ? '' : 'none'); refresh(); }
 
 document.addEventListener('mouseover', e => { // vista previa al pasar el ratón
   const el = e.target.closest && e.target.closest('#hg [data-pv]'), v = el && el.dataset.pv ? el.dataset.pv : null; if (v !== pvs) { pvs = v; refresh(); }
 });
 document.addEventListener('click', e => {
-  const tb = e.target.closest('#hg .tabs button'), t = e.target.closest('#hg [data-t]'), eq = e.target.closest('[data-equip]'), sl = e.target.closest('[data-slot]');
+  const tb = e.target.closest('#hg .tabs button'), t = e.target.closest('#hg [data-t]'), eq = e.target.closest('[data-equip]'), sl = e.target.closest('[data-slot]'), lb = e.target.closest('#hg [data-lv]');
   if (tb) return setTab(tb.dataset.tab);
-  if (t) { const id = t.dataset.t; if (SHIP_COST[id] && !unlocked.has(id)) return say('Doble clic en la nave para desbloquearla'); sel.t = id; applyNow(); }
-  else if (eq) { const k = eq.dataset.equip; for (let i = 0; i < 4; i++) send({ t: 'bts', i, s: k }); }
-  else if (sl) { const h = BASE.mine(), i = +sl.dataset.slot; if (!h) return; const list = [...towersUnlocked], n = list[(list.indexOf(h.ts[i]) + 1) % list.length]; send({ t: 'bts', i, s: n }); }
+  if (lb) { // +10: asigna un punto de nivel a esa característica de la nave actual
+    if (!atBase()) return say(NOB); const L = lvlOf(mySpec.t), i = +lb.dataset.lv; if (lvPts(L) <= 0) return say('Sin puntos: sube de nivel derribando naves'); if (L.a[i] >= LV_PTMAX) return;
+    L.a[i]++; saveLv(); pvs = null; sel.t = mySpec.t; sel.a = mySpec.a.slice(); applyNow(); return;
+  }
+  if (t) { const id = t.dataset.t; if (id === mySpec.t) return; if (!atBase()) return say(NOB + ': vuelve para cambiar de nave'); if (SHIP_COST[id] && !unlocked.has(id)) return say('Doble clic en la nave para desbloquearla'); sel.t = id; applyNow(); }
+  else if (eq) { if (!atBase()) return say(NOB); const k = eq.dataset.equip; for (let i = 0; i < 4; i++) send({ t: 'bts', i, s: k }); }
+  else if (sl) { if (!atBase()) return say(NOB); const h = BASE.mine(), i = +sl.dataset.slot; if (!h) return; const list = [...towersUnlocked], n = list[(list.indexOf(h.ts[i]) + 1) % list.length]; send({ t: 'bts', i, s: n }); }
 });
 document.addEventListener('dblclick', e => { // comprar: doble clic en la tarjeta completa
   const card = e.target.closest('#hg .upc, #hg .ship'); if (!card) return;
+  if (!atBase()) return say(NOB); // fuera de la base el menú solo muestra las estadísticas
   if (card.dataset.t) { const id = card.dataset.t, cost = SHIP_COST[id]; if (cost && !unlocked.has(id)) { if (!canPay(cost)) return say('Faltan recursos'); if (!FOOT.spend(cost)) return; unlocked.add(id); saveSets(); sel.t = id; applyNow(); } return; }
   const b = card.querySelector('.buy'); if (!b) return;
   if (b.dataset.a !== undefined) { const i = +b.dataset.a, cost = upgradeCost(i, sel.a[i]); if (!canPay(cost)) return say('Faltan recursos'); if (FOOT.spend(cost)) { sel.a[i]++; applyNow(); } }
@@ -93,7 +109,7 @@ $('go').onclick = () => {
 };
 let sig = '', fitLast = '';
 function hangarFrame(now) { // llamado desde el bucle principal mientras el menú está abierto
-  const h = typeof BASE !== 'undefined' ? BASE.mine() : null, sg = JSON.stringify([typeof INV !== 'undefined' && INV, typeof TOOLS !== 'undefined' && TOOLS, h && [h.up, Math.round(h.hp), Math.round(h.sh), h.tw, h.ts], [...unlocked], [...towersUnlocked], mySpec.a, tab]);
+  const h = typeof BASE !== 'undefined' ? BASE.mine() : null, sg = JSON.stringify([typeof INV !== 'undefined' && INV, typeof TOOLS !== 'undefined' && TOOLS, h && [h.up, Math.round(h.hp), Math.round(h.sh), h.tw, h.ts], [...unlocked], [...towersUnlocked], mySpec.a, mySpec.t, lvlOf(mySpec.t), atBase(), tab]);
   if (fitLast !== ov.style.display + innerWidth + 'x' + innerHeight) { fitLast = ov.style.display + innerWidth + 'x' + innerHeight; fitMenu(); }
   if (sg !== sig) { sig = sg; sel.a = mySpec.a.slice(); sel.t = mySpec.t; refresh(); } // los recursos y la base cambian mientras juegas
   const P_ = tab === 'ship' ? PV : tab === 'base' ? BV : null;
@@ -117,11 +133,12 @@ let seen = null, sug = null; const nel = {};
 setInterval(() => {
   if (typeof BASE === 'undefined' || !BASE.started() || BASE.loading()) return;
   const now = new Set(BUYS().filter(b => canPay(b.cost)).map(b => b.key)), first = seen === null;
-  if (!first) for (const b of BUYS()) if (now.has(b.key) && !seen.has(b.key)) { sug = b.key; nel[b.key] = notifyEl(`${ic(b.ik)}<span>Ya puedes comprar<br><b>${b.name}</b> — pulsa <kbd>F</kbd></span>`, 9000, 'buy'); }
+  if (!first) for (const b of BUYS()) if (now.has(b.key) && !seen.has(b.key)) { sug = b.key; nel[b.key] = notifyEl(`${ic(b.ik)}<span>${atBase() ? `Ya puedes comprar<br><b>${b.name}</b> — pulsa <kbd>F</kbd>` : `Ya te alcanza para<br><b>${b.name}</b> — vuelve a tu base para comprar`}</span>`, 9000, 'buy'); }
   seen = now;
 }, 700);
 addEventListener('keydown', e => {
   if (e.code !== 'KeyF' || e.repeat || !document.pointerLockElement) return;
+  if (!atBase()) return say('Vuelve a tu base para comprar');
   const all = BUYS().filter(b => canPay(b.cost)), b = all.find(x => x.key === sug) || all[0];
   if (!b) return say('Aún no te alcanzan los recursos');
   if (FOOT.spend(b.cost)) { b.go(); sug = null; const el = nel[b.key]; if (el && el.isConnected) { el.classList.add('done'); el.insertAdjacentHTML('beforeend', '<span class="ok">✔</span>'); setTimeout(() => el.classList.add('out'), 900); setTimeout(() => el.remove(), 1400); } }

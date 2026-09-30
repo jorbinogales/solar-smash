@@ -220,7 +220,7 @@ const BASE = (() => {
   }
   function startGame() { // el administrador inició la partida (o te uniste con ella en marcha): nave básica, inventario vacío, reaparecer en tu hangar
     started = true; chooserShown = false; pl.style.display = 'none'; myName = ($('lbName') && $('lbName').value || myName).slice(0, 16) || 'Piloto';
-    FOOT.resetInv(); if (typeof resetShips === 'function') resetShips(); const b0 = basicSpec(mySpec.c); saveSpec(b0); applyLoadout(b0, true); P.kills = 0; P.deadUntil = 0;
+    FOOT.resetInv(); if (typeof resetShips === 'function') resetShips(); resetLv(); const b0 = basicSpec(mySpec.c); saveSpec(b0); applyLoadout(b0, true); P.kills = 0; P.deadUntil = 0;
     if (typeof refresh === 'function') { sel = JSON.parse(JSON.stringify(b0)); refresh(); }
     document.exitPointerLock(); ov.style.display = 'none'; say('¡Partida iniciada! Esc abre el menú de mejoras'); // el menú no se abre solo: haz clic para tomar el control
     { const pn = document.getElementById('pname'); if (pn) pn.value = myName; }
@@ -341,14 +341,16 @@ const BASE = (() => {
     let dx = c.x, dy = -c.y; if (Math.hypot(dx, dy) < 1e-6) { dx = 0; dy = 1; }
     const rx = W / 2 - 52, ry = H / 2 - 62, t = 1 / Math.hypot(dx / rx, dy / ry); return { x: W / 2 + dx * t, y: H / 2 + dy * t, edge: true, ang: Math.atan2(dy, dx) };
   }
-  function marker(k, w, dist, label, W, H, now, ally) { // ally: marcador azul de mi propia base (siempre visible, también tras el planeta: indica la dirección)
+  function marker(k, w, dist, label, W, H, now, ally, sub) { // ally: marcador azul de mi propia base (siempre visible, también tras el planeta: indica la dirección) · sub: 3.ª línea (nave y nivel)
     const p = screenPos(w, W, H), sz = 34, y = p.edge ? p.y : p.y - 46;
     g2.save(); g2.textAlign = 'center'; const pulse = 0.5 + 0.5 * Math.sin(now / 260);
     if (p.edge) { g2.translate(p.x, p.y); g2.rotate(p.ang); g2.fillStyle = ally ? '#4db8ff' : '#ff3b30'; g2.beginPath(); g2.moveTo(sz / 2 + 14, 0); g2.lineTo(sz / 2 + 2, -8); g2.lineTo(sz / 2 + 2, 8); g2.closePath(); g2.fill(); g2.rotate(-p.ang); g2.translate(-p.x, -p.y); }
     g2.shadowColor = ally ? '#2a9dff' : '#ff2a1a'; g2.shadowBlur = 10 + 8 * pulse; g2.fillStyle = ally ? 'rgba(0,18,38,0.8)' : 'rgba(38,2,0,0.78)'; g2.strokeStyle = ally ? '#4db8ff' : '#ff3b30'; g2.lineWidth = 2; g2.beginPath(); g2.arc(p.x, y, sz / 2 + 5, 0, 7); g2.fill(); g2.stroke(); g2.shadowBlur = 0;
     const im = icon(k); if (im.complete && im.naturalWidth) { if (ally) g2.filter = 'hue-rotate(200deg) saturate(1.4)'; g2.drawImage(im, p.x - sz / 2, y - sz / 2, sz, sz); g2.filter = 'none'; }
     g2.font = `bold 10px ${MONO}`; g2.fillStyle = ally ? '#9fd8ff' : '#ff8a7a'; g2.strokeStyle = '#000'; g2.lineWidth = 3; g2.strokeText(label, p.x, y + sz / 2 + 17); g2.fillText(label, p.x, y + sz / 2 + 17);
-    g2.font = `11px ${MONO}`; g2.fillStyle = ally ? '#d6eeff' : '#ffd7cf'; g2.strokeText(fD(dist), p.x, y + sz / 2 + 29); g2.fillText(fD(dist), p.x, y + sz / 2 + 29); g2.restore();
+    g2.font = `11px ${MONO}`; g2.fillStyle = ally ? '#d6eeff' : '#ffd7cf'; g2.strokeText(fD(dist), p.x, y + sz / 2 + 29); g2.fillText(fD(dist), p.x, y + sz / 2 + 29);
+    if (sub) { g2.font = `bold 10px ${MONO}`; g2.fillStyle = '#ffd23f'; g2.strokeText(sub, p.x, y + sz / 2 + 41); g2.fillText(sub, p.x, y + sz / 2 + 41); }
+    g2.restore();
   }
   const tv2 = new THREE.Vector3();
   // estado de MI base, siempre visible arriba a la izquierda (vida, escudo y torretas)
@@ -365,7 +367,7 @@ const BASE = (() => {
     if (P.hp > 0 && !S.foot.on) { // enemigos: hangares y naves siempre señalados en rojo; mi base, en azul
       { const mh = HG.get(myId); if (mh && mh.grp) { const mw = worldOf(mh), md = Math.hypot(mw[0] - S.pos[0], mw[1] - S.pos[1], mw[2] - S.pos[2]); if (md > 0.6) marker('hangar', mw, md, 'TU BASE', W, H, now, true); } }
       for (const h of HG.values()) if (h.o !== myId && h.grp) { const w = worldOf(h), dd = w.map((c, i) => c - S.pos[i]), dl = Math.hypot(...dd); if (dl > 0 && !losBlocked({ kind: 'h', dir: dd.map(c => c / dl), dist: dl })) marker('hangar', w, dl, 'HANGAR ' + h.nm.toUpperCase(), W, H, now); } // sin planeta de por medio
-      for (const r of remotes.values()) if (r.hp > 0 && r.apos) { const dd = r.apos.map((c, i) => c - S.pos[i]), dl = r.dist ?? Math.hypot(...dd), hl = Math.hypot(...dd); if (hl > 0 && !losBlocked({ kind: 'p', dir: dd.map(c => c / hl), dist: hl })) marker('ship', r.apos, dl, (r.name || 'PILOTO').toUpperCase(), W, H, now); }
+      for (const r of remotes.values()) if (r.hp > 0 && r.apos) { const dd = r.apos.map((c, i) => c - S.pos[i]), dl = r.dist ?? Math.hypot(...dd), hl = Math.hypot(...dd); if (hl > 0 && !losBlocked({ kind: 'p', dir: dd.map(c => c / hl), dist: hl })) marker('ship', r.apos, dl, (r.name || 'PILOTO').toUpperCase(), W, H, now, false, `${TYPES[r.st] ? TYPES[r.st].name.toUpperCase() : 'NAVE'} NV ${r.lv || 0}`); } // debajo: nave que usa y su nivel
     }
     for (const h of HG.values()) { // barras de vida de las torretas de un hangar enemigo cercano
       if (h.o === myId || !h.tw || !h.towers || !h.grp.visible || h.d > 2.5 * BK) continue;
@@ -394,6 +396,11 @@ const BASE = (() => {
     }
     return out;
   }
+  function atBase() { // compras, mejoras y cambios de nave solo aquí: tengo hangar y estoy a menos de 1,5 km de él (la plataforma mide 3 veces el modelo, BK) o estacionado en ella
+    const h = HG.get(myId); if (!h || !h.info) return false; const w = worldOf(h), p = S.foot.on ? S.shipPos : S.pos;
+    return Math.hypot(w[0] - p[0], w[1] - p[1], w[2] - p[2]) < AT_BASE_KM || (S.park.on && S.park.b && S.park.b.n === h.b && Math.hypot(S.park.dir[0] - h.dir[0], S.park.dir[1] - h.dir[1], S.park.dir[2] - h.dir[2]) * bodyBy(h.b).R < AT_BASE_KM);
+  }
+  const AT_BASE_KM = 1.5;
   const targetPos = id => { const h = HG.get(id); if (!h || h.hp <= 0) return null; const w = worldOf(h); return [w[0] + h.dir[0] * 0.012, w[1] + h.dir[1] * 0.012, w[2] + h.dir[2] * 0.012]; };
-  return { model, targets, targetPos, mine: () => HG.get(myId) || null, canRespawn: () => !!HG.get(myId), sync, onEvent, onClaim, onLobby, LB, started: () => started, choose: show, spawnAt, frame, hit, hud, HG, worldOf, isHost: () => LB.adm === myId, booted: () => MM.booted, onWelcome, onRoomMsg, loading: () => loading };
+  return { model, targets, targetPos, atBase, mine: () => HG.get(myId) || null, canRespawn: () => !!HG.get(myId), sync, onEvent, onClaim, onLobby, LB, started: () => started, choose: show, spawnAt, frame, hit, hud, HG, worldOf, isHost: () => LB.adm === myId, booted: () => MM.booted, onWelcome, onRoomMsg, loading: () => loading };
 })();

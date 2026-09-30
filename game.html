@@ -87,6 +87,25 @@
   #map .mc .zb{margin-top:10px;padding-top:10px;border-top:1px solid #1d4a66;display:grid;gap:6px}#map .mc>.zb:first-child{margin-top:0;padding-top:0;border-top:0}
   #map .mc button{justify-self:start;background:#4db8ff;color:#00131f;border:0;border-radius:8px;padding:7px 14px;font:inherit;font-weight:bold;cursor:pointer}#map .mc button:disabled{background:#3a5a2a;color:#cfffd8;cursor:default}
   #help{font:inherit;color:#8fb8d0;white-space:pre-wrap;margin:14px 0 0}
+  /* niveles por nave, indicador hexagonal, aviso de subida de nivel y bloqueo de compras fuera de la base (estilo pegatina: borde grueso #050f1c y sombra sólida) */
+  #tv .hx{position:absolute;left:-14px;top:-16px;display:none;filter:none}
+  #xph{position:fixed;left:16px;top:60px;z-index:4;width:210px;display:none;align-items:center;gap:8px;background:#0b2233;border:3px solid #050f1c;box-shadow:3px 3px 0 #050f1c;border-radius:10px;padding:4px 9px 5px 5px;color:#dff4ff;font:700 11px ui-monospace,Consolas,monospace;pointer-events:none}
+  #xph .xb{flex:1;min-width:0}#xph .xt{display:flex;justify-content:space-between;letter-spacing:.08em}#xph .xt em{font-style:normal;color:#ffd23f}#xph .xbar{height:8px;margin-top:3px;background:#050f1c;border-radius:4px;overflow:hidden;border:1px solid #050f1c}#xph .xbar i{display:block;height:100%;background:linear-gradient(90deg,#ffd23f,#5dff8a)}
+  .lvup{position:fixed;left:50%;top:18%;transform:translateX(-50%);z-index:30;display:flex;align-items:center;gap:16px;background:#ffd23f;color:#050f1c;border:4px solid #050f1c;box-shadow:6px 6px 0 #050f1c;border-radius:16px;padding:10px 26px 10px 14px;font-family:ui-monospace,Consolas,monospace;pointer-events:none;animation:lvin .35s cubic-bezier(.2,1.6,.4,1);transition:opacity .5s,transform .5s}
+  .lvup b{display:block;font-size:34px;letter-spacing:.06em}.lvup span{display:block;font-size:15px;font-weight:bold}.lvup.out{opacity:0;transform:translate(-50%,-20px)}
+  @keyframes lvin{from{transform:translate(-50%,-30px) scale(.6);opacity:0}to{transform:translateX(-50%) scale(1);opacity:1}}
+  #nt .ni.xp{border-left-color:#c8ff5d}#nt .ni.xp .ico{font-size:24px;color:#ffd23f;text-align:center}
+  #lvl{display:grid;grid-template-columns:250px 1fr;gap:14px;align-items:center;margin-bottom:12px;border:3px solid #050f1c;box-shadow:4px 4px 0 #050f1c}
+  #lvl .lvh{display:flex;align-items:center;gap:10px}#lvl .lvh b{display:block;letter-spacing:.1em}#lvl .lvh small{display:block;color:#9fd4ee;margin-top:4px}#lvl .lvh em{font-style:normal;color:#ffd23f;font-weight:bold}
+  #lvl .xbar{height:10px;margin-top:5px;background:#050f1c;border-radius:5px;overflow:hidden}#lvl .xbar i{display:block;height:100%;background:linear-gradient(90deg,#ffd23f,#5dff8a)}
+  #lvl .lvg{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px}
+  #lvl .lvs{background:#0a1f30;border:2px solid #050f1c;border-radius:9px;padding:5px 6px;display:grid;gap:3px;text-align:center}#lvl .lvs b{font-size:12px}#lvl .lvs small{color:#7fb6d4;font-size:10px;min-height:26px}
+  .kb{font:800 13px ui-monospace,Consolas,monospace;color:#050f1c;background:#ffd23f;border:3px solid #050f1c;border-bottom-width:5px;border-radius:8px;padding:3px 6px;cursor:pointer;box-shadow:2px 2px 0 #050f1c}.kb:hover:not(:disabled){background:#ffe27a}.kb:active:not(:disabled){transform:translateY(2px);border-bottom-width:3px}
+  .kb:disabled{background:#3a4652;color:#9aa7b4;cursor:not-allowed}.kb.nb{font-size:9px;letter-spacing:.04em;background:#5a1f1a;color:#ffb3a8}
+  #nobase{display:none;margin:0 0 10px;padding:7px 12px;background:#5a1f1a;color:#ffd7cf;border:3px solid #050f1c;box-shadow:3px 3px 0 #050f1c;border-radius:10px;font-weight:bold;letter-spacing:.08em;text-align:center}#hg.nob #nobase{display:block}
+  #hg.nob .buy{position:relative;cursor:not-allowed}#hg.nob .buy .costs{opacity:.45;filter:grayscale(1)}#hg.nob .upc:has(.buy){cursor:not-allowed}
+  #hg.nob .buy::after{content:'SOLO EN TU BASE';position:absolute;left:100%;top:50%;transform:translateY(-50%);margin-left:8px;padding:2px 6px;border:2px solid #050f1c;border-radius:6px;background:#5a1f1a;font-size:9px;font-weight:bold;letter-spacing:.08em;color:#ffd7cf;white-space:nowrap}
+  #hg.nob #shipList .ship:not(.on),#hg.nob button.up,#hg.nob #slotsRow button{opacity:.45;cursor:not-allowed}
 </style>
 </head>
 <body>
@@ -94,7 +113,9 @@
 <div id="hud"></div><div id="nt"></div>
 <div id="ov"><div id="hg">
   <div class="hd"><h1>MENÚ</h1><div class="tabs"><button data-tab="ship" class="on">NAVE</button><button data-tab="base">BASE</button><button data-tab="help">CONTROLES</button></div><div id="resbar"></div><button id="go">CONTINUAR</button></div>
+  <div id="nobase">FUERA DE TU BASE · solo puedes ver las estadísticas: vuelve a tu base para comprar, mejorar o cambiar de nave</div>
   <div id="tab-ship" class="tab">
+    <div id="lvl" class="panel"></div>
     <div class="cols">
       <div class="panel sc"><div class="in"><div id="shipList" class="lst"></div></div></div>
       <div class="panel"><canvas id="pv" width="460" height="320"></canvas><div id="stats"></div></div>
@@ -126,7 +147,7 @@
       <div class="kr"><span class="note">Blanco fijado en la mira = impacto seguro.</span></div>
     </section>
     <section><h3>Navegación</h3>
-      <div class="kr"><span><kbd>Tab</kbd></span><em>siguiente destino (planetas y zonas de recursos)</em></div>
+      <div class="kr"><span><kbd>Tab</kbd></span><em>siguiente objetivo: naves cercanas (de la más cercana a la más lejana), luego planetas y zonas de recursos</em></div>
       <div class="kr"><span><kbd>G</kbd></span><em>vuelo directo al planeta apuntado</em></div>
       <div class="kr"><span><kbd>V</kbd></span><em>escáner de recursos</em></div>
       <div class="kr"><span><kbd>M</kbd></span><em>mapa del sistema</em></div>
@@ -147,7 +168,7 @@
 <script>
 // Carga por etapas: la pantalla de arranque se pinta primero y avanza con cada módulo; al terminar se generan las texturas de los planetas (BOOT_DONE, en base.js)
 (function () {
-  const L = [['ships.js', 'Naves'], ['space.js', 'Asteroides'], ['planets.js', 'Terreno'], ['seed.js?token=' + encodeURIComponent((() => { try { return sessionStorage.getItem('token') || ''; } catch { return ''; } })()), 'Semilla del sistema'], ['sysgen.js', 'Generador de sistemas'], ['game.js', 'Generando el sistema solar'], ['base.js', 'Bases y salas'], ['bot.js', 'Bots'], ['icons.js', 'Iconos'], ['hangar.js', 'Menú'], ['tview.js', 'Radar'], ['foot.js', 'Personaje'], ['map.js', 'Mapas']];
+  const L = [['ships.js', 'Naves'], ['space.js', 'Asteroides'], ['planets.js', 'Terreno'], ['seed.js?token=' + encodeURIComponent((() => { try { return sessionStorage.getItem('token') || ''; } catch { return ''; } })()), 'Semilla del sistema'], ['sysgen.js', 'Generador de sistemas'], ['game.js', 'Generando el sistema solar'], ['base.js', 'Bases y salas'], ['bot.js', 'Bots'], ['neutral.js', 'Naves neutrales'],['icons.js', 'Iconos'], ['hangar.js', 'Menú'], ['tview.js', 'Radar'], ['foot.js', 'Personaje'], ['map.js', 'Mapas']];
   const bar = document.querySelector('#boot .bb i'), st = document.querySelector('#boot .bs'); let i = 0;
   function next() {
     if (i >= L.length) { if (window.BOOT_DONE) window.BOOT_DONE(); return; }
